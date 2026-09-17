@@ -6,7 +6,9 @@ const HTML_ESCAPE_CHARACTERS: Readonly<Record<string, string>> = Object.freeze({
   "'": '&#39;',
 });
 
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/u;
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F-\u009F]/u;
+const ENCODED_CONTROL_CHARACTER_PATTERN =
+  /%(?:0[0-9a-f]|1[0-9a-f]|7f|c2%(?:8[0-9a-f]|9[0-9a-f]))/iu;
 
 /** Escapes untrusted text for insertion into HTML text or attribute content. */
 export function escapeHtml(value: string): string {
@@ -26,7 +28,9 @@ export function safeUrl(value: string, kind: 'post' | 'image'): string | null {
 
   if (
     value.length === 0 ||
+    value !== value.trim() ||
     CONTROL_CHARACTER_PATTERN.test(value) ||
+    ENCODED_CONTROL_CHARACTER_PATTERN.test(value) ||
     value.startsWith('//') ||
     value.includes('\\')
   ) {

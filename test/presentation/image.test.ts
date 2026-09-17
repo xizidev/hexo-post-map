@@ -22,6 +22,15 @@ describe('resolveRepresentativeImage', () => {
     ).toBe('/images/first.webp');
   });
 
+  it('rejects entity-decoded executable sources and ignores empty src and srcset-only images', () => {
+    expect(
+      resolveRepresentativeImage({
+        content:
+          '<img src="java&#x73;cript:alert(1)"><img src=""><img srcset="/images/srcset.webp 1x"><img src="/images/safe.webp">',
+      }),
+    ).toBe('/images/safe.webp');
+  });
+
   it('falls back when no safe thumbnail or rendered image exists', () => {
     expect(
       resolveRepresentativeImage({

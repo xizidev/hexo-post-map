@@ -20,6 +20,12 @@ describe('safe presentation HTML helpers', () => {
     expect(safeUrl('http://example.test/archives/safe/', 'post')).toBe(
       'http://example.test/archives/safe/',
     );
+    expect(safeUrl('HTTPS://cdn.example.test/cover.webp', 'image')).toBe(
+      'HTTPS://cdn.example.test/cover.webp',
+    );
+    expect(safeUrl('/images/cover.webp?size=large#preview', 'image')).toBe(
+      '/images/cover.webp?size=large#preview',
+    );
   });
 
   it('rejects executable, protocol-relative, document-relative, and malformed URLs', () => {
@@ -27,10 +33,17 @@ describe('safe presentation HTML helpers', () => {
       'javascript:alert(1)',
       'data:image/svg+xml,<svg onload=alert(1)>',
       'blob:https://example.test/value',
+      'JaVaScRiPt:alert(1)',
       '//cdn.example.test/cover.webp',
       'images/cover.webp',
       '/\\evil.example.test/cover.webp',
       '/safe\npath',
+      '/safe\u0085path',
+      '/safe%0Apath',
+      '/safe%7Fpath',
+      '/safe%C2%85path',
+      ' https://cdn.example.test/cover.webp',
+      'https://cdn.example.test/cover.webp ',
     ]) {
       expect(safeUrl(value, 'image')).toBeNull();
     }
