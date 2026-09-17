@@ -56,7 +56,7 @@
   },
   "devDependencies": {
     "@amap/amap-jsapi-loader": "^1.0.1",
-    "@types/node": "^22.20.3",
+    "@types/node": "^26.5.1",
     "eslint": "^10.10.0",
     "esbuild": "^0.28.2",
     "happy-dom": "^20.14.5",
@@ -64,9 +64,9 @@
     "parse5": "^8.0.1",
     "playwright": "^1.63.0",
     "prettier": "^3.9.7",
-    "typescript": "^6.0.3",
+    "typescript": "^7.0.2",
     "typescript-eslint": "^8.70.0",
-    "vitest": "^3.2.7",
+    "vitest": "^5.0.0",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   }
