@@ -4,13 +4,18 @@ const pointIdentifier = z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
   message: 'must contain only lowercase ASCII letters, digits, and hyphens',
 });
 
-const pointSchema = z.object({
-  id: pointIdentifier,
-  name: z.string().trim().min(1, { message: 'must be a non-empty name' }),
-  longitude: z.number().finite().min(-180).max(180),
-  latitude: z.number().finite().min(-90).max(90),
-});
+const pointSchema = z
+  .object({
+    id: pointIdentifier,
+    name: z.string().trim().min(1, { message: 'must be a non-empty name' }),
+    longitude: z.number().finite().min(-180).max(180),
+    latitude: z.number().finite().min(-90).max(90),
+  })
+  .strict();
 
+/**
+ * Validates raw map Front Matter. Longitude and latitude are GCJ-02 values and are never converted or jittered.
+ */
 export const postMapSchema = z
   .object({
     representative: pointIdentifier.optional(),
@@ -21,6 +26,7 @@ export const postMapSchema = z
       .optional(),
     zoom: z.number().finite().optional(),
   })
+  .strict()
   .superRefine((map, context) => {
     const identifiers = new Set<string>();
 

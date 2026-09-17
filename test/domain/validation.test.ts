@@ -111,4 +111,75 @@ describe('normalizePostMap validation diagnostics', () => {
       'map.route',
     );
   });
+
+  it('reports invalid point identifiers at the id field', () => {
+    const error = expectValidationError(
+      { points: [{ id: 'Uppercase', name: '上海', longitude: 121.4737, latitude: 31.2304 }] },
+      'map.points[0].id',
+    );
+
+    expect(error.value).toBe('Uppercase');
+  });
+
+  it('reports names that are empty after trimming', () => {
+    const error = expectValidationError(
+      { points: [{ id: 'shanghai', name: '   ', longitude: 121.4737, latitude: 31.2304 }] },
+      'map.points[0].name',
+    );
+
+    expect(error.value).toBe('   ');
+  });
+
+  it('reports NaN coordinates at their exact field', () => {
+    const error = expectValidationError(
+      { points: [{ id: 'shanghai', name: '上海', longitude: Number.NaN, latitude: 31.2304 }] },
+      'map.points[0].longitude',
+    );
+
+    expect(error.value).toBeNaN();
+  });
+
+  it('reports infinite coordinates at their exact field', () => {
+    const error = expectValidationError(
+      {
+        points: [
+          { id: 'shanghai', name: '上海', longitude: 121.4737, latitude: Number.POSITIVE_INFINITY },
+        ],
+      },
+      'map.points[0].latitude',
+    );
+
+    expect(error.value).toBe(Number.POSITIVE_INFINITY);
+  });
+
+  it('requires at least one point', () => {
+    const error = expectValidationError({ points: [] }, 'map.points');
+
+    expect(error.value).toEqual([]);
+  });
+
+  it('reports an unknown map field at the unknown key', () => {
+    const error = expectValidationError(
+      {
+        points: [{ id: 'shanghai', name: '上海', longitude: 121.4737, latitude: 31.2304 }],
+        typo: true,
+      },
+      'map.typo',
+    );
+
+    expect(error.value).toBe(true);
+  });
+
+  it('reports an unknown point field at the unknown key', () => {
+    const error = expectValidationError(
+      {
+        points: [
+          { id: 'shanghai', name: '上海', longitude: 121.4737, latitude: 31.2304, typo: true },
+        ],
+      },
+      'map.points[0].typo',
+    );
+
+    expect(error.value).toBe(true);
+  });
 });

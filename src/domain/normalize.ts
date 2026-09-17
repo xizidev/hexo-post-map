@@ -53,10 +53,15 @@ function toValidationError(
     return new PostMapValidationError(sourcePath, 'map', raw, 'is invalid');
   }
 
+  const path =
+    issue.code === 'unrecognized_keys' && issue.keys[0] !== undefined
+      ? [...issue.path, issue.keys[0]]
+      : issue.path;
+
   return new PostMapValidationError(
     sourcePath,
-    formatFieldPath(issue.path),
-    getValueAtPath(raw, issue.path),
+    formatFieldPath(path),
+    getValueAtPath(raw, path),
     issue.message,
   );
 }
@@ -67,6 +72,11 @@ function normalizePoint(point: ParsedPostMap['points'][number]): NormalizedPoint
   return { id: point.id, name: point.name, coordinate };
 }
 
+/**
+ * Validates and normalizes raw map Front Matter.
+ *
+ * Coordinates are interpreted as GCJ-02 and are preserved without conversion or jitter.
+ */
 export function normalizePostMap(raw: unknown, sourcePath: string): NormalizedPostMap | null {
   if (raw === undefined) {
     return null;
