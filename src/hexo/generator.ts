@@ -37,8 +37,6 @@ interface OverviewLocals {
 
 /** Compare decoded segments, never confusing a sibling prefix or encoded separator with root. */
 function relativeToRoot(pathname: string, root: string): string | null {
-  // Hexo's URL helper decodes percent escapes; keep ambiguous separators/escapes absolute.
-  if (/%(?:2f|5c|25|3f|23)/iu.test(pathname)) return null;
   const rootSegments = root.replace(/\/+$/u, '').split('/');
   const segments = pathname.split('/');
   try {
@@ -55,6 +53,31 @@ function relativeToRoot(pathname: string, root: string): string | null {
   return segments.slice(rootSegments.length).join('/');
 }
 
+/** Let Hexo handle root/pretty URLs without decoding any already-encoded path bytes. */
+function encodedPathFor(path: string, hexo: Hexo): string {
+  let prefix = '__hpm_escape_';
+  let root = hexo.config.root;
+  try {
+    root += decodeURIComponent(root);
+  } catch {
+    // The original root still participates in collision detection.
+  }
+  while ((path + root).includes(prefix)) prefix += '_';
+  const escapes: string[] = [];
+  const protectedPath = path.replace(/%[\da-f]{2}/giu, (escape) => {
+    escapes.push(escape);
+    return `${prefix}${escapes.length - 1}__`;
+  });
+  const helper = hexo.extend.helper.get('url_for');
+  const resolved: unknown = Reflect.apply(helper, hexo, [protectedPath, { relative: false }]);
+  if (typeof resolved !== 'string') return '';
+  let restored = resolved;
+  escapes.forEach((escape, index) => {
+    restored = restored.replaceAll(`${prefix}${index}__`, escape);
+  });
+  return restored;
+}
+
 /** Normalize internal routes with Hexo's helper, without double-prefixing an existing root. */
 function publicUrl(raw: string, hexo: Hexo, kind: 'post' | 'image'): string {
   let path = raw;
@@ -65,6 +88,8 @@ function publicUrl(raw: string, hexo: Hexo, kind: 'post' | 'image'): string {
     const url = new URL(raw);
     if (url.username || url.password) return '';
     if (url.origin !== new URL(hexo.config.url).origin) return raw;
+    // Preserve existing absolute URLs with encoded separators or delimiters byte-for-byte.
+    if (/%(?:2f|5c|25|3f|23)/iu.test(url.pathname)) return raw;
     const internalPath = relativeToRoot(url.pathname, new URL(root, hexo.config.url).pathname);
     if (internalPath === null) return raw;
     path = internalPath;
@@ -76,11 +101,17 @@ function publicUrl(raw: string, hexo: Hexo, kind: 'post' | 'image'): string {
       safeUrl(raw.startsWith('/') ? raw : `/${raw}`, kind) === null
     )
       return '';
-    if (path.startsWith(root)) path = path.slice(root.length);
+    const boundary = path.search(/[?#]/u);
+    if (boundary !== -1) {
+      suffix = path.slice(boundary);
+      path = path.slice(0, boundary);
+    }
+    // A browser normalizes percent-encoded dot segments as well as literal ones.
+    if (path.split('/').some((segment) => segment.replace(/%2e/giu, '.') === '..')) return '';
+    if (path.startsWith('/')) path = relativeToRoot(path, root) ?? path;
   }
-  const helper = hexo.extend.helper.get('url_for');
-  const resolved: unknown = Reflect.apply(helper, hexo, [path, { relative: false }]);
-  return typeof resolved === 'string' ? (safeUrl(resolved + suffix, kind) ?? '') : '';
+  const resolved = encodedPathFor(path, hexo);
+  return resolved ? (safeUrl(resolved + suffix, kind) ?? '') : '';
 }
 
 function publicImage(post: OverviewSourcePost, hexo: Hexo, placeholderUrl: string): string {

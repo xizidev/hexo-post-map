@@ -256,6 +256,60 @@ describe('overview generation', () => {
       );
     },
   );
+  it.each(['/', '/blog/'])(
+    'preserves encoded local paths and query/fragment boundaries at root %s',
+    (root) => {
+      const routes = generate(
+        [
+          post({ path: 'archives/question%3Fmark/', thumbnail: '/images/hash%23name.jpg' }),
+          post({
+            path: `${root}archives/mixed%3f%23%252f/`,
+            thumbnail: `${root}images/a%2Fb%5Cc%25.jpg`,
+          }),
+          post({
+            path: 'archives/plain/?q=a%3Fb%23c#view%23part',
+            content: '<img src="/images/from%23content.jpg?x=%3F#part%23one">',
+          }),
+          post({ path: 'archives/%e4%b8%8a%E6%B5%B7/', thumbnail: '/images/hello world.jpg' }),
+          post({ path: `${root}archives/__hpm_escape_0__%3Fmark/` }),
+        ],
+        instance(root),
+      );
+      expect(data(routes).posts.map((p: { url: string }) => p.url)).toEqual([
+        `${root}archives/question%3Fmark/`,
+        `${root}archives/mixed%3f%23%252f/`,
+        `${root}archives/plain/?q=a%3Fb%23c#view%23part`,
+        `${root}archives/%e4%b8%8a%E6%B5%B7/`,
+        `${root}archives/__hpm_escape_0__%3Fmark/`,
+      ]);
+      expect(data(routes).posts.map((p: { image: string }) => p.image)).toEqual([
+        `${root}images/hash%23name.jpg`,
+        `${root}images/a%2Fb%5Cc%25.jpg`,
+        `${root}images/from%23content.jpg?x=%3F#part%23one`,
+        `${root}images/hello%20world.jpg`,
+        `${root}hexo-post-map/assets/placeholder.svg`,
+      ]);
+    },
+  );
+  it.each(['/', '/blog/'])(
+    'rejects local traversal without damaging literal escapes (%s)',
+    (root) => {
+      const routes = generate(
+        [
+          post({ path: '../outside/', thumbnail: `${root}images/%2e%2E/outside.jpg` }),
+          post({ path: 'archives/%2e%2E/outside/' }),
+          post({ path: 'archives/%252e%252e/literal/' }),
+        ],
+        instance(root),
+      );
+      expect(data(routes).posts.map((p: { url: string }) => p.url)).toEqual([
+        '',
+        '',
+        `${root}archives/%252e%252e/literal/`,
+      ]);
+      expect(data(routes).posts[0].image).toBe(`${root}hexo-post-map/assets/placeholder.svg`);
+    },
+  );
   it('tries safe content images after final URL validation rejects the thumbnail, then falls back to the placeholder', () => {
     const routes = generate(
       [
