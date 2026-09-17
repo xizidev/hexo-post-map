@@ -1,0 +1,49 @@
+{
+  "name": "hexo-post-map",
+  "version": "0.0.0",
+  "description": "Geotagged post maps and a clustered map index for Hexo",
+  "license": "MIT",
+  "main": "dist/index.cjs",
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "hexo": ">=7 <9"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:e2e": "playwright test",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:run && npm run build"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "devDependencies": {
+    "@amap/amap-jsapi-loader": "^1.0.1",
+    "@types/node": "^22.20.3",
+    "eslint": "^10.10.0",
+    "esbuild": "^0.28.2",
+    "happy-dom": "^20.14.5",
+    "hexo": "^8.1.2",
+    "parse5": "^8.0.1",
+    "playwright": "^1.63.0",
+    "prettier": "^3.9.7",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^3.2.7",
+    "yaml": "^2.9.1",
+    "zod": "^4.6.5"
+  }
+}
