@@ -6,8 +6,11 @@ import { build } from 'esbuild';
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const distDirectory = resolve(projectRoot, 'dist');
 
-// Browser tasks declare their source/output pairs here when those sources exist.
-const browserEntries = [];
+const browserEntries = [
+  { source: 'src/browser/detail/index.ts', output: 'assets/post-map.js' },
+  { source: 'src/browser/overview/index.ts', output: 'assets/overview-map.js' },
+  { source: 'src/browser/styles/index.css', output: 'assets/style.css' },
+];
 
 await rm(distDirectory, { force: true, recursive: true });
 await mkdir(resolve(distDirectory, 'assets'), { recursive: true });
@@ -44,6 +47,7 @@ for (const entry of browserEntries) {
     legalComments: 'eof',
     outfile: resolve(distDirectory, entry.output),
     platform: 'browser',
+    minify: true,
     sourcemap: false,
     target: 'es2020',
   });
