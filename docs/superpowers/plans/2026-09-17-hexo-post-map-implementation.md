@@ -573,6 +573,7 @@ git commit -m "feat: integrate post map rendering"
 - Create: `src/templates/standalone.ts`
 - Create: `src/hexo/generator.ts`
 - Modify: `src/hexo/register.ts`
+- Modify: `scripts/build.mjs`
 - Create: `src/browser/styles/placeholder.svg`
 - Create: `test/hexo/generator.test.ts`
 
@@ -626,6 +627,8 @@ The themed route supplies `layout: ['page']`, `type: 'post-map-overview'`, and r
 - [ ] **Step 5: Add bundled asset routes and registration**
 
 Return read streams or buffers from `dist/assets/` under `hexo-post-map/assets/`. Register the generator only when the resolved plugin configuration is enabled.
+
+At this stage, update `scripts/build.mjs` to copy `src/browser/styles/placeholder.svg` to `dist/assets/placeholder.svg`. Task 7 remains responsible for producing the JavaScript and CSS browser bundles.
 
 - [ ] **Step 6: Run tests and commit**
 
