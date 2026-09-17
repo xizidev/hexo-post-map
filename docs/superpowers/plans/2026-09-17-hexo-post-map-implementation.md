@@ -6,7 +6,7 @@
 
 **Architecture:** Parse and validate provider-independent Front Matter during the Hexo build, inject server-rendered accessible fallbacks, generate a versioned overview data route, and hydrate only marked pages with framework-independent browser bundles. Keep AMap behind an internal adapter so the public Front Matter and site configuration contracts do not depend on its APIs.
 
-**Tech Stack:** TypeScript 7, Hexo 7/8 APIs, Zod 4, parse5 8, esbuild 0.28, Vitest 3.2, Playwright 1.63, ESLint 10, Prettier 3, GitHub Actions, Release Please, npm Trusted Publishing.
+**Tech Stack:** TypeScript 6, Hexo 7/8 APIs, Zod 4, parse5 8, esbuild 0.28, Vitest 3.2, Playwright 1.63, ESLint 10, Prettier 3, GitHub Actions, Release Please, npm Trusted Publishing.
 
 **Spec:** `docs/superpowers/specs/2026-09-17-hexo-post-map-design.md`
 
@@ -129,7 +129,7 @@ Use these exact compatibility declarations and scripts in `package.json`:
 }
 ```
 
-Add exact development dependencies compatible with Node 20: TypeScript `^7.0.2`, Vitest `^3.2.7`, Playwright `^1.63.0`, ESLint `^10.10.0`, `typescript-eslint` `^8.70.0`, Prettier `^3.9.7`, esbuild `^0.28.2`, Zod `^4.6.5`, parse5 `^8.0.1`, `@amap/amap-jsapi-loader` `^1.0.1`, `@types/node` `^22.20.3`, Happy DOM `^20.14.5`, YAML `^2.9.1`, and Hexo `^8.1.2` for types and local tests. Keep Hexo in `peerDependencies` as well.
+Add exact development dependencies compatible with Node 20: TypeScript `^6.0.3`, Vitest `^3.2.7`, Playwright `^1.63.0`, ESLint `^10.10.0`, `typescript-eslint` `^8.70.0`, Prettier `^3.9.7`, esbuild `^0.28.2`, Zod `^4.6.5`, parse5 `^8.0.1`, `@amap/amap-jsapi-loader` `^1.0.1`, `@types/node` `^22.20.3`, Happy DOM `^20.14.5`, YAML `^2.9.1`, and Hexo `^8.1.2` for types and local tests. Keep Hexo in `peerDependencies` as well.
 
 - [ ] **Step 2: Install dependencies and create the lockfile**
 
