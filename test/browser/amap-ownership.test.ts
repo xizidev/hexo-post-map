@@ -40,6 +40,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   globals.forEach((key) => Reflect.deleteProperty(window, key));
+  Reflect.deleteProperty(window, Symbol.for('hexo-post-map.amap-terminal.v1'));
   document.head.replaceChildren();
   vi.useRealTimers();
 });
@@ -63,12 +64,10 @@ describe('AMap page global ownership', () => {
     expect(sdk.reset).toHaveBeenCalledTimes(1);
   });
 
-  it('cannot let a timed-out callback or promise clear a newer pending attempt', async () => {
+  it('keeps the page terminal after the current fixed-name callback and old promise arrive late', async () => {
     vi.useFakeTimers();
     const old = deferred<typeof api>();
-    const next = deferred<typeof api>();
     const oldCallback = vi.fn();
-    const newCallback = vi.fn();
     sdk.load.mockImplementationOnce(() => {
       set('___onAPILoaded', oldCallback);
       return old.promise;
@@ -76,28 +75,19 @@ describe('AMap page global ownership', () => {
     const load = createProviderLoader(createAMapProvider);
     const first = load(config);
     await Promise.resolve();
-    const wrappedOld = get('___onAPILoaded') as () => void;
     const rejection = expect(first).rejects.toThrow('timed out');
     await vi.advanceTimersByTimeAsync(20_000);
     await rejection;
-    sdk.load.mockImplementationOnce(() => {
-      set('___onAPILoaded', newCallback);
-      return next.promise;
-    });
-    const retry = load(config);
-    await Promise.resolve();
-    const newSecurity = get('_AMapSecurityConfig');
-    const wrappedNew = get('___onAPILoaded');
-    wrappedOld();
+    set('AMap', api);
+    const currentCallback = get('___onAPILoaded') as () => void;
+    expect(typeof currentCallback).toBe('function');
+    currentCallback();
     old.reject(new Error('late rejection'));
     await vi.advanceTimersByTimeAsync(1);
     expect(oldCallback).not.toHaveBeenCalled();
-    expect(get('_AMapSecurityConfig')).toBe(newSecurity);
-    expect(get('___onAPILoaded')).toBe(wrappedNew);
-    expect(sdk.reset).toHaveBeenCalledTimes(1);
-    set('AMap', api);
-    next.resolve(api);
-    await expect(retry).resolves.toHaveProperty('mountDetail');
+    await expect(load(config)).rejects.toThrow('reload page');
+    expect(sdk.load).toHaveBeenCalledTimes(1);
+    expect(sdk.reset).not.toHaveBeenCalled();
   });
 
   it('reuses an existing compatible SDK without changing security or sibling globals', async () => {
@@ -171,7 +161,7 @@ describe('AMap page global ownership', () => {
   });
 
   it.each(['resolve', 'reject'] as const)(
-    'times out, retries, and ignores old promise %s after the new attempt succeeds',
+    'requires a page reload after timeout even when the old promise later %s',
     async (late) => {
       vi.useFakeTimers();
       const priorSecurity = { serviceHost: 'https://old.test/proxy' };
@@ -184,22 +174,21 @@ describe('AMap page global ownership', () => {
       await vi.advanceTimersByTimeAsync(20_000);
       await timedOut;
       expect(get('_AMapSecurityConfig')).toBe(priorSecurity);
-      expect(sdk.reset).toHaveBeenCalledTimes(1);
-      const successful = await load(config);
-      const currentSecurity = get('_AMapSecurityConfig');
-      expect(get('AMap')).toBe(api);
+      expect(sdk.reset).not.toHaveBeenCalled();
+      await expect(load(config)).rejects.toThrow('reload page');
+      set('AMap', api);
       if (late === 'resolve') old.resolve({ ...api });
       else old.reject(new Error('late network failure'));
       await vi.advanceTimersByTimeAsync(1);
       expect(get('AMap')).toBe(api);
-      expect(get('_AMapSecurityConfig')).toBe(currentSecurity);
-      expect(sdk.reset).toHaveBeenCalledTimes(1);
-      expect(await load(config)).toBe(successful);
-      expect(sdk.load).toHaveBeenCalledTimes(2);
+      expect(get('_AMapSecurityConfig')).toBe(priorSecurity);
+      expect(sdk.reset).not.toHaveBeenCalled();
+      await expect(load(config)).rejects.toThrow('reload page');
+      expect(sdk.load).toHaveBeenCalledTimes(1);
     },
   );
 
-  it('removes only the owned pending SDK script and callback on timeout', async () => {
+  it('removes only the owned script and leaves a fixed-name tombstone on timeout', async () => {
     vi.useFakeTimers();
     const themeScript = document.createElement('script');
     themeScript.type = 'application/json';
@@ -220,6 +209,7 @@ describe('AMap page global ownership', () => {
     await timedOut;
     expect(themeScript.isConnected).toBe(true);
     expect(owned.isConnected).toBe(false);
-    expect(get('___onAPILoaded')).toBeUndefined();
+    expect(typeof get('___onAPILoaded')).toBe('function');
+    expect(sdk.reset).not.toHaveBeenCalled();
   });
 });

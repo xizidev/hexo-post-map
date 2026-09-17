@@ -27,6 +27,10 @@ const loader = AMapLoader as unknown as {
 };
 const LOAD_TIMEOUT_MS = 20_000;
 const attemptKey = Symbol.for('hexo-post-map.amap-attempt.v1');
+const terminalKey = Symbol.for('hexo-post-map.amap-terminal.v1');
+
+// A timed-out JSONP response may still execute. Keep one inert callback, without attempt state.
+function ignoreLateApiResponse(): void {}
 
 function existingApi(value: unknown): value is AMapApi {
   if (value === null || typeof value !== 'object') return false;
@@ -44,6 +48,9 @@ function isSdkScript(script: HTMLScriptElement): boolean {
 
 /** Own only the request started here, never an SDK or configuration belonging to the theme. */
 function loadApi(config: BrowserProviderConfig): Promise<AMapApi> {
+  if (Reflect.get(window, terminalKey)) {
+    return Promise.reject(new Error('Map SDK loading timed out; reload page to retry'));
+  }
   const currentApi: unknown = Reflect.get(window, 'AMap');
   if (currentApi !== undefined) {
     return existingApi(currentApi)
@@ -69,7 +76,7 @@ function loadApi(config: BrowserProviderConfig): Promise<AMapApi> {
     let ownedScripts: HTMLScriptElement[] = [];
     let ownedCallback: unknown;
     const timer = window.setTimeout(
-      () => fail(new Error('Map SDK loading timed out')),
+      () => fail(new Error('Map SDK loading timed out; reload page to retry'), true),
       LOAD_TIMEOUT_MS,
     );
     const ownsAttempt = () => Reflect.get(window, attemptKey) === attempt;
@@ -77,18 +84,22 @@ function loadApi(config: BrowserProviderConfig): Promise<AMapApi> {
       clearTimeout(timer);
       if (ownsAttempt()) Reflect.deleteProperty(window, attemptKey);
     }
-    function fail(error: unknown) {
+    function fail(error: unknown, terminal = false) {
       if (settled) return;
       settled = true;
+      if (terminal) Reflect.set(window, terminalKey, true);
       if (ownsAttempt()) {
         const ownsSecurity = Reflect.get(window, '_AMapSecurityConfig') === security;
         const currentCallback: unknown = Reflect.get(window, '___onAPILoaded');
         const ownsCallback = currentCallback === undefined || currentCallback === ownedCallback;
         ownedScripts.forEach((script) => script.remove());
-        if (currentCallback === ownedCallback && ownedCallback !== undefined)
-          Reflect.deleteProperty(window, '___onAPILoaded');
+        if (currentCallback === ownedCallback && ownedCallback !== undefined) {
+          if (terminal) Reflect.set(window, '___onAPILoaded', ignoreLateApiResponse);
+          else Reflect.deleteProperty(window, '___onAPILoaded');
+        }
         // reset() deletes all three SDK globals. Only use it while none has been supplied by another owner.
         if (
+          !terminal &&
           ownsSecurity &&
           ownsCallback &&
           ['AMap', 'AMapUI', 'Loca'].every((key) => Reflect.get(window, key) === undefined)
