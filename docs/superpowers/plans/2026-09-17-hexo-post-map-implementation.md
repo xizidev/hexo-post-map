@@ -401,7 +401,7 @@ export interface ResolvedPluginConfig {
 }
 ```
 
-Validate CSS height syntax, overview path traversal, cluster bounds, zoom bounds, provider equality, HTTPS `service_host`, and exactly one security mode. Read environment values first, then file values, then defaults. Never interpolate environment syntax inside YAML strings.
+Validate CSS height syntax, overview path traversal, positive finite `cluster.grid_size`, finite zoom values in AMap's default `[2, 20]` range, provider equality, HTTPS `service_host`, and exactly one security mode. Do not impose an undocumented upper bound on grid size or require integral zoom values. Read environment values first, then file values, then defaults. Never interpolate environment syntax inside YAML strings.
 
 - [ ] **Step 4: Add failure tests for missing key, zero/two security modes, unsafe path, and secret redaction**
 
