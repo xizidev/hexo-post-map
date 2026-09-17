@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { hydrateDetail } from '../../src/browser/detail/index';
+import { hydrateDetail, initializeDetailMaps } from '../../src/browser/detail/index';
 import { renderDetailMap } from '../../src/templates/detail';
 import { resolveConfig } from '../../src/config/resolve';
 import { normalizePostMap } from '../../src/domain/normalize';
@@ -36,6 +36,72 @@ afterEach(() => {
 });
 
 describe('detail hydration', () => {
+  it('releases failed configuration registration on pagehide before explicit rebuild', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = fixture();
+    const data = root.querySelector('[data-hpm-data]')!;
+    const valid = data.textContent;
+    data.textContent = '{';
+    const load = vi.fn(async () => ({
+      mountDetail: async () => ({ destroy: vi.fn(), setInteractive: vi.fn() }),
+      mountOverview: vi.fn(),
+    }));
+    const failed = hydrateDetail(root, load);
+    window.dispatchEvent(new Event('pagehide'));
+    data.textContent = valid;
+    const rebuilt = hydrateDetail(root, load);
+    expect(rebuilt).not.toBe(failed);
+    await flush();
+    expect(load).toHaveBeenCalledTimes(1);
+    rebuilt.destroy();
+  });
+  it('deduplicates sections across repeated initialization and independent bundle modules', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = fixture();
+    const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
+    const mountDetail = vi.fn<MapProvider['mountDetail']>(async () => handle);
+    const load = vi.fn(async () => ({ mountDetail, mountOverview: vi.fn() }));
+    const first = hydrateDetail(root, load);
+    initializeDetailMaps(document, load);
+    vi.resetModules();
+    const otherBundle = await import('../../src/browser/detail/index');
+    otherBundle.initializeDetailMaps(document, load);
+    expect(otherBundle.hydrateDetail(root, load)).toBe(first);
+    await flush();
+    expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+    expect(mountDetail).toHaveBeenCalledTimes(1);
+    expect(load).toHaveBeenCalledTimes(1);
+    first.destroy();
+  });
+
+  it.each(['destroy', 'pagehide'])(
+    'releases the section registration after %s so explicit initialization can rebuild',
+    async (reason) => {
+      vi.stubGlobal('IntersectionObserver', undefined);
+      const root = fixture();
+      const handles = Array.from({ length: 2 }, () => ({
+        destroy: vi.fn(),
+        setInteractive: vi.fn(),
+      }));
+      const mountDetail = vi
+        .fn<MapProvider['mountDetail']>()
+        .mockResolvedValueOnce(handles[0]!)
+        .mockResolvedValueOnce(handles[1]!);
+      const load = async () => ({ mountDetail, mountOverview: vi.fn() });
+      const first = hydrateDetail(root, load);
+      await flush();
+      if (reason === 'destroy') first.destroy();
+      else window.dispatchEvent(new Event('pagehide'));
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
+      const second = hydrateDetail(root, load);
+      expect(second).not.toBe(first);
+      await flush();
+      expect(mountDetail).toHaveBeenCalledTimes(2);
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+      expect(handles[0]!.destroy).toHaveBeenCalledTimes(1);
+      second.destroy();
+    },
+  );
   it('waits until intersection within 300px and keeps SSR links until complete', async () => {
     let intersect!: IntersectionObserverCallback;
     const disconnect = vi.fn();

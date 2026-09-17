@@ -3,10 +3,27 @@ import { readDetailConfig } from '../shared/config';
 import { setStatus, showFallback } from '../shared/dom';
 import { loadProvider } from '../shared/provider-loader';
 
+interface DetailController {
+  destroy(): void;
+}
+const controllersKey = Symbol.for('hexo-post-map.detail-controllers.v1');
+function controllers(): WeakMap<HTMLElement, DetailController> {
+  const page = window as unknown as Record<
+    symbol,
+    WeakMap<HTMLElement, DetailController> | undefined
+  >;
+  return (page[controllersKey] ??= new WeakMap());
+}
+
 export function hydrateDetail(
   root: HTMLElement,
   load: ProviderLoader = loadProvider,
-): { destroy(): void } {
+): DetailController {
+  const registry = controllers();
+  const existing = registry.get(root);
+  if (existing) return existing;
+  const controller = { destroy };
+  registry.set(root, controller);
   const abort = new AbortController();
   let handle: MapHandle | undefined;
   let observer: IntersectionObserver | undefined;
@@ -51,6 +68,7 @@ export function hydrateDetail(
   function destroy() {
     if (disposed) return;
     disposed = true;
+    if (registry.get(root) === controller) registry.delete(root);
     observer?.disconnect();
     abort.abort();
     handle?.destroy();
@@ -62,6 +80,7 @@ export function hydrateDetail(
     showFallback(root, true);
   }
   let config: ReturnType<typeof readDetailConfig>;
+  window.addEventListener('pagehide', destroy, { once: true });
   try {
     config = readDetailConfig(root);
     if (!canvas) throw new Error('Missing map canvas');
@@ -71,7 +90,7 @@ export function hydrateDetail(
     canvas.insertAdjacentElement('afterend', activate);
   } catch {
     fail();
-    return { destroy };
+    return controller;
   }
 
   async function start() {
@@ -102,7 +121,6 @@ export function hydrateDetail(
   }
   activate.addEventListener('click', onActivate);
   root.addEventListener('keydown', onKey);
-  window.addEventListener('pagehide', destroy, { once: true });
   if (typeof IntersectionObserver === 'function') {
     observer = new IntersectionObserver(
       (entries) => {
@@ -114,14 +132,17 @@ export function hydrateDetail(
   } else {
     void start();
   }
-  return { destroy };
+  return controller;
 }
 
-function initialize() {
-  document
+export function initializeDetailMaps(
+  scope: ParentNode = document,
+  load: ProviderLoader = loadProvider,
+): void {
+  scope
     .querySelectorAll<HTMLElement>('[data-hpm-detail]')
-    .forEach((root) => hydrateDetail(root));
+    .forEach((root) => hydrateDetail(root, load));
 }
 if (document.readyState === 'loading')
-  document.addEventListener('DOMContentLoaded', initialize, { once: true });
-else initialize();
+  document.addEventListener('DOMContentLoaded', () => initializeDetailMaps(), { once: true });
+else initializeDetailMaps();
