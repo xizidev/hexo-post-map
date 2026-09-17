@@ -494,6 +494,7 @@ git commit -m "feat: add safe map presentation helpers"
 - Create: `src/hexo/tag.ts`
 - Create: `src/hexo/injector.ts`
 - Modify: `src/hexo/register.ts`
+- Modify: `test/package-smoke.test.ts`
 - Create: `test/hexo/post-filter.test.ts`
 - Create: `test/hexo/tag.test.ts`
 - Create: `test/hexo/injector.test.ts`
@@ -558,7 +559,7 @@ Run: `npm run test:run -- test/hexo && npm run typecheck`
 Expected: PASS.
 
 ```bash
-git add src/templates/detail.ts src/hexo src/index.ts test/hexo
+git add src/templates/detail.ts src/hexo src/index.ts test/hexo test/package-smoke.test.ts
 git commit -m "feat: integrate post map rendering"
 ```
 
