@@ -740,6 +740,7 @@ git commit -m "feat: render lazy post maps with AMap"
 - Modify: `src/browser/providers/amap.ts`
 - Modify: `src/browser/styles/index.css`
 - Modify: `test/hexo/generator.test.ts`
+- Modify: `test/package-smoke.test.ts`
 - Create: `test/browser/cluster-decision.test.ts`
 - Create: `test/browser/overview.test.ts`
 
