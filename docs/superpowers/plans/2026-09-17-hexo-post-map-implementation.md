@@ -812,6 +812,8 @@ git commit -m "feat: add automatic post map clustering"
 - Create: `e2e/detail-map.spec.ts`
 - Create: `e2e/overview-map.spec.ts`
 - Create: `e2e/amap-smoke.spec.ts`
+- Modify: `src/hexo/register.ts`
+- Modify: `test/hexo/tag.test.ts`
 - Modify: `package.json`
 
 **Interfaces:**
@@ -834,6 +836,8 @@ The runner must:
 5. run `hexo generate` with dummy build-time AMap values;
 6. assert exit status and return the public directory path;
 7. delete only the validated temporary directory in a `finally` block.
+
+Include an enabled-invalid configuration case. Hexo catches exceptions thrown while loading a plugin script, so `registerPlugin` must preserve any `ConfigValidationError` and register a minimal `before_generate` filter that rethrows it during the build lifecycle. This makes `hexo generate` exit nonzero with redacted field diagnostics. Disabled configuration must still register no hooks at all.
 
 - [ ] **Step 3: Add generated-output assertions**
 
@@ -860,7 +864,7 @@ Expected: PASS across fixture themes with no real AMap request.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add fixtures test/integration e2e playwright.config.ts package.json package-lock.json
+git add fixtures test/integration e2e playwright.config.ts src/hexo/register.ts test/hexo/tag.test.ts package.json package-lock.json
 git commit -m "test: verify packaged plugin compatibility"
 ```
 
