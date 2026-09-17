@@ -36,7 +36,13 @@ export function createPostImage(post: OverviewPost, placeholderUrl: string): HTM
 export function renderPostPanel(
   posts: readonly OverviewPost[],
   viewport: 'desktop' | 'mobile',
-  options: { container?: HTMLElement; placeholderUrl?: string; origin?: HTMLElement } = {},
+  options: {
+    container?: HTMLElement;
+    placeholderUrl?: string;
+    origin?: HTMLElement;
+    resolveOrigin?: () => HTMLElement | undefined;
+    fallback?: HTMLElement;
+  } = {},
 ): PanelHandle {
   const origin =
     options.origin ??
@@ -93,7 +99,11 @@ export function renderPostPanel(
     close.removeEventListener('click', destroy);
     element.removeEventListener('keydown', onKey);
     element.remove();
-    if (restore && origin?.isConnected) origin.focus();
+    if (restore) {
+      const current = options.resolveOrigin ? options.resolveOrigin() : origin;
+      const target = current?.isConnected ? current : options.fallback;
+      if (target?.isConnected) target.focus();
+    }
   }
   function onKey(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;

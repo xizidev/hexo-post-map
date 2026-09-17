@@ -96,6 +96,9 @@ class OverviewFakeMap {
     return this.zoom;
   }
   setBounds = vi.fn();
+  setZoom = vi.fn((zoom: number) => {
+    this.zoom = zoom;
+  });
   setStatus = vi.fn();
   destroy = vi.fn();
 }
@@ -147,6 +150,140 @@ function overviewOptions(overrides: Partial<OverviewMapOptions> = {}): OverviewM
   };
 }
 describe('AMap overview clustering boundary', () => {
+  it.each([
+    { start: 6, maxZoom: 8, steps: [7, 8] },
+    { start: 6.25, maxZoom: 8.5, steps: [7.25, 8.25, 8.5] },
+    { start: 2, maxZoom: 2.5, steps: [2.5] },
+  ])(
+    'advances a no-op fit at gridSize 1024 to a bounded terminal list ($start -> $maxZoom)',
+    async ({ start, maxZoom, steps }) => {
+      const provider = await adapter();
+      const options = overviewOptions({
+        gridSize: 1024,
+        maxZoom,
+        posts: [a, { ...b, location: { name: 'B', longitude: 122, latitude: 32 } }],
+      });
+      const pending = provider.mountOverview(document.createElement('div'), options);
+      await flush();
+      mapInstance.emit('complete');
+      const handle = await pending;
+      handle.setInteractive(true);
+      mapInstance.zoom = start;
+      const marker = new ClusterMarker();
+      clusterInstance.options.renderClusterMarker({ marker, clusterData: clusterInstance.data });
+      const button = marker.content as HTMLButtonElement;
+      for (const expected of steps) {
+        button.click();
+        expect(mapInstance.zoom).toBe(expected);
+        expect(options.onGroupSelect).not.toHaveBeenCalled();
+      }
+      button.click();
+      expect(mapInstance.setZoom.mock.calls.map(([zoom]) => zoom)).toEqual(steps);
+      expect(options.onGroupSelect).toHaveBeenCalledOnce();
+      handle.destroy();
+    },
+  );
+  it.each([
+    { fitted: 12, expected: 12, nudged: false },
+    { fitted: 3, expected: 7, nudged: true },
+  ])('uses the pre-click zoom when fit returns $fitted', async ({ fitted, expected, nudged }) => {
+    const provider = await adapter();
+    const pending = provider.mountOverview(
+      document.createElement('div'),
+      overviewOptions({
+        posts: [a, { ...b, location: { name: 'B', longitude: 122, latitude: 32 } }],
+      }),
+    );
+    await flush();
+    mapInstance.emit('complete');
+    const handle = await pending;
+    handle.setInteractive(true);
+    mapInstance.zoom = 6;
+    mapInstance.setBounds.mockImplementation(() => {
+      mapInstance.zoom = fitted;
+    });
+    const marker = new ClusterMarker();
+    clusterInstance.options.renderClusterMarker({ marker, clusterData: clusterInstance.data });
+    (marker.content as HTMLButtonElement).click();
+    expect(mapInstance.zoom).toBe(expected);
+    expect(mapInstance.setZoom).toHaveBeenCalledTimes(nudged ? 1 : 0);
+    handle.destroy();
+  });
+  it.each(['same-marker', 'new-marker', 'removed-group'])(
+    'restores focus after SDK redraw: %s',
+    async (redraw) => {
+      const root = fixture();
+      const provider = await adapter();
+      const controller = hydrateOverview(
+        root,
+        async () => provider,
+        async () => new Response(JSON.stringify({ version: 1, posts: [a, b] })),
+      );
+      await flush();
+      mapInstance.emit('complete');
+      await flush();
+      root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
+      const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]')!;
+      const marker = new ClusterMarker();
+      clusterInstance.options.renderClusterMarker({ marker, clusterData: clusterInstance.data });
+      const original = marker.content as HTMLButtonElement;
+      canvas.append(original);
+      original.click();
+      expect(root.querySelector('.hpm-panel')!.contains(document.activeElement)).toBe(true);
+      const replacementMarker = redraw === 'new-marker' ? new ClusterMarker() : marker;
+      if (redraw === 'removed-group') {
+        clusterInstance.options.renderMarker({
+          marker: replacementMarker,
+          data: [clusterInstance.data[0]!],
+        });
+      } else {
+        clusterInstance.options.renderClusterMarker({
+          marker: replacementMarker,
+          clusterData: [...clusterInstance.data].reverse(),
+        });
+      }
+      const replacement = replacementMarker.content!;
+      original.replaceWith(replacement);
+      root
+        .querySelector('.hpm-panel')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(document.activeElement).toBe(redraw === 'removed-group' ? canvas : replacement);
+      expect(root.dataset.hpmActive).toBe('true');
+      controller.destroy();
+    },
+  );
+  it.each([2, 2.5, 18.5, 20])(
+    'preserves the supported maxZoom %s and minimum map zoom 2',
+    async (maxZoom) => {
+      const provider = await adapter();
+      const pending = provider.mountOverview(
+        document.createElement('div'),
+        overviewOptions({ maxZoom }),
+      );
+      await flush();
+      mapInstance.emit('complete');
+      const handle = await pending;
+      expect(mapInstance.options.zooms).toEqual([2, maxZoom]);
+      expect(clusterInstance.options.maxZoom).toBe(maxZoom);
+      handle.destroy();
+    },
+  );
+  it.each([1.99, 20.01, NaN, Infinity, -Infinity])(
+    'rejects unsupported adapter maxZoom %s before constructing a map',
+    async (maxZoom) => {
+      const provider = await adapter();
+      const previous = mapInstance;
+      const pending = provider.mountOverview(
+        document.createElement('div'),
+        overviewOptions({ maxZoom }),
+      );
+      const rejected = expect(pending).rejects.toThrow();
+      await flush();
+      if (mapInstance !== previous) mapInstance.emit('complete');
+      await rejected;
+      expect(mapInstance).toBe(previous);
+    },
+  );
   it('configures pixel clustering, fits all unchanged coordinates and renders accessible leaf images', async () => {
     const provider = await adapter();
     const options = overviewOptions({
@@ -157,7 +294,7 @@ describe('AMap overview clustering boundary', () => {
     await flush();
     expect(clusterInstance.options).toMatchObject({ gridSize: 72, maxZoom: 18 });
     expect(mapInstance.options).toMatchObject({
-      zooms: [3, 18],
+      zooms: [2, 18],
       scrollWheel: false,
       touchZoom: false,
     });
@@ -181,7 +318,7 @@ describe('AMap overview clustering boundary', () => {
     );
     handle.setInteractive(true);
     button.click();
-    expect(options.onPostSelect).toHaveBeenCalledWith(a, button);
+    expect(options.onPostSelect).toHaveBeenCalledWith(a, button, expect.any(Function));
     expect(JSON.stringify(options.posts)).toBe(before);
     handle.destroy();
     handle.destroy();
@@ -220,7 +357,11 @@ describe('AMap overview clustering boundary', () => {
         expect(options.onGroupSelect).not.toHaveBeenCalled();
       } else {
         expect(mapInstance.setBounds).not.toHaveBeenCalled();
-        expect(options.onGroupSelect).toHaveBeenCalledWith([options.posts[1], a], button);
+        expect(options.onGroupSelect).toHaveBeenCalledWith(
+          [options.posts[1], a],
+          button,
+          expect.any(Function),
+        );
       }
       handle.destroy();
     },
@@ -317,6 +458,39 @@ describe('article panels', () => {
 });
 
 describe('overview hydration', () => {
+  it.each([2, 2.5, 18.5, 20])('accepts the server-supported finite maxZoom %s', async (maxZoom) => {
+    const root = fixture();
+    const data = root.querySelector('[data-hpm-data]')!;
+    const settings = JSON.parse(data.textContent!);
+    settings.cluster.maxZoom = maxZoom;
+    data.textContent = JSON.stringify(settings);
+    const mountOverview = vi.fn<MapProvider['mountOverview']>(async () => ({
+      destroy() {},
+      setInteractive() {},
+    }));
+    hydrateOverview(
+      root,
+      async () => ({ mountOverview, mountDetail: vi.fn() }),
+      async () => new Response(JSON.stringify({ version: 1, posts: [a] })),
+    );
+    await flush();
+    expect(mountOverview.mock.calls[0]?.[1].maxZoom).toBe(maxZoom);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+  });
+  it.each(['1.99', '20.01', '1e309', '-1e309', 'null', '"2"'])(
+    'rejects invalid embedded maxZoom %s without provider loading',
+    async (value) => {
+      const root = fixture();
+      const data = root.querySelector('[data-hpm-data]')!;
+      data.textContent = data.textContent!.replace('"maxZoom":18', `"maxZoom":${value}`);
+      const load = vi.fn();
+      hydrateOverview(root, load, vi.fn());
+      await flush();
+      expect(load).not.toHaveBeenCalled();
+      expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+      expect(root.querySelector('[data-hpm-status]')!.textContent).toContain('无法加载');
+    },
+  );
   it('fetches root-aware versioned data and only replaces SSR after map completion', async () => {
     const root = fixture();
     const pending = deferred<MapHandle>();

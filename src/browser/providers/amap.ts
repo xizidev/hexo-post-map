@@ -20,6 +20,7 @@ interface AMapMap {
   setStatus(status: Record<string, boolean>): void;
   destroy(): void;
   getZoom(): number;
+  setZoom(zoom: number, immediately: boolean): void;
   setBounds(bounds: unknown, immediately: boolean, padding: number[]): void;
 }
 interface AMapInfoWindow {
@@ -43,6 +44,7 @@ interface AMapApi {
 interface ClusterPoint {
   lnglat: number[];
   post: OverviewPost;
+  postId: number;
 }
 interface ClusterMarker {
   setContent(content: HTMLElement): void;
@@ -392,14 +394,16 @@ async function mountOverview(
   container: HTMLElement,
   options: OverviewMapOptions,
 ): Promise<MapHandle> {
+  if (!Number.isFinite(options.maxZoom) || options.maxZoom < 2 || options.maxZoom > 20)
+    throw new Error('Invalid overview maximum zoom');
   await loadCluster(api, options.signal);
   if (options.signal?.aborted) throw new Error('Map initialization cancelled');
   if (!options.posts.length) throw new Error('Missing overview posts');
   return new Promise((resolve, reject) => {
     const map = new api.Map(container, {
-      zoom: 4,
+      zoom: Math.min(4, options.maxZoom),
       // Keep overlapping points clustered at the terminal level, including manual zooming.
-      zooms: [3, options.maxZoom],
+      zooms: [2, options.maxZoom],
       ...interaction(false),
       animateEnable: !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     });
@@ -408,7 +412,11 @@ async function mountOverview(
     let active = false;
     let cluster: { setMap(map: AMapMap | null): void } | undefined;
     const buttons = new Set<HTMLButtonElement>();
-    const previousButtons = new WeakMap<ClusterMarker, HTMLButtonElement>();
+    const previousButtons = new WeakMap<
+      ClusterMarker,
+      { key: string; button: HTMLButtonElement }
+    >();
+    const currentButtons = new Map<string, HTMLButtonElement>();
     const events = new AbortController();
     const timer = window.setTimeout(fail, LOAD_TIMEOUT_MS);
     function destroy() {
@@ -420,6 +428,7 @@ async function mountOverview(
       options.signal?.removeEventListener('abort', cancel);
       events.abort();
       buttons.clear();
+      currentButtons.clear();
       cluster?.setMap(null);
       map.destroy();
     }
@@ -469,18 +478,29 @@ async function mountOverview(
     function render(context: ClusterContext, grouped: boolean) {
       if (destroyed) return;
       try {
-        const posts = (grouped ? context.clusterData : context.data)?.map((point) => point.post);
+        const points = grouped ? context.clusterData : context.data;
+        const posts = points?.map((point) => point.post);
         if (!posts?.length) throw new Error('Missing cluster data');
+        // Stable membership survives vendor marker replacement and renderer ordering changes.
+        const key = points!
+          .map((point) => point.postId)
+          .sort((a, b) => a - b)
+          .join(',');
         const old = previousButtons.get(context.marker);
         if (old) {
-          old.disabled = true;
-          buttons.delete(old);
+          old.button.disabled = true;
+          buttons.delete(old.button);
+          if (currentButtons.get(old.key) === old.button) currentButtons.delete(old.key);
         }
         const button = document.createElement('button');
         button.type = 'button';
         button.className = grouped ? 'hpm-marker hpm-cluster' : 'hpm-image-marker';
         button.disabled = !active;
         button.tabIndex = active ? 0 : -1;
+        const resolveOrigin = () => {
+          const current = currentButtons.get(key);
+          return !destroyed && current?.isConnected && !current.disabled ? current : undefined;
+        };
         if (grouped) {
           button.textContent = String(posts.length);
           button.setAttribute('aria-label', `查看此处的 ${posts.length} 篇文章`);
@@ -495,24 +515,30 @@ async function mountOverview(
             if (destroyed || !active || button.disabled) return;
             try {
               if (!grouped) {
-                options.onPostSelect(posts[0]!, button);
+                options.onPostSelect(posts[0]!, button, resolveOrigin);
                 return;
               }
+              const zoom = map.getZoom();
               const decision = decideClusterAction({
-                zoom: map.getZoom(),
+                zoom,
                 maxZoom: options.maxZoom,
                 posts,
                 bounds: postBounds(posts),
               });
-              if (decision.type === 'zoom') fit(decision.bounds);
-              else options.onGroupSelect(decision.posts, button);
+              if (decision.type === 'zoom') {
+                fit(decision.bounds);
+                // A large pixel grid may retain the same members after fitting; always advance.
+                if (!destroyed && map.getZoom() <= zoom)
+                  map.setZoom(Math.min(zoom + 1, options.maxZoom), true);
+              } else options.onGroupSelect(decision.posts, button, resolveOrigin);
             } catch {
               fail();
             }
           },
           { signal: events.signal },
         );
-        previousButtons.set(context.marker, button);
+        previousButtons.set(context.marker, { key, button });
+        currentButtons.set(key, button);
         buttons.add(button);
         context.marker.setContent(button);
         context.marker.setOffset(new api.Pixel(grouped ? -24 : -48, grouped ? -24 : -36));
@@ -526,9 +552,10 @@ async function mountOverview(
     try {
       cluster = new api.MarkerCluster!(
         map,
-        options.posts.map((post) => ({
+        options.posts.map((post, postId) => ({
           lnglat: [post.location.longitude, post.location.latitude],
           post,
+          postId,
         })),
         {
           gridSize: options.gridSize,

@@ -1,6 +1,11 @@
 import { safeUrl } from '../../presentation/safe-html';
 import type { OverviewPost } from '../../templates/overview';
-import type { BrowserProviderConfig, MapHandle, ProviderLoader } from '../providers/types';
+import type {
+  BrowserProviderConfig,
+  FocusOriginResolver,
+  MapHandle,
+  ProviderLoader,
+} from '../providers/types';
 import { setStatus, showFallback } from '../shared/dom';
 import { loadProvider } from '../shared/provider-loader';
 import { installImageFallback, renderPostPanel, type PanelHandle } from './panel';
@@ -143,7 +148,7 @@ export function hydrateOverview(
       !Number.isFinite(config.cluster?.gridSize) ||
       config.cluster.gridSize <= 0 ||
       !Number.isFinite(config.cluster.maxZoom) ||
-      config.cluster.maxZoom < 3 ||
+      config.cluster.maxZoom < 2 ||
       config.cluster.maxZoom > 20
     )
       throw new Error('Invalid map configuration');
@@ -161,13 +166,23 @@ export function hydrateOverview(
   activate.addEventListener('click', onActivate);
   showList.addEventListener('click', onList);
   root.addEventListener('keydown', onKey);
-  function select(posts: readonly OverviewPost[], origin: HTMLElement) {
+  function select(
+    posts: readonly OverviewPost[],
+    origin: HTMLElement,
+    resolveOrigin?: FocusOriginResolver,
+  ) {
     if (disposed || failed) return;
     panel?.destroy();
     panel = renderPostPanel(
       posts,
       window.matchMedia?.('(max-width: 600px)').matches ? 'mobile' : 'desktop',
-      { container: root, placeholderUrl: config.placeholderUrl, origin },
+      {
+        container: root,
+        placeholderUrl: config.placeholderUrl,
+        origin,
+        resolveOrigin,
+        fallback: canvas ?? activate,
+      },
     );
   }
   async function start() {
@@ -195,7 +210,7 @@ export function hydrateOverview(
         placeholderUrl: config.placeholderUrl,
         signal: abort.signal,
         onError: fail,
-        onPostSelect: (post, origin) => select([post], origin),
+        onPostSelect: (post, origin, resolveOrigin) => select([post], origin, resolveOrigin),
         onGroupSelect: select,
       });
       if (disposed || failed) {

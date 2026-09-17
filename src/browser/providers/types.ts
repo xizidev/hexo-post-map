@@ -24,9 +24,19 @@ export interface OverviewMapOptions {
   readonly placeholderUrl: string;
   readonly signal?: AbortSignal;
   readonly onError?: () => void;
-  readonly onPostSelect: (post: OverviewPost, origin: HTMLElement) => void;
-  readonly onGroupSelect: (posts: readonly OverviewPost[], origin: HTMLElement) => void;
+  readonly onPostSelect: (
+    post: OverviewPost,
+    origin: HTMLElement,
+    resolveOrigin?: FocusOriginResolver,
+  ) => void;
+  readonly onGroupSelect: (
+    posts: readonly OverviewPost[],
+    origin: HTMLElement,
+    resolveOrigin?: FocusOriginResolver,
+  ) => void;
 }
+
+export type FocusOriginResolver = () => HTMLElement | undefined;
 
 export interface MapHandle {
   setInteractive(active: boolean): void;
