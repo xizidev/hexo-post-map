@@ -20,10 +20,12 @@
     "build": "node scripts/build.mjs",
     "format:check": "prettier --check .",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --ignoreConfig --noEmit --target ES2022 --module ESNext --moduleResolution Bundler --types node --strict --skipLibCheck e2e/*.ts playwright.config.ts",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:e2e": "playwright test",
+    "test:integration": "node test/integration/pack-and-build.mjs",
+    "test:e2e": "npm run build && playwright test --project=chromium",
+    "test:amap-smoke": "npm run build && playwright test --project=amap-smoke",
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:run && npm run build"
   },
   "publishConfig": {

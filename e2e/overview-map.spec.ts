@@ -1,0 +1,106 @@
+import { test, expect } from './fixtures';
+
+for (const mobile of [false, true]) {
+  test(`cluster zoom, identical terminal list, close/focus and image navigation on ${mobile ? 'mobile' : 'desktop'}`, async ({
+    page,
+    network,
+  }) => {
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
+    await page.goto('/blog/map/');
+    await page.locator('[data-hpm-activate]').click();
+    expect(network.sdkRequests).toBe(1);
+    await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
+    await expect(page.getByRole('button', { name: '预览文章：Mountain itinerary' })).toBeVisible();
+    expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].zoom)).toBe(5);
+    const overlap = page.getByRole('button', { name: '查看此处的 2 篇文章' });
+    await overlap.focus();
+    await page.keyboard.press('Enter');
+    const panel = page.getByRole('dialog', { name: '此处的文章' });
+    await expect(panel).toHaveAttribute('data-hpm-viewport', mobile ? 'mobile' : 'desktop');
+    await expect(panel.locator('li')).toHaveCount(2);
+    await expect(panel.locator('time')).toHaveText(['2025-05-01', '2025-02-01']);
+    await expect(panel).toHaveCSS('position', mobile ? 'fixed' : 'absolute');
+    if (mobile) {
+      const box = await panel.boundingBox();
+      expect(Math.round(box!.y + box!.height)).toBe(844);
+    }
+    expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].zoom)).toBe(5);
+    await expect(panel.locator('[data-attack]')).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: '关闭文章面板' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(overlap).toBeFocused();
+    const marker = page.getByRole('button', { name: '预览文章：Mountain itinerary' });
+    await marker.click();
+    const preview = page.getByRole('dialog', { name: '文章预览' });
+    await expect(preview.locator('img')).toHaveAttribute(
+      'src',
+      '/blog/hexo-post-map/assets/placeholder.svg',
+    );
+    await preview
+      .locator('a')
+      .filter({ has: page.locator('img') })
+      .click();
+    await expect(page).toHaveURL(/\/blog\/posts\/route\/$/);
+    await expect(page.locator('[data-hpm-detail]')).toBeVisible();
+  });
+}
+
+test('overview data failure preserves chronological fallback links', async ({ page }) => {
+  await page.route('**/map/posts.json', (route) => route.fulfill({ status: 503, body: '{}' }));
+  await page.goto('/blog/map/');
+  await expect(page.locator('[data-hpm-status]')).toContainText('无法加载');
+  const fallback = page.locator('[data-hpm-fallback]');
+  await expect(fallback).toBeVisible();
+  await expect(fallback.locator('time')).toHaveText([
+    '2025-05-01',
+    '2025-04-01',
+    '2025-03-01',
+    '2025-02-01',
+  ]);
+  await fallback.getByRole('link', { name: 'Mountain itinerary', exact: true }).click();
+  await expect(page).toHaveURL(/\/blog\/posts\/route\/$/);
+});
+
+test('failed representative images use the packaged placeholder and the list remains accessible', async ({
+  page,
+}) => {
+  await page.goto('/blog/map/');
+  await page.locator('[data-hpm-activate]').click();
+  await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
+  await page.getByRole('button', { name: '预览文章：Quzhou multiple places' }).click();
+  const preview = page.getByRole('dialog', { name: '文章预览' });
+  await expect(preview.locator('img')).toHaveAttribute(
+    'src',
+    '/blog/hexo-post-map/assets/placeholder.svg',
+  );
+  await preview.getByRole('button', { name: '关闭文章面板' }).click();
+  await page.getByRole('button', { name: '显示全部文章列表' }).click();
+  await expect(page.locator('[data-hpm-fallback]')).toBeVisible();
+});
+
+test('a surviving cluster at maximum zoom opens its list without another zoom', async ({
+  page,
+}) => {
+  await page.goto('/blog/map/');
+  await page.locator('[data-hpm-activate]').click();
+  // The SDK supplies the current zoom; retain a large pixel-grid cluster at its limit.
+  await page.evaluate(() => {
+    Reflect.get(window, '__hpmSdk').maps[0].zoom = 18;
+  });
+  await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
+  await expect(page.getByRole('dialog', { name: '此处的文章' }).locator('li')).toHaveCount(4);
+  expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].zoom)).toBe(18);
+});
+
+test('SDK failure and later map errors reveal the overview fallback', async ({ page }) => {
+  await page.goto('/blog/map/');
+  await expect(page.locator('[data-hpm-activate]')).toBeEnabled();
+  await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].emit('error'));
+  await expect(page.locator('[data-hpm-fallback]')).toBeVisible();
+  await expect(page.locator('[data-hpm-status]')).toContainText('无法加载');
+  await page.route('https://webapi.amap.com/**', (route) => route.abort());
+  await page.reload();
+  await expect(page.locator('[data-hpm-status]')).toContainText('无法加载');
+  await expect(page.locator('[data-hpm-fallback] a')).toHaveCount(4);
+});

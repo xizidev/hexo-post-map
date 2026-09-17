@@ -6,6 +6,29 @@ import { postMapTag } from '../../src/hexo/tag';
 afterEach(() => vi.unstubAllEnvs());
 
 describe('tag and registration', () => {
+  it('defers configuration errors to generation so Hexo cannot swallow invalid builds during plugin loading', async () => {
+    vi.stubEnv('HEXO_POST_MAP_AMAP_KEY', undefined);
+    vi.stubEnv('HEXO_POST_MAP_AMAP_SERVICE_HOST', undefined);
+    vi.stubEnv('HEXO_POST_MAP_AMAP_SECURITY_JS_CODE', undefined);
+    const hexo = new Hexo('/tmp/hpm-invalid-registration-test');
+    hexo.config.post_map = {
+      enabled: true,
+      amap: {
+        key: 'private-key',
+        security: { security_js_code: 'private-code', service_host: 'https://proxy.example.test' },
+      },
+    };
+    expect(() => registerPlugin(hexo)).not.toThrow();
+    const generation = hexo.extend.filter.exec('before_generate', undefined);
+    await expect(generation).rejects.toMatchObject({
+      name: 'ConfigValidationError',
+      fieldPath: 'amap.security',
+    });
+    await expect(generation).rejects.not.toThrow('private-key');
+    await expect(generation).rejects.not.toThrow('private-code');
+    expect(hexo.extend.tag.env.hasExtension('post_map')).toBe(false);
+    expect(hexo.extend.generator.get('post-map')).toBeUndefined();
+  });
   it.each([undefined, { enabled: false }])(
     'registers no behavior for disabled config %j',
     (postMap) => {
