@@ -1,6 +1,7 @@
 import { createReadStream, type ReadStream } from 'node:fs';
 import { join } from 'node:path';
 import type Hexo from 'hexo';
+import { parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
 import type { ResolvedPluginConfig } from '../config/types';
 import { normalizePostMap } from '../domain/normalize';
 import { resolveRepresentativeImage } from '../presentation/image';
@@ -34,26 +35,74 @@ interface OverviewLocals {
   posts: { toArray(): unknown[] };
 }
 
+/** Compare decoded segments, never confusing a sibling prefix or encoded separator with root. */
+function relativeToRoot(pathname: string, root: string): string | null {
+  // Hexo's URL helper decodes percent escapes; keep ambiguous separators/escapes absolute.
+  if (/%(?:2f|5c|25)/iu.test(pathname)) return null;
+  const rootSegments = root.replace(/\/+$/u, '').split('/');
+  const segments = pathname.split('/');
+  try {
+    if (
+      !rootSegments.every(
+        (segment, index) =>
+          decodeURIComponent(segment) === decodeURIComponent(segments[index] ?? ''),
+      )
+    )
+      return null;
+  } catch {
+    return null;
+  }
+  return segments.slice(rootSegments.length).join('/');
+}
+
 /** Normalize internal routes with Hexo's helper, without double-prefixing an existing root. */
 function publicUrl(raw: string, hexo: Hexo, kind: 'post' | 'image'): string {
   let path = raw;
+  let suffix = '';
+  const root = hexo.config.root;
   if (/^https?:/iu.test(raw)) {
     if (safeUrl(raw, kind) === null) return '';
     const url = new URL(raw);
     if (url.username || url.password) return '';
     if (url.origin !== new URL(hexo.config.url).origin) return raw;
-    path = url.pathname + url.search + url.hash;
-  } else if (
-    /^[a-z][a-z\d+.-]*:/iu.test(raw) ||
-    safeUrl(raw.startsWith('/') ? raw : `/${raw}`, kind) === null
-  ) {
-    return '';
+    const internalPath = relativeToRoot(url.pathname, new URL(root, hexo.config.url).pathname);
+    if (internalPath === null) return raw;
+    path = internalPath;
+    // Keep query/hash escapes intact instead of feeding them through Hexo's path encoder.
+    suffix = url.search + url.hash;
+  } else {
+    if (
+      /^[a-z][a-z\d+.-]*:/iu.test(raw) ||
+      safeUrl(raw.startsWith('/') ? raw : `/${raw}`, kind) === null
+    )
+      return '';
+    if (path.startsWith(root)) path = path.slice(root.length);
   }
-  const root = hexo.config.root;
-  if (path.startsWith(root)) path = path.slice(root.length);
   const helper = hexo.extend.helper.get('url_for');
   const resolved: unknown = Reflect.apply(helper, hexo, [path, { relative: false }]);
-  return typeof resolved === 'string' ? (safeUrl(resolved, kind) ?? '') : '';
+  return typeof resolved === 'string' ? (safeUrl(resolved + suffix, kind) ?? '') : '';
+}
+
+function publicImage(post: OverviewSourcePost, hexo: Hexo, placeholderUrl: string): string {
+  const preferred = publicUrl(resolveRepresentativeImage(post), hexo, 'image');
+  if (preferred) return preferred;
+
+  // The presentation allowlist permits HTTP(S); the final site URL policy also rejects userinfo.
+  // Remove rejected content candidates before retrying the shared image-priority resolver.
+  const fragment = parseFragment(post.content);
+  function removeRejectedSources(node: DefaultTreeAdapterMap['node']): void {
+    if ('tagName' in node && node.tagName === 'img') {
+      node.attrs = node.attrs.filter(
+        (attribute) => attribute.name !== 'src' || publicUrl(attribute.value, hexo, 'image') !== '',
+      );
+    }
+    if ('childNodes' in node) node.childNodes.forEach(removeRejectedSources);
+  }
+  removeRejectedSources(fragment);
+  return (
+    publicUrl(resolveRepresentativeImage({ content: serialize(fragment) }), hexo, 'image') ||
+    placeholderUrl
+  );
 }
 
 function assetRoutes(): HexoRoute[] {
@@ -88,7 +137,7 @@ export function createOverviewRoutes(
       title: post.title,
       url: publicUrl(post.path ?? post.permalink, hexo, 'post'),
       date,
-      image: publicUrl(resolveRepresentativeImage(post), hexo, 'image') || placeholderUrl,
+      image: publicImage(post, hexo, placeholderUrl),
       location: {
         name: representative.name,
         longitude: representative.coordinate[0],

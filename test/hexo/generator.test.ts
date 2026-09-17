@@ -182,6 +182,87 @@ describe('overview generation', () => {
       expect(image.getAttribute('alt')).toBe('旅行');
     }
   });
+  it('keeps same-origin thumbnails outside the blog root absolute and normalizes only root members', () => {
+    const urls = [
+      'https://example.com/images/a.jpg?size=2&crop=1#preview',
+      'https://example.com/blogger/a.jpg',
+      'https://example.com/blog%2Fimages/a.jpg',
+      'https://example.com/blog/../images/a.jpg',
+      'https://example.com/blog/images/a.jpg?size=2&crop=1#preview',
+      'https://example.com/bl%6Fg/images/a.jpg',
+    ];
+    const routes = generate(
+      urls.map((thumbnail) => post({ thumbnail })),
+      instance('/blog/'),
+    );
+    const images = data(routes).posts.map((p: { image: string }) => p.image);
+    expect(images).toEqual([
+      'https://example.com/images/a.jpg?size=2&crop=1#preview',
+      'https://example.com/blogger/a.jpg',
+      'https://example.com/blog%2Fimages/a.jpg',
+      'https://example.com/blog/../images/a.jpg',
+      '/blog/images/a.jpg?size=2&crop=1#preview',
+      '/blog/images/a.jpg',
+    ]);
+    expect(document(routes).querySelector('img')!.getAttribute('src')).toBe(urls[0]);
+  });
+  it('keeps same-origin permalinks outside the blog root absolute and respects path segment boundaries', () => {
+    const urls = [
+      'https://example.com/elsewhere/post/?x=1&y=2#section',
+      'https://example.com/blogger/post/',
+      'https://example.com/blog%2fpost/',
+      'https://example.com/blog/%2e%2e/elsewhere/post/',
+      'https://example.com/blog/archives/post/?x=1&y=2#section',
+      'https://example.com/bl%6fg/archives/post/',
+      'https://example.com/blog?x=1#section',
+      'https://example.com/blog//blog/post/',
+    ];
+    const routes = generate(
+      urls.map((permalink) => post({ path: undefined, permalink })),
+      instance('/blog/'),
+    );
+    expect(data(routes).posts.map((p: { url: string }) => p.url)).toEqual([
+      'https://example.com/elsewhere/post/?x=1&y=2#section',
+      'https://example.com/blogger/post/',
+      'https://example.com/blog%2fpost/',
+      'https://example.com/blog/%2e%2e/elsewhere/post/',
+      '/blog/archives/post/?x=1&y=2#section',
+      '/blog/archives/post/',
+      '/blog/?x=1#section',
+      '/blog/blog/post/',
+    ]);
+    expect(document(routes).querySelector('[data-hpm-fallback] a')!.getAttribute('href')).toBe(
+      urls[0],
+    );
+  });
+  it('tries safe content images after final URL validation rejects the thumbnail, then falls back to the placeholder', () => {
+    const routes = generate(
+      [
+        post({
+          thumbnail: 'https://user:secret@example.com/blog/cover.jpg',
+          content: '<img src="/body.jpg">',
+        }),
+        post({
+          thumbnail: 'https://user:secret@images.example/cover.jpg',
+          content:
+            '<img src="https://user:secret@images.example/unsafe.jpg"><img src="javascript:alert(1)"><img src="https://images.example/body.jpg">',
+        }),
+        post({
+          thumbnail: 'https://user:secret@example.com/blog/cover.jpg',
+          content: '<img src="https://user:secret@images.example/unsafe.jpg">',
+        }),
+      ],
+      instance('/blog/'),
+    );
+    expect(data(routes).posts.map((p: { image: string }) => p.image)).toEqual([
+      '/blog/body.jpg',
+      'https://images.example/body.jpg',
+      '/blog/hexo-post-map/assets/placeholder.svg',
+    ]);
+    expect(String(routes.find((route) => route.path === 'map/posts.json')!.data)).not.toContain(
+      'secret',
+    );
+  });
   it('escapes titles and location names and refuses unsafe post links', () => {
     const title = '</script><img src=x onerror=alert(1)> & "title"';
     const routes = generate(
