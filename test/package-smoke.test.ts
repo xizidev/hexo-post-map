@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
-import { describe, expect, it, vi } from 'vitest';
+import Hexo from 'hexo';
+import { describe, expect, it } from 'vitest';
 
 const execFileAsync = promisify(execFile);
 
@@ -17,13 +18,17 @@ describe('package contract', () => {
 });
 
 describe('registerPlugin', () => {
-  it('reports that the plugin has loaded through the Hexo logger', async () => {
+  it('requires explicit post_map activation even when unrelated site settings include enabled', async () => {
     const { registerPlugin } = await import('../src/hexo/register');
-    const debug = vi.fn();
+    const hexo = new Hexo('/tmp/hpm-package-smoke');
+    hexo.config.enabled = true;
+    hexo.config.provider = 'unknown';
+    const filterTypes = Object.keys(hexo.extend.filter.list());
 
-    registerPlugin({ log: { debug } } as never);
+    registerPlugin(hexo);
 
-    expect(debug).toHaveBeenCalledExactlyOnceWith('[hexo-post-map] loaded');
+    expect(Object.keys(hexo.extend.filter.list())).toEqual(filterTypes);
+    expect(hexo.extend.tag.env.hasExtension('post_map')).toBe(false);
   });
 });
 
