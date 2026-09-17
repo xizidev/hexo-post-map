@@ -1,0 +1,23 @@
+name: Feature request / 功能建议
+description: Describe a user problem and the expected outcome.
+title: '[Feature]: '
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem / 使用场景
+      description: What are you trying to accomplish, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior / 期望行为
+      description: Include authoring or configuration examples with placeholder data if helpful.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and compatibility
+      description: Workarounds tried, and whether this changes existing posts or site configuration.

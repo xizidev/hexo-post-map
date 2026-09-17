@@ -4,6 +4,28 @@
   "description": "Geotagged post maps and a clustered map index for Hexo",
   "license": "MIT",
   "main": "dist/index.cjs",
+  "exports": {
+    ".": "./dist/index.cjs",
+    "./package.json": "./package.json"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xizidev/hexo-post-map.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xizidev/hexo-post-map/issues"
+  },
+  "homepage": "https://github.com/xizidev/hexo-post-map#readme",
+  "author": "xizidev",
+  "keywords": [
+    "hexo",
+    "hexo-plugin",
+    "map",
+    "amap",
+    "geotag",
+    "travel",
+    "marker-cluster"
+  ],
   "files": [
     "dist",
     "README.md",
