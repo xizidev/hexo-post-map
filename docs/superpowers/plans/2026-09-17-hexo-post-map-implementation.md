@@ -188,7 +188,7 @@ Configure `scripts/build.mjs` to remove only `dist/`, bundle `src/index.ts` to `
 
 Run: `npm run test:run -- test/package-smoke.test.ts && npm run typecheck && npm run build && npm pack --dry-run`
 
-Expected: all commands pass and the tarball listing contains `dist/index.cjs`, documentation, and the license only.
+Expected: all commands pass and the bootstrap tarball listing contains `package.json`, `dist/index.cjs`, and `LICENSE`. The manifest already reserves `README.md` and `README.zh-CN.md`; Task 10 creates and validates those documentation files before release packaging.
 
 - [ ] **Step 7: Commit the bootstrap**
 
