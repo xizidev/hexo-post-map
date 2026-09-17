@@ -122,6 +122,31 @@ describe('resolveConfig', () => {
     expectConfigError({ ...validConfig, overview: { layout: 'custom' } }, 'overview.layout');
   });
 
+  it('accepts AMap zoom boundaries and finite fractional zoom values', () => {
+    const boundaries = resolveConfig(
+      { ...validConfig, post: { default_zoom: 2 }, cluster: { max_zoom: 20 } },
+      {},
+    );
+    const fractional = resolveConfig(
+      { ...validConfig, post: { default_zoom: 11.5 }, cluster: { max_zoom: 19.5 } },
+      {},
+    );
+
+    expect(boundaries?.post.defaultZoom).toBe(2);
+    expect(boundaries?.cluster.maxZoom).toBe(20);
+    expect(fractional?.post.defaultZoom).toBe(11.5);
+    expect(fractional?.cluster.maxZoom).toBe(19.5);
+  });
+
+  it('accepts any positive finite cluster grid size', () => {
+    expect(
+      resolveConfig({ ...validConfig, cluster: { grid_size: 1024 } }, {})?.cluster.gridSize,
+    ).toBe(1024);
+    expect(
+      resolveConfig({ ...validConfig, cluster: { grid_size: 0.5 } }, {})?.cluster.gridSize,
+    ).toBe(0.5);
+  });
+
   it('rejects unsupported providers, unsafe service hosts, and invalid numeric bounds', () => {
     expectConfigError({ ...validConfig, provider: 'google' }, 'provider');
     expectConfigError(
@@ -131,9 +156,20 @@ describe('resolveConfig', () => {
       },
       'amap.security.service_host',
     );
-    expectConfigError({ ...validConfig, post: { default_zoom: 2 } }, 'post.default_zoom');
+    expectConfigError({ ...validConfig, post: { default_zoom: 1.999 } }, 'post.default_zoom');
+    expectConfigError({ ...validConfig, cluster: { max_zoom: 20.001 } }, 'cluster.max_zoom');
+    expectConfigError({ ...validConfig, post: { default_zoom: Number.NaN } }, 'post.default_zoom');
+    expectConfigError(
+      { ...validConfig, cluster: { max_zoom: Number.POSITIVE_INFINITY } },
+      'cluster.max_zoom',
+    );
     expectConfigError({ ...validConfig, cluster: { grid_size: 0 } }, 'cluster.grid_size');
-    expectConfigError({ ...validConfig, cluster: { max_zoom: 21 } }, 'cluster.max_zoom');
+    expectConfigError({ ...validConfig, cluster: { grid_size: -0.5 } }, 'cluster.grid_size');
+    expectConfigError({ ...validConfig, cluster: { grid_size: Number.NaN } }, 'cluster.grid_size');
+    expectConfigError(
+      { ...validConfig, cluster: { grid_size: Number.POSITIVE_INFINITY } },
+      'cluster.grid_size',
+    );
   });
 
   it('does not interpolate environment syntax in file values', () => {

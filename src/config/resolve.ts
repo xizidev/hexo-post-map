@@ -1,10 +1,8 @@
 import { DEFAULT_CONFIG } from './defaults';
 import type { ResolvedPluginConfig } from './types';
 
-const MIN_ZOOM = 3;
+const MIN_ZOOM = 2;
 const MAX_ZOOM = 20;
-const MIN_GRID_SIZE = 1;
-const MAX_GRID_SIZE = 256;
 const CSS_LENGTH_PATTERN =
   /^(?:0(?:\.0+)?|(?:\d+(?:\.\d+)?|\.\d+)(?:%|cap|ch|cm|em|ex|ic|in|lh|mm|pc|pt|px|Q|rcap|rch|rem|rex|ric|rlh|rrem|vh|vmax|vmin|vw))$/u;
 
@@ -81,7 +79,7 @@ function optionalEnum<T extends string>(
   return value as T;
 }
 
-function optionalBoundedInteger(
+function optionalBoundedFiniteNumber(
   value: unknown,
   fieldPath: string,
   fallback: number,
@@ -91,8 +89,22 @@ function optionalBoundedInteger(
   if (value === undefined) {
     return fallback;
   }
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < minimum || value > maximum) {
-    throw new ConfigValidationError(fieldPath, `must be an integer from ${minimum} to ${maximum}`);
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) {
+    throw new ConfigValidationError(
+      fieldPath,
+      `must be a finite number from ${minimum} to ${maximum}`,
+    );
+  }
+
+  return value;
+}
+
+function optionalPositiveFiniteNumber(value: unknown, fieldPath: string, fallback: number): number {
+  if (value === undefined) {
+    return fallback;
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new ConfigValidationError(fieldPath, 'must be a positive finite number');
   }
 
   return value;
@@ -295,7 +307,7 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv): ResolvedPlu
         DEFAULT_CONFIG.post.position,
       ),
       height: optionalHeight(post?.height),
-      defaultZoom: optionalBoundedInteger(
+      defaultZoom: optionalBoundedFiniteNumber(
         post?.default_zoom,
         'post.default_zoom',
         DEFAULT_CONFIG.post.defaultZoom,
@@ -319,14 +331,12 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv): ResolvedPlu
       ),
     },
     cluster: {
-      gridSize: optionalBoundedInteger(
+      gridSize: optionalPositiveFiniteNumber(
         cluster?.grid_size,
         'cluster.grid_size',
         DEFAULT_CONFIG.cluster.gridSize,
-        MIN_GRID_SIZE,
-        MAX_GRID_SIZE,
       ),
-      maxZoom: optionalBoundedInteger(
+      maxZoom: optionalBoundedFiniteNumber(
         cluster?.max_zoom,
         'cluster.max_zoom',
         DEFAULT_CONFIG.cluster.maxZoom,
