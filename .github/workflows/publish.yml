@@ -1,0 +1,95 @@
+name: Publish npm package
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - run: npm install --global npm@latest
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
+          assert.match(version, /^\d+\.\d+\.\d+$/u);
+          assert.notEqual(version, '0.0.0');
+          assert.equal(process.env.RELEASE_TAG, `v${version}`);
+          NODE
+      - run: npm ci
+      - run: npm run check
+      - run: npx playwright install --with-deps chromium
+      - name: Pack release artifact once
+        id: pack
+        run: |
+          npm pack --json --ignore-scripts --pack-destination "$RUNNER_TEMP" > "$RUNNER_TEMP/hpm-pack.json"
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { appendFileSync, readFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          import { basename, join } from 'node:path';
+          const packs = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'hpm-pack.json'), 'utf8'));
+          assert.equal(packs.length, 1);
+          const pack = packs[0];
+          assert.equal(basename(pack.filename), pack.filename);
+          assert.ok(pack.files.some(({ path }) => path === 'dist/index.cjs'));
+          assert.ok(pack.files.every(({ path }) => /^(dist\/|README(?:\.zh-CN)?\.md$|LICENSE$|package\.json$)/u.test(path)));
+          const tarball = join(process.env.RUNNER_TEMP, pack.filename);
+          const sha256 = createHash('sha256').update(readFileSync(tarball)).digest('hex');
+          appendFileSync(process.env.GITHUB_OUTPUT, `tarball=${tarball}\nsha256=${sha256}\n`);
+          NODE
+      - name: Test exact artifact in every Hexo/theme/root fixture
+        run: npm run test:integration
+        env:
+          HPM_PACKED_TARBALL: ${{ steps.pack.outputs.tarball }}
+      - name: Test exact artifact in Chromium
+        run: npm run test:e2e -- --trace=retain-on-failure
+        env:
+          HPM_PACKED_TARBALL: ${{ steps.pack.outputs.tarball }}
+      - name: Verify artifact is unchanged after testing
+        id: verify-artifact
+        env:
+          HPM_PACKED_TARBALL: ${{ steps.pack.outputs.tarball }}
+          HPM_PACKED_SHA256: ${{ steps.pack.outputs.sha256 }}
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          import { createHash } from 'node:crypto';
+          const actual = createHash('sha256').update(readFileSync(process.env.HPM_PACKED_TARBALL)).digest('hex');
+          assert.equal(actual, process.env.HPM_PACKED_SHA256);
+          NODE
+      - name: Publish the verified artifact with OIDC
+        run: npm publish "$HPM_PACKED_TARBALL" --access public --provenance --ignore-scripts
+        env:
+          HPM_PACKED_TARBALL: ${{ steps.pack.outputs.tarball }}
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: release-chromium-failure-traces
+          path: test-results/**/trace.zip
+          if-no-files-found: ignore
+          retention-days: 7

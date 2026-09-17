@@ -1,0 +1,39 @@
+name: Bug report / 问题反馈
+description: Report reproducible plugin behavior with sanitized examples.
+title: '[Bug]: '
+body:
+  - type: markdown
+    attributes:
+      value: 'For vulnerabilities, follow SECURITY.md. Never include real keys, security codes, private locations, or credential-bearing URLs. / 请勿附上真实凭据和敏感坐标。'
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Plugin, Node.js, npm, Hexo, theme, browser, and operating system.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Steps and sanitized post_map/Front Matter configuration; state root deployment or subdirectory deployment. Replace all credentials with placeholders.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Sanitized diagnostics
+      description: Relevant build errors or CSP violations. Redact secrets and query strings from provider URLs before posting.
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Before submitting
+      options:
+        - label: I checked the documentation and removed credentials and private location data.
+          required: true

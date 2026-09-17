@@ -1,0 +1,11 @@
+title: Packed plugin fixture
+url: https://example.test
+root: /
+permalink: posts/:title/
+timezone: UTC
+language: en
+theme: cactus-minimal
+highlight:
+  enable: false
+prismjs:
+  enable: false

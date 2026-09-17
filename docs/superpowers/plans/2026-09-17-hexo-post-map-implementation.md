@@ -6,7 +6,7 @@
 
 **Architecture:** Parse and validate provider-independent Front Matter during the Hexo build, inject server-rendered accessible fallbacks, generate a versioned overview data route, and hydrate only marked pages with framework-independent browser bundles. Keep AMap behind an internal adapter so the public Front Matter and site configuration contracts do not depend on its APIs.
 
-**Tech Stack:** TypeScript 7, Hexo 7/8 APIs, Zod 4, parse5 8, esbuild 0.28, Vitest 3.2, Playwright 1.63, ESLint 10, Prettier 3, GitHub Actions, Release Please, npm Trusted Publishing.
+**Tech Stack:** TypeScript 6, Hexo 7/8 APIs, Zod 4, parse5 8, esbuild 0.28, Vitest 3.2, Playwright 1.63, ESLint 10, Prettier 3, GitHub Actions, Release Please, npm Trusted Publishing.
 
 **Spec:** `docs/superpowers/specs/2026-09-17-hexo-post-map-design.md`
 
@@ -80,6 +80,7 @@ hexo-post-map/
 ### Task 1: Bootstrap a Reproducible Publishable Package
 
 **Files:**
+
 - Create: `package.json`
 - Create: `package-lock.json`
 - Create: `tsconfig.json`
@@ -94,6 +95,7 @@ hexo-post-map/
 - Create: `LICENSE`
 
 **Interfaces:**
+
 - Produces: CommonJS entry `dist/index.cjs` and browser asset directory `dist/assets/`.
 - Produces: `registerPlugin(hexo: Hexo): void`, used by every later Hexo integration task.
 - Consumes: no earlier task.
@@ -129,7 +131,7 @@ Use these exact compatibility declarations and scripts in `package.json`:
 }
 ```
 
-Add exact development dependencies compatible with Node 20: TypeScript `^7.0.2`, Vitest `^3.2.7`, Playwright `^1.63.0`, ESLint `^10.10.0`, `typescript-eslint` `^8.70.0`, Prettier `^3.9.7`, esbuild `^0.28.2`, Zod `^4.6.5`, parse5 `^8.0.1`, `@amap/amap-jsapi-loader` `^1.0.1`, `@types/node` `^22.20.3`, Happy DOM `^20.14.5`, YAML `^2.9.1`, and Hexo `^8.1.2` for types and local tests. Keep Hexo in `peerDependencies` as well.
+Add exact development dependencies compatible with Node 20: TypeScript `^6.0.3`, Vitest `^3.2.7`, Playwright `^1.63.0`, ESLint `^10.10.0`, `typescript-eslint` `^8.70.0`, Prettier `^3.9.7`, esbuild `^0.28.2`, Zod `^4.6.5`, parse5 `^8.0.1`, `@amap/amap-jsapi-loader` `^1.0.1`, `@types/node` `^22.20.3`, Happy DOM `^20.14.5`, YAML `^2.9.1`, and Hexo `^8.1.2` for types and local tests. Keep Hexo in `peerDependencies` as well.
 
 - [ ] **Step 2: Install dependencies and create the lockfile**
 
@@ -188,7 +190,7 @@ Configure `scripts/build.mjs` to remove only `dist/`, bundle `src/index.ts` to `
 
 Run: `npm run test:run -- test/package-smoke.test.ts && npm run typecheck && npm run build && npm pack --dry-run`
 
-Expected: all commands pass and the tarball listing contains `dist/index.cjs`, documentation, and the license only.
+Expected: all commands pass and the bootstrap tarball listing contains `package.json`, `dist/index.cjs`, and `LICENSE`. The manifest already reserves `README.md` and `README.zh-CN.md`; Task 10 creates and validates those documentation files before release packaging.
 
 - [ ] **Step 7: Commit the bootstrap**
 
@@ -202,6 +204,7 @@ git commit -m "chore: bootstrap hexo-post-map package"
 ### Task 2: Define and Validate the Front Matter Domain Model
 
 **Files:**
+
 - Create: `src/domain/types.ts`
 - Create: `src/domain/schema.ts`
 - Create: `src/domain/errors.ts`
@@ -210,6 +213,7 @@ git commit -m "chore: bootstrap hexo-post-map package"
 - Create: `test/domain/validation.test.ts`
 
 **Interfaces:**
+
 - Produces: `normalizePostMap(raw: unknown, sourcePath: string): NormalizedPostMap | null`.
 - Produces: `PostMapValidationError` with `sourcePath`, `fieldPath`, `value`, and `reason`.
 - Produces: `NormalizedPostMap`, `NormalizedPoint`, and `Coordinate` types.
@@ -321,12 +325,14 @@ git commit -m "feat: validate post map metadata"
 ### Task 3: Resolve Site Configuration and Credential Modes
 
 **Files:**
+
 - Create: `src/config/types.ts`
 - Create: `src/config/defaults.ts`
 - Create: `src/config/resolve.ts`
 - Create: `test/config/resolve.test.ts`
 
 **Interfaces:**
+
 - Produces: `resolveConfig(raw: unknown, env: NodeJS.ProcessEnv): ResolvedPluginConfig | null`.
 - Produces: `ConfigValidationError` whose messages never contain secret values.
 - Consumes: no Hexo global; registration passes `hexo.config.post_map` explicitly.
@@ -347,11 +353,17 @@ describe('resolveConfig', () => {
   it('applies public defaults and environment overrides', () => {
     const config = resolveConfig(
       { enabled: true, amap: { key: 'file-key', security: { security_js_code: 'file-code' } } },
-      { HEXO_POST_MAP_AMAP_KEY: 'env-key', HEXO_POST_MAP_AMAP_SERVICE_HOST: 'https://maps.example.test/' },
+      {
+        HEXO_POST_MAP_AMAP_KEY: 'env-key',
+        HEXO_POST_MAP_AMAP_SERVICE_HOST: 'https://maps.example.test/',
+      },
     );
     expect(config?.post).toMatchObject({ position: 'before', height: '220px', defaultZoom: 11 });
     expect(config?.overview).toMatchObject({ path: 'map/', layout: 'page' });
-    expect(config?.amap).toMatchObject({ key: 'env-key', serviceHost: 'https://maps.example.test/' });
+    expect(config?.amap).toMatchObject({
+      key: 'env-key',
+      serviceHost: 'https://maps.example.test/',
+    });
   });
 });
 ```
@@ -368,14 +380,28 @@ Expected: FAIL because the resolver is missing.
 // src/config/types.ts
 export interface ResolvedPluginConfig {
   readonly provider: 'amap';
-  readonly post: { readonly enabled: boolean; readonly position: 'before' | 'after' | 'manual'; readonly height: string; readonly defaultZoom: number };
-  readonly overview: { readonly enabled: boolean; readonly path: string; readonly title: string; readonly layout: 'page' | 'standalone' };
+  readonly post: {
+    readonly enabled: boolean;
+    readonly position: 'before' | 'after' | 'manual';
+    readonly height: string;
+    readonly defaultZoom: number;
+  };
+  readonly overview: {
+    readonly enabled: boolean;
+    readonly path: string;
+    readonly title: string;
+    readonly layout: 'page' | 'standalone';
+  };
   readonly cluster: { readonly gridSize: number; readonly maxZoom: number };
-  readonly amap: { readonly key: string; readonly serviceHost?: string; readonly securityJsCode?: string };
+  readonly amap: {
+    readonly key: string;
+    readonly serviceHost?: string;
+    readonly securityJsCode?: string;
+  };
 }
 ```
 
-Validate CSS height syntax, overview path traversal, cluster bounds, zoom bounds, provider equality, HTTPS `service_host`, and exactly one security mode. Read environment values first, then file values, then defaults. Never interpolate environment syntax inside YAML strings.
+Validate CSS height syntax, overview path traversal, positive finite `cluster.grid_size`, finite zoom values in AMap's default `[2, 20]` range, provider equality, HTTPS `service_host`, and exactly one security mode. Do not impose an undocumented upper bound on grid size or require integral zoom values. Read environment values first, then file values, then defaults. Never interpolate environment syntax inside YAML strings.
 
 - [ ] **Step 4: Add failure tests for missing key, zero/two security modes, unsafe path, and secret redaction**
 
@@ -397,6 +423,7 @@ git commit -m "feat: resolve plugin configuration"
 ### Task 4: Build Safe Presentation Primitives
 
 **Files:**
+
 - Create: `src/presentation/safe-html.ts`
 - Create: `src/presentation/serialize.ts`
 - Create: `src/presentation/image.ts`
@@ -405,6 +432,7 @@ git commit -m "feat: resolve plugin configuration"
 - Create: `test/presentation/image.test.ts`
 
 **Interfaces:**
+
 - Produces: `escapeHtml(value: string): string`.
 - Produces: `safeUrl(value: string, kind: 'post' | 'image'): string | null`.
 - Produces: `serializeForHtmlScript(value: unknown): string`.
@@ -424,7 +452,9 @@ it('escapes post-derived markup and rejects executable URLs', () => {
 });
 
 it('cannot terminate an application/json script', () => {
-  expect(serializeForHtmlScript({ name: '</script><script>alert(1)</script>' })).not.toContain('</script>');
+  expect(serializeForHtmlScript({ name: '</script><script>alert(1)</script>' })).not.toContain(
+    '</script>',
+  );
 });
 ```
 
@@ -458,16 +488,19 @@ git commit -m "feat: add safe map presentation helpers"
 ### Task 5: Integrate Post Filters, Manual Tags, and Selective Assets
 
 **Files:**
+
 - Create: `src/templates/detail.ts`
 - Create: `src/hexo/post-filter.ts`
 - Create: `src/hexo/tag.ts`
 - Create: `src/hexo/injector.ts`
 - Modify: `src/hexo/register.ts`
+- Modify: `test/package-smoke.test.ts`
 - Create: `test/hexo/post-filter.test.ts`
 - Create: `test/hexo/tag.test.ts`
 - Create: `test/hexo/injector.test.ts`
 
 **Interfaces:**
+
 - Produces: `renderDetailMap(model: DetailTemplateModel): string` with `data-hpm-detail` and an accessible fallback.
 - Produces: `createPostFilter(config): (post: HexoPostLike) => HexoPostLike`.
 - Produces: `injectMarkedAssets(html: string, root: string): string`.
@@ -499,8 +532,12 @@ The template must contain:
 ```html
 <section class="hpm-detail" data-hpm-detail aria-label="文章地点地图">
   <div class="hpm-detail__canvas" data-hpm-canvas></div>
-  <script type="application/json" data-hpm-data>{safe JSON}</script>
-  <ol class="hpm-place-list" data-hpm-fallback>{escaped place links}</ol>
+  <script type="application/json" data-hpm-data>
+    {safe JSON}
+  </script>
+  <ol class="hpm-place-list" data-hpm-fallback>
+    {escaped place links}
+  </ol>
   <div class="hpm-detail__status" data-hpm-status aria-live="polite"></div>
 </section>
 ```
@@ -522,7 +559,7 @@ Run: `npm run test:run -- test/hexo && npm run typecheck`
 Expected: PASS.
 
 ```bash
-git add src/templates/detail.ts src/hexo src/index.ts test/hexo
+git add src/templates/detail.ts src/hexo src/index.ts test/hexo test/package-smoke.test.ts
 git commit -m "feat: integrate post map rendering"
 ```
 
@@ -531,14 +568,17 @@ git commit -m "feat: integrate post map rendering"
 ### Task 6: Generate the Overview Page, Data Route, and Assets
 
 **Files:**
+
 - Create: `src/templates/overview.ts`
 - Create: `src/templates/standalone.ts`
 - Create: `src/hexo/generator.ts`
 - Modify: `src/hexo/register.ts`
+- Modify: `scripts/build.mjs`
 - Create: `src/browser/styles/placeholder.svg`
 - Create: `test/hexo/generator.test.ts`
 
 **Interfaces:**
+
 - Produces: `createOverviewRoutes(locals, config, hexo): HexoRoute[]`.
 - Produces: versioned `{ version: 1, posts: OverviewPost[] }` JSON.
 - Produces routes below `hexo-post-map/assets/` for bundled JS, CSS, and the placeholder.
@@ -588,6 +628,8 @@ The themed route supplies `layout: ['page']`, `type: 'post-map-overview'`, and r
 
 Return read streams or buffers from `dist/assets/` under `hexo-post-map/assets/`. Register the generator only when the resolved plugin configuration is enabled.
 
+At this stage, update `scripts/build.mjs` to copy `src/browser/styles/placeholder.svg` to `dist/assets/placeholder.svg`. Task 7 remains responsible for producing the JavaScript and CSS browser bundles.
+
 - [ ] **Step 6: Run tests and commit**
 
 Run: `npm run test:run -- test/hexo/generator.test.ts && npm run typecheck`
@@ -604,18 +646,22 @@ git commit -m "feat: generate clustered map index routes"
 ### Task 7: Implement the Browser Provider Loader and Detail Map
 
 **Files:**
+
 - Create: `src/browser/providers/types.ts`
 - Create: `src/browser/providers/amap.ts`
 - Create: `src/browser/shared/config.ts`
 - Create: `src/browser/shared/dom.ts`
 - Create: `src/browser/shared/provider-loader.ts`
 - Create: `src/browser/detail/index.ts`
+- Create: `src/browser/overview/index.ts`
 - Create: `src/browser/styles/index.css`
 - Modify: `scripts/build.mjs`
+- Modify: `test/package-smoke.test.ts`
 - Create: `test/browser/provider-loader.test.ts`
 - Create: `test/browser/detail.test.ts`
 
 **Interfaces:**
+
 - Produces: `loadProvider(config: BrowserProviderConfig): Promise<MapProvider>` with one cached promise per page.
 - Produces: `MapProvider.mountDetail(container, model): Promise<MapHandle>`.
 - Consumes: normalized JSON emitted by `renderDetailMap`.
@@ -644,7 +690,9 @@ Expected: FAIL because browser modules are absent.
 - [ ] **Step 3: Define the internal provider interface**
 
 ```ts
-export interface MapHandle { destroy(): void }
+export interface MapHandle {
+  destroy(): void;
+}
 
 export interface MapProvider {
   mountDetail(container: HTMLElement, model: DetailMapModel): Promise<MapHandle>;
@@ -666,6 +714,8 @@ Use IntersectionObserver with a 300px root margin. Keep fallback visible until s
 
 Configure esbuild entries to emit `dist/assets/post-map.js`, `dist/assets/overview-map.js`, and `dist/assets/style.css` as minified production assets with sourcemaps excluded from the published package.
 
+For this task, `src/browser/overview/index.ts` is a side-effect-free placeholder entry that leaves the server-rendered overview fallback intact. Task 8 modifies this same entry to add clustering and panels; do not mount a partial provider or hide fallback here.
+
 Run: `npm run test:run -- test/browser && npm run build`
 
 Expected: PASS and all three assets exist.
@@ -673,7 +723,7 @@ Expected: PASS and all three assets exist.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/browser scripts/build.mjs test/browser
+git add src/browser scripts/build.mjs test/browser test/package-smoke.test.ts
 git commit -m "feat: render lazy post maps with AMap"
 ```
 
@@ -682,16 +732,20 @@ git commit -m "feat: render lazy post maps with AMap"
 ### Task 8: Implement Automatic Overview Clustering and Article Panels
 
 **Files:**
+
 - Create: `src/browser/overview/cluster-decision.ts`
 - Create: `src/browser/overview/panel.ts`
-- Create: `src/browser/overview/index.ts`
+- Modify: `src/browser/overview/index.ts`
 - Modify: `src/browser/providers/types.ts`
 - Modify: `src/browser/providers/amap.ts`
 - Modify: `src/browser/styles/index.css`
+- Modify: `test/hexo/generator.test.ts`
+- Modify: `test/package-smoke.test.ts`
 - Create: `test/browser/cluster-decision.test.ts`
 - Create: `test/browser/overview.test.ts`
 
 **Interfaces:**
+
 - Produces: `decideClusterAction(input): { type: 'zoom'; bounds: Bounds } | { type: 'list'; posts: OverviewPost[] }`.
 - Produces: `renderPostPanel(posts, viewport): PanelHandle`.
 - Extends: `OverviewMapOptions` with callbacks for a single post and terminal overlapping group.
@@ -747,6 +801,7 @@ git commit -m "feat: add automatic post map clustering"
 ### Task 9: Verify Packed-Artifact, Hexo-Version, Theme, and Browser Compatibility
 
 **Files:**
+
 - Create: `fixtures/sites/base/_config.yml`
 - Create: `fixtures/sites/base/source/_posts/{plain,single,multi,route,overlap}.md`
 - Create: `fixtures/themes/cactus-minimal/layout/{layout,post,page}.ejs`
@@ -757,9 +812,12 @@ git commit -m "feat: add automatic post map clustering"
 - Create: `e2e/detail-map.spec.ts`
 - Create: `e2e/overview-map.spec.ts`
 - Create: `e2e/amap-smoke.spec.ts`
+- Modify: `src/hexo/register.ts`
+- Modify: `test/hexo/tag.test.ts`
 - Modify: `package.json`
 
 **Interfaces:**
+
 - Produces: `npm run test:integration` and `npm run test:e2e` release gates.
 - Consumes: the actual `npm pack` tarball and all generated routes/assets.
 
@@ -778,6 +836,8 @@ The runner must:
 5. run `hexo generate` with dummy build-time AMap values;
 6. assert exit status and return the public directory path;
 7. delete only the validated temporary directory in a `finally` block.
+
+Include an enabled-invalid configuration case. Hexo catches exceptions thrown while loading a plugin script, so `registerPlugin` must preserve any `ConfigValidationError` and register a minimal `before_generate` filter that rethrows it during the build lifecycle. This makes `hexo generate` exit nonzero with redacted field diagnostics. Disabled configuration must still register no hooks at all.
 
 - [ ] **Step 3: Add generated-output assertions**
 
@@ -804,7 +864,7 @@ Expected: PASS across fixture themes with no real AMap request.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add fixtures test/integration e2e playwright.config.ts package.json package-lock.json
+git add fixtures test/integration e2e playwright.config.ts src/hexo/register.ts test/hexo/tag.test.ts package.json package-lock.json
 git commit -m "test: verify packaged plugin compatibility"
 ```
 
@@ -813,6 +873,7 @@ git commit -m "test: verify packaged plugin compatibility"
 ### Task 10: Document the Public Contract and Repository Policy
 
 **Files:**
+
 - Create: `README.md`
 - Create: `README.zh-CN.md`
 - Create: `docs/configuration.md`
@@ -828,6 +889,7 @@ git commit -m "test: verify packaged plugin compatibility"
 - Create: `test/docs/examples.test.ts`
 
 **Interfaces:**
+
 - Produces: tested installation, configuration, authoring, CSP, privacy, troubleshooting, and contribution documentation.
 - Consumes: the final public config and Front Matter schemas from Tasks 2 and 3.
 
@@ -865,6 +927,7 @@ git commit -m "docs: document public plugin contract"
 ### Task 11: Add CI, Release Automation, and npm Publication Gates
 
 **Files:**
+
 - Create: `.github/workflows/ci.yml`
 - Create: `.github/workflows/release-please.yml`
 - Create: `.github/workflows/publish.yml`
@@ -875,6 +938,7 @@ git commit -m "docs: document public plugin contract"
 - Create: `test/workflows/workflows.test.ts`
 
 **Interfaces:**
+
 - Produces: required CI, version PRs, GitHub Releases, and OIDC npm publication.
 - Consumes: `npm run check`, `npm run test:integration`, `npm run test:e2e`, and the packed-artifact tests.
 
@@ -916,9 +980,11 @@ git commit -m "ci: add release and trusted publishing gates"
 ### Task 12: Dogfood the Packed Plugin in the Existing Cactus Blog
 
 **Files:**
+
 - Create: `test/integration/real-blog-smoke.mjs`
 
 **Interfaces:**
+
 - Produces: verified installation and rendering from a temporary copy of the user's actual Cactus site.
 - Consumes: the packed tarball from the plugin repository; does not consume plugin source through a symlink.
 
@@ -977,9 +1043,11 @@ Do not modify, commit, or push the real blog repository in this task. Permanent 
 ### Task 13: Final Verification and Prerelease Readiness Review
 
 **Files:**
+
 - Modify only files required to correct failures found by this task.
 
 **Interfaces:**
+
 - Produces: evidence that the repository satisfies every acceptance criterion in the design specification.
 - Consumes: all prior tasks.
 
