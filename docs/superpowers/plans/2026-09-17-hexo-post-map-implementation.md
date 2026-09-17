@@ -656,6 +656,7 @@ git commit -m "feat: generate clustered map index routes"
 - Create: `src/browser/overview/index.ts`
 - Create: `src/browser/styles/index.css`
 - Modify: `scripts/build.mjs`
+- Modify: `test/package-smoke.test.ts`
 - Create: `test/browser/provider-loader.test.ts`
 - Create: `test/browser/detail.test.ts`
 
@@ -722,7 +723,7 @@ Expected: PASS and all three assets exist.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/browser scripts/build.mjs test/browser
+git add src/browser scripts/build.mjs test/browser test/package-smoke.test.ts
 git commit -m "feat: render lazy post maps with AMap"
 ```
 
