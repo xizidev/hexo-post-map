@@ -12,6 +12,11 @@ npm run test:integration -- --hexo=7.1.1 --theme=next --root=/blog/
 
 Each invocation packs once, creates a fresh temporary directory, installs the tarball
 with npm lifecycle scripts disabled, and removes only that directory in `finally`.
+SIGINT/SIGTERM handlers are installed before setup. Cancellation stops the active
+child process group, waits for it to close (with bounded force-kill escalation),
+prevents subsequent commands, then performs one cleanup. Exit status is 130/143.
+The preview server uses the same cancellation path. Controlled subprocess tests
+verify install/generate cancellation without signaling the test runner itself.
 The site has a deliberately failing postinstall sentinel. The lockfile must show a
 tarball dependency, never a source link. Every cell checks no-op, invalid post and
 configuration failures, safe diagnostics, and enabled generated output. Fixture
@@ -30,3 +35,7 @@ route coordinates, activation, fallback, cluster decisions, navigation and focus
 `HEXO_POST_MAP_AMAP_KEY` and `HEXO_POST_MAP_AMAP_SECURITY_JS_CODE` are all set.
 Provider initialization failure is a non-blocking generic warning; no traces or
 credential-bearing network diagnostics are saved. Do not add this project to required CI.
+Navigation and initialization share the downgrade boundary, with explicit 5 s and
+7 s budgets inside the 30 s test timeout. Required deterministic tests simulate
+navigation rejection and initialization timeout and verify one redacted warning
+and annotation per failure.
