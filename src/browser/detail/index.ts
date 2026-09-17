@@ -65,6 +65,10 @@ export function hydrateDetail(
   const onKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape') interact(false);
   };
+  const onPageHide = (event: PageTransitionEvent) => {
+    // BFCache freezes this controller and its SDK ownership for the next pageshow.
+    if (!event.persisted) destroy();
+  };
   function destroy() {
     if (disposed) return;
     disposed = true;
@@ -74,13 +78,13 @@ export function hydrateDetail(
     handle?.destroy();
     activate.removeEventListener('click', onActivate);
     root.removeEventListener('keydown', onKey);
-    window.removeEventListener('pagehide', destroy);
+    window.removeEventListener('pagehide', onPageHide);
     activate.remove();
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
   }
   let config: ReturnType<typeof readDetailConfig>;
-  window.addEventListener('pagehide', destroy, { once: true });
+  window.addEventListener('pagehide', onPageHide);
   try {
     config = readDetailConfig(root);
     if (!canvas) throw new Error('Missing map canvas');

@@ -25,6 +25,12 @@ const b: OverviewPost = { ...a, title: 'B', url: '/blog/b/', date: '2026-01-01T0
 const flush = async () => {
   for (let i = 0; i < 16; i++) await Promise.resolve();
 };
+function pageTransition(type: 'pagehide' | 'pageshow', persisted: boolean) {
+  const event = new PageTransitionEvent(type, { persisted });
+  // happy-dom aliases PageTransitionEvent to Event and omits the persisted property.
+  Object.defineProperty(event, 'persisted', { value: persisted });
+  window.dispatchEvent(event);
+}
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((yes) => {
@@ -458,6 +464,68 @@ describe('article panels', () => {
 });
 
 describe('overview hydration', () => {
+  it('keeps one usable map and panel across repeated BFCache restores, then destroys on ordinary pagehide', async () => {
+    const { root, load, fetcher, handle, mountOverview } = setup();
+    await flush();
+    const origin = document.createElement('button');
+    root.querySelector('[data-hpm-canvas]')!.append(origin);
+    for (let visit = 0; visit < 2; visit++) {
+      root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
+      mountOverview.mock.calls[0]![1].onPostSelect(a, origin);
+      expect(root.querySelectorAll('.hpm-panel')).toHaveLength(1);
+      pageTransition('pagehide', true);
+      pageTransition('pageshow', true);
+      pageTransition('pageshow', true);
+      await flush();
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+      expect(root.querySelectorAll('[data-hpm-show-list]')).toHaveLength(1);
+      expect(root.dataset.hpmActive).toBe('true');
+      expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+      root
+        .querySelector('.hpm-panel')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(root.querySelectorAll('.hpm-panel')).toHaveLength(0);
+      expect(document.activeElement).toBe(origin);
+      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(root.dataset.hpmActive).toBe('false');
+      expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
+    }
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(mountOverview).toHaveBeenCalledTimes(1);
+    expect(handle.destroy).not.toHaveBeenCalled();
+    pageTransition('pagehide', false);
+    pageTransition('pageshow', false);
+    expect(handle.destroy).toHaveBeenCalledTimes(1);
+    expect(
+      root.querySelectorAll('[data-hpm-activate], [data-hpm-show-list], .hpm-panel'),
+    ).toHaveLength(0);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+  it('allows pending overview data to finish after BFCache restore with one request owner', async () => {
+    const root = fixture();
+    const response = deferred<Response>();
+    let signal: AbortSignal | null | undefined;
+    const fetcher = vi.fn<typeof fetch>((_url, init) => {
+      signal = init?.signal;
+      return response.promise;
+    });
+    const mountOverview = vi.fn<MapProvider['mountOverview']>(async () => ({
+      destroy: vi.fn(),
+      setInteractive: vi.fn(),
+    }));
+    hydrateOverview(root, async () => ({ mountOverview, mountDetail: vi.fn() }), fetcher);
+    pageTransition('pagehide', true);
+    pageTransition('pageshow', true);
+    expect(signal?.aborted).toBe(false);
+    response.resolve(new Response(JSON.stringify({ version: 1, posts: [a] })));
+    await flush();
+    expect(root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.disabled).toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(mountOverview).toHaveBeenCalledTimes(1);
+  });
   it.each([2, 2.5, 18.5, 20])('accepts the server-supported finite maxZoom %s', async (maxZoom) => {
     const root = fixture();
     const data = root.querySelector('[data-hpm-data]')!;

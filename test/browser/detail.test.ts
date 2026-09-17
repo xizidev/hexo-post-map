@@ -30,12 +30,74 @@ function deferred<T>() {
 const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 };
+function pageTransition(type: 'pagehide' | 'pageshow', persisted: boolean) {
+  const event = new PageTransitionEvent(type, { persisted });
+  // happy-dom aliases PageTransitionEvent to Event and omits the persisted property.
+  Object.defineProperty(event, 'persisted', { value: persisted });
+  window.dispatchEvent(event);
+}
 afterEach(() => {
+  pageTransition('pagehide', false);
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
 });
 
 describe('detail hydration', () => {
+  it('keeps one usable map across repeated BFCache restores and destroys it on ordinary pagehide', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = fixture();
+    const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
+    const mountDetail = vi.fn<MapProvider['mountDetail']>(async () => handle);
+    const load = vi.fn(async () => ({ mountDetail, mountOverview: vi.fn() }));
+    hydrateDetail(root, load);
+    await flush();
+    for (let visit = 0; visit < 2; visit++) {
+      pageTransition('pagehide', true);
+      pageTransition('pageshow', true);
+      pageTransition('pageshow', true);
+      await flush();
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+      expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+      root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
+      expect(root.dataset.hpmActive).toBe('true');
+      expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
+      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      expect(root.dataset.hpmActive).toBe('false');
+      expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
+    }
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(mountDetail).toHaveBeenCalledTimes(1);
+    expect(handle.destroy).not.toHaveBeenCalled();
+    pageTransition('pagehide', false);
+    pageTransition('pageshow', false);
+    expect(handle.destroy).toHaveBeenCalledTimes(1);
+    expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+  it('allows a pending map to finish after BFCache restore without aborting its owner', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = fixture();
+    const pending = deferred<MapHandle>();
+    let signal: AbortSignal | undefined;
+    hydrateDetail(root, async () => ({
+      mountDetail: (_container, model) => {
+        signal = model.signal;
+        return pending.promise;
+      },
+      mountOverview: vi.fn(),
+    }));
+    await flush();
+    pageTransition('pagehide', true);
+    pageTransition('pageshow', true);
+    expect(signal?.aborted).toBe(false);
+    const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
+    pending.resolve(handle);
+    await flush();
+    expect(root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.disabled).toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+    expect(handle.destroy).not.toHaveBeenCalled();
+  });
   it('releases failed configuration registration on pagehide before explicit rebuild', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const root = fixture();

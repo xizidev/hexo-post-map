@@ -110,6 +110,10 @@ export function hydrateOverview(
   const onKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape') interact(false);
   };
+  const onPageHide = (event: PageTransitionEvent) => {
+    // BFCache freezes this controller and its SDK ownership for the next pageshow.
+    if (!event.persisted) destroy();
+  };
   const onList = () => {
     const visible = showList.getAttribute('aria-expanded') !== 'true';
     showFallback(root, visible);
@@ -127,13 +131,13 @@ export function hydrateOverview(
     activate.removeEventListener('click', onActivate);
     showList.removeEventListener('click', onList);
     root.removeEventListener('keydown', onKey);
-    window.removeEventListener('pagehide', destroy);
+    window.removeEventListener('pagehide', onPageHide);
     activate.remove();
     showList.remove();
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
   }
-  window.addEventListener('pagehide', destroy, { once: true });
+  window.addEventListener('pagehide', onPageHide);
   let config: OverviewConfig;
   try {
     config = JSON.parse(root.querySelector('[data-hpm-data]')?.textContent ?? '') as OverviewConfig;
