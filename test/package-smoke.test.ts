@@ -80,9 +80,15 @@ describe('package build', () => {
       );
       expect(routes).toHaveLength(4);
       for (const route of routes) {
-        const chunks: Buffer[] = [];
-        for await (const chunk of route.data()) chunks.push(Buffer.from(chunk));
-        expect(Buffer.concat(chunks).length).toBeGreaterThan(0);
+        let previous: Buffer | undefined;
+        for (let read = 0; read < 2; read++) {
+          const chunks: Buffer[] = [];
+          for await (const chunk of route.data()) chunks.push(Buffer.from(chunk));
+          const content = Buffer.concat(chunks);
+          expect(content.length).toBeGreaterThan(0);
+          if (previous) expect(content).toEqual(previous);
+          previous = content;
+        }
       }
     } finally {
       await hexo.exit();

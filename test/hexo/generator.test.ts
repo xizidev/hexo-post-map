@@ -1,6 +1,3 @@
-import { execFile } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
-import { promisify } from 'node:util';
 import Hexo from 'hexo';
 import type { SiteLocals } from 'hexo/dist/types';
 import registerHelpers from 'hexo/dist/plugins/helper';
@@ -340,32 +337,13 @@ describe('overview generation', () => {
       'hexo-post-map/assets/placeholder.svg',
     ]);
   });
-  it('serves namespaced bundled assets through reusable stream factories', async () => {
-    await promisify(execFile)(process.execPath, ['scripts/build.mjs']);
+  it('registers namespaced asset routes with fresh data functions', () => {
     const routes = generate();
     for (const file of ['post-map.js', 'overview-map.js', 'style.css', 'placeholder.svg']) {
       expect(typeof routes.find((r) => r.path === `hexo-post-map/assets/${file}`)!.data).toBe(
         'function',
       );
     }
-    // Exercise stream resolution from the published CommonJS entry, whose directory owns assets/.
-    const { stdout } = await promisify(execFile)(process.execPath, [
-      '-e',
-      `
-      const Hexo = require('hexo');
-      global.hexo = new Hexo('/tmp/hpm-generator-bundle');
-      hexo.config.post_map = ${JSON.stringify({ ...rawConfig, overview: { enabled: false } })};
-      require('./dist/index.cjs');
-      (async () => {
-        const routes = await hexo.extend.generator.get('post-map')(hexo.locals.toObject());
-        const route = routes.find(r => r.path === 'hexo-post-map/assets/placeholder.svg');
-        for (let i = 0; i < 2; i++) {
-          for await (const chunk of route.data()) process.stdout.write(chunk);
-        }
-      })().catch(error => { console.error(error); process.exitCode = 1; });
-    `,
-    ]);
-    expect(stdout).toBe((await readFile('src/browser/styles/placeholder.svg', 'utf8')).repeat(2));
   });
 });
 

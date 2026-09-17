@@ -1,6 +1,15 @@
 import AMapLoader from '@amap/amap-jsapi-loader';
 import type { Coordinate } from '../../domain/types';
-import type { BrowserProviderConfig, DetailMapModel, MapHandle, MapProvider } from './types';
+import type { OverviewPost } from '../../templates/overview';
+import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
+import { createPostImage } from '../overview/panel';
+import type {
+  BrowserProviderConfig,
+  DetailMapModel,
+  MapHandle,
+  MapProvider,
+  OverviewMapOptions,
+} from './types';
 
 // Local structural types deliberately keep all vendor API details inside the adapter.
 interface AMapMap {
@@ -10,6 +19,8 @@ interface AMapMap {
   setFitView(overlays: unknown[], immediately: boolean, padding: number[]): void;
   setStatus(status: Record<string, boolean>): void;
   destroy(): void;
+  getZoom(): number;
+  setBounds(bounds: unknown, immediately: boolean, padding: number[]): void;
 }
 interface AMapInfoWindow {
   open(map: AMapMap, coordinate: Coordinate): void;
@@ -20,6 +31,33 @@ interface AMapApi {
   Marker: new (options: Record<string, unknown>) => unknown;
   Polyline: new (options: Record<string, unknown>) => unknown;
   InfoWindow: new (options: Record<string, unknown>) => AMapInfoWindow;
+  Bounds: new (southwest: Coordinate, northeast: Coordinate) => unknown;
+  Pixel: new (x: number, y: number) => unknown;
+  plugin(names: string[], ready: () => void): void;
+  MarkerCluster?: new (
+    map: AMapMap,
+    data: ClusterPoint[],
+    options: ClusterOptions,
+  ) => { setMap(map: AMapMap | null): void };
+}
+interface ClusterPoint {
+  lnglat: number[];
+  post: OverviewPost;
+}
+interface ClusterMarker {
+  setContent(content: HTMLElement): void;
+  setOffset(offset: unknown): void;
+}
+interface ClusterContext {
+  marker: ClusterMarker;
+  clusterData?: ClusterPoint[];
+  data?: ClusterPoint[];
+}
+interface ClusterOptions {
+  gridSize: number;
+  maxZoom: number;
+  renderClusterMarker(context: ClusterContext): void;
+  renderMarker(context: ClusterContext): void;
 }
 const loader = AMapLoader as unknown as {
   load(options: { key: string; version: string }): Promise<AMapApi>;
@@ -301,12 +339,216 @@ function mountDetail(
   });
 }
 
+function loadCluster(api: AMapApi, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error('Map initialization cancelled'));
+      return;
+    }
+    if (api.MarkerCluster) {
+      resolve();
+      return;
+    }
+    let settled = false;
+    const timer = window.setTimeout(
+      () => finish(new Error('Map plugin loading timed out')),
+      LOAD_TIMEOUT_MS,
+    );
+    const cancel = () => finish(new Error('Map initialization cancelled'));
+    function finish(error?: Error) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
+      if (error) reject(error);
+      else resolve();
+    }
+    signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      api.plugin(['AMap.MarkerCluster'], () => {
+        if (settled) return;
+        finish(api.MarkerCluster ? undefined : new Error('Map plugin unavailable'));
+      });
+    } catch {
+      finish(new Error('Map plugin unavailable'));
+    }
+  });
+}
+
+function postBounds(posts: readonly OverviewPost[]): Bounds {
+  return posts.reduce(
+    (bounds, post) => ({
+      west: Math.min(bounds.west, post.location.longitude),
+      east: Math.max(bounds.east, post.location.longitude),
+      south: Math.min(bounds.south, post.location.latitude),
+      north: Math.max(bounds.north, post.location.latitude),
+    }),
+    { west: Infinity, east: -Infinity, south: Infinity, north: -Infinity },
+  );
+}
+
+async function mountOverview(
+  api: AMapApi,
+  container: HTMLElement,
+  options: OverviewMapOptions,
+): Promise<MapHandle> {
+  await loadCluster(api, options.signal);
+  if (options.signal?.aborted) throw new Error('Map initialization cancelled');
+  if (!options.posts.length) throw new Error('Missing overview posts');
+  return new Promise((resolve, reject) => {
+    const map = new api.Map(container, {
+      zoom: 4,
+      // Keep overlapping points clustered at the terminal level, including manual zooming.
+      zooms: [3, options.maxZoom],
+      ...interaction(false),
+      animateEnable: !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+    });
+    let destroyed = false;
+    let complete = false;
+    let active = false;
+    let cluster: { setMap(map: AMapMap | null): void } | undefined;
+    const buttons = new Set<HTMLButtonElement>();
+    const previousButtons = new WeakMap<ClusterMarker, HTMLButtonElement>();
+    const events = new AbortController();
+    const timer = window.setTimeout(fail, LOAD_TIMEOUT_MS);
+    function destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      clearTimeout(timer);
+      map.off('complete', ready);
+      map.off('error', fail);
+      options.signal?.removeEventListener('abort', cancel);
+      events.abort();
+      buttons.clear();
+      cluster?.setMap(null);
+      map.destroy();
+    }
+    function fail() {
+      if (destroyed) return;
+      destroy();
+      if (complete) options.onError?.();
+      else reject(new Error('Map initialization failed'));
+    }
+    function cancel() {
+      destroy();
+      if (!complete) reject(new Error('Map initialization cancelled'));
+    }
+    function fit(bounds: Bounds) {
+      map.setBounds(
+        new api.Bounds([bounds.west, bounds.south], [bounds.east, bounds.north]),
+        true,
+        [48, 48, 48, 48],
+      );
+    }
+    function ready() {
+      if (destroyed || complete) return;
+      try {
+        fit(postBounds(options.posts));
+        clearTimeout(timer);
+        complete = true;
+        resolve({
+          destroy,
+          setInteractive(enabled) {
+            if (destroyed) return;
+            try {
+              active = enabled;
+              map.setStatus(interaction(enabled));
+              buttons.forEach((button) => {
+                button.disabled = !enabled;
+                button.tabIndex = enabled ? 0 : -1;
+              });
+            } catch {
+              fail();
+            }
+          },
+        });
+      } catch {
+        fail();
+      }
+    }
+    function render(context: ClusterContext, grouped: boolean) {
+      if (destroyed) return;
+      try {
+        const posts = (grouped ? context.clusterData : context.data)?.map((point) => point.post);
+        if (!posts?.length) throw new Error('Missing cluster data');
+        const old = previousButtons.get(context.marker);
+        if (old) {
+          old.disabled = true;
+          buttons.delete(old);
+        }
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = grouped ? 'hpm-marker hpm-cluster' : 'hpm-image-marker';
+        button.disabled = !active;
+        button.tabIndex = active ? 0 : -1;
+        if (grouped) {
+          button.textContent = String(posts.length);
+          button.setAttribute('aria-label', `查看此处的 ${posts.length} 篇文章`);
+        } else {
+          button.setAttribute('aria-label', `预览文章：${posts[0]!.title}`);
+          button.append(createPostImage(posts[0]!, options.placeholderUrl));
+        }
+        button.addEventListener(
+          'click',
+          (event) => {
+            event.stopPropagation();
+            if (destroyed || !active || button.disabled) return;
+            try {
+              if (!grouped) {
+                options.onPostSelect(posts[0]!, button);
+                return;
+              }
+              const decision = decideClusterAction({
+                zoom: map.getZoom(),
+                maxZoom: options.maxZoom,
+                posts,
+                bounds: postBounds(posts),
+              });
+              if (decision.type === 'zoom') fit(decision.bounds);
+              else options.onGroupSelect(decision.posts, button);
+            } catch {
+              fail();
+            }
+          },
+          { signal: events.signal },
+        );
+        previousButtons.set(context.marker, button);
+        buttons.add(button);
+        context.marker.setContent(button);
+        context.marker.setOffset(new api.Pixel(grouped ? -24 : -48, grouped ? -24 : -36));
+      } catch {
+        fail();
+      }
+    }
+    map.on('complete', ready);
+    map.on('error', fail);
+    options.signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      cluster = new api.MarkerCluster!(
+        map,
+        options.posts.map((post) => ({
+          lnglat: [post.location.longitude, post.location.latitude],
+          post,
+        })),
+        {
+          gridSize: options.gridSize,
+          maxZoom: options.maxZoom,
+          renderClusterMarker: (context) => render(context, true),
+          renderMarker: (context) => render(context, false),
+        },
+      );
+      // A renderer can fail synchronously inside the vendor constructor.
+      if (destroyed) cluster.setMap(null);
+    } catch {
+      fail();
+    }
+  });
+}
+
 export async function createAMapProvider(config: BrowserProviderConfig): Promise<MapProvider> {
   const api = await loadApi(config);
   return {
     mountDetail: (container, model) => mountDetail(api, container, model),
-    mountOverview: async () => {
-      throw new Error('Overview maps are not implemented yet');
-    },
+    mountOverview: (container, options) => mountOverview(api, container, options),
   };
 }

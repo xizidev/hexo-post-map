@@ -1,4 +1,5 @@
 import type { NormalizedPostMap } from '../../domain/types';
+import type { OverviewPost } from '../../templates/overview';
 
 export interface BrowserProviderConfig {
   readonly provider: 'amap';
@@ -16,8 +17,16 @@ export interface DetailMapModel {
   readonly onError?: () => void;
 }
 
-/** Task 8 extends these options with clustering and selection callbacks. */
-export type OverviewMapOptions = Record<string, never>;
+export interface OverviewMapOptions {
+  readonly posts: readonly OverviewPost[];
+  readonly gridSize: number;
+  readonly maxZoom: number;
+  readonly placeholderUrl: string;
+  readonly signal?: AbortSignal;
+  readonly onError?: () => void;
+  readonly onPostSelect: (post: OverviewPost, origin: HTMLElement) => void;
+  readonly onGroupSelect: (posts: readonly OverviewPost[], origin: HTMLElement) => void;
+}
 
 export interface MapHandle {
   setInteractive(active: boolean): void;
