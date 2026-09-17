@@ -46,21 +46,27 @@ for (const mobile of [false, true]) {
   });
 }
 
-test('overview data failure preserves chronological fallback links', async ({ page }) => {
-  await page.route('**/map/posts.json', (route) => route.fulfill({ status: 503, body: '{}' }));
-  await page.goto('/blog/map/');
-  await expect(page.locator('[data-hpm-status]')).toContainText('无法加载');
-  const fallback = page.locator('[data-hpm-fallback]');
-  await expect(fallback).toBeVisible();
-  await expect(fallback.locator('time')).toHaveText([
-    '2025-05-01',
-    '2025-04-01',
-    '2025-03-01',
-    '2025-02-01',
-  ]);
-  await fallback.getByRole('link', { name: 'Mountain itinerary', exact: true }).click();
-  await expect(page).toHaveURL(/\/blog\/posts\/route\/$/);
-});
+for (const failure of ['http', 'network']) {
+  test(`overview data ${failure} failure preserves chronological fallback links`, async ({
+    page,
+  }) => {
+    await page.route('**/map/posts.json', (route) =>
+      failure === 'network' ? route.abort() : route.fulfill({ status: 503, body: '{}' }),
+    );
+    await page.goto('/blog/map/');
+    await expect(page.locator('[data-hpm-status]')).toContainText('无法加载');
+    const fallback = page.locator('[data-hpm-fallback]');
+    await expect(fallback).toBeVisible();
+    await expect(fallback.locator('time')).toHaveText([
+      '2025-05-01',
+      '2025-04-01',
+      '2025-03-01',
+      '2025-02-01',
+    ]);
+    await fallback.getByRole('link', { name: 'Mountain itinerary', exact: true }).click();
+    await expect(page).toHaveURL(/\/blog\/posts\/route\/$/);
+  });
+}
 
 test('failed representative images use the packaged placeholder and the list remains accessible', async ({
   page,
