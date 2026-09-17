@@ -411,13 +411,44 @@ async function mountOverview(
     let complete = false;
     let active = false;
     let cluster: { setMap(map: AMapMap | null): void } | undefined;
-    const buttons = new Set<HTMLButtonElement>();
-    const previousButtons = new WeakMap<
-      ClusterMarker,
-      { key: string; button: HTMLButtonElement }
-    >();
-    const currentButtons = new Map<string, HTMLButtonElement>();
-    const events = new AbortController();
+    interface RenderedButton {
+      marker: ClusterMarker;
+      key: string;
+      button: HTMLButtonElement;
+      onClick: (event: MouseEvent) => void;
+      awaitingMount: boolean;
+    }
+    const buttons = new Map<HTMLButtonElement, RenderedButton>();
+    const previousButtons = new WeakMap<ClusterMarker, RenderedButton>();
+    const currentButtons = new Map<string, RenderedButton>();
+    let sweepFrame: number | undefined;
+    function release(entry: RenderedButton) {
+      buttons.delete(entry.button);
+      if (previousButtons.get(entry.marker) === entry) previousButtons.delete(entry.marker);
+      if (currentButtons.get(entry.key) === entry) currentButtons.delete(entry.key);
+      entry.button.removeEventListener('click', entry.onClick);
+      entry.button.disabled = true;
+      entry.button.tabIndex = -1;
+    }
+    function scheduleSweep() {
+      if (destroyed || sweepFrame !== undefined) return;
+      sweepFrame = window.requestAnimationFrame(() => {
+        sweepFrame = undefined;
+        let pending = false;
+        for (const entry of buttons.values()) {
+          if (container.contains(entry.button)) entry.awaitingMount = false;
+          else if (entry.awaitingMount) {
+            // The SDK can attach content after its renderer returns, even on the next frame.
+            entry.awaitingMount = false;
+            pending = true;
+          } else release(entry);
+        }
+        if (pending) scheduleSweep();
+      });
+    }
+    // There is no public cluster redraw-complete event. Observe actual canvas membership instead.
+    const observer = new MutationObserver(scheduleSweep);
+    observer.observe(container, { childList: true, subtree: true });
     const timer = window.setTimeout(fail, LOAD_TIMEOUT_MS);
     function destroy() {
       if (destroyed) return;
@@ -426,9 +457,9 @@ async function mountOverview(
       map.off('complete', ready);
       map.off('error', fail);
       options.signal?.removeEventListener('abort', cancel);
-      events.abort();
-      buttons.clear();
-      currentButtons.clear();
+      observer.disconnect();
+      if (sweepFrame !== undefined) window.cancelAnimationFrame(sweepFrame);
+      buttons.forEach(release);
       cluster?.setMap(null);
       map.destroy();
     }
@@ -462,7 +493,7 @@ async function mountOverview(
             try {
               active = enabled;
               map.setStatus(interaction(enabled));
-              buttons.forEach((button) => {
+              buttons.forEach(({ button }) => {
                 button.disabled = !enabled;
                 button.tabIndex = enabled ? 0 : -1;
               });
@@ -487,18 +518,16 @@ async function mountOverview(
           .sort((a, b) => a - b)
           .join(',');
         const old = previousButtons.get(context.marker);
-        if (old) {
-          old.button.disabled = true;
-          buttons.delete(old.button);
-          if (currentButtons.get(old.key) === old.button) currentButtons.delete(old.key);
-        }
+        if (old) release(old);
+        const replacement = currentButtons.get(key);
+        if (replacement) release(replacement);
         const button = document.createElement('button');
         button.type = 'button';
         button.className = grouped ? 'hpm-marker hpm-cluster' : 'hpm-image-marker';
         button.disabled = !active;
         button.tabIndex = active ? 0 : -1;
         const resolveOrigin = () => {
-          const current = currentButtons.get(key);
+          const current = currentButtons.get(key)?.button;
           return !destroyed && current?.isConnected && !current.disabled ? current : undefined;
         };
         if (grouped) {
@@ -508,40 +537,39 @@ async function mountOverview(
           button.setAttribute('aria-label', `预览文章：${posts[0]!.title}`);
           button.append(createPostImage(posts[0]!, options.placeholderUrl));
         }
-        button.addEventListener(
-          'click',
-          (event) => {
-            event.stopPropagation();
-            if (destroyed || !active || button.disabled) return;
-            try {
-              if (!grouped) {
-                options.onPostSelect(posts[0]!, button, resolveOrigin);
-                return;
-              }
-              const zoom = map.getZoom();
-              const decision = decideClusterAction({
-                zoom,
-                maxZoom: options.maxZoom,
-                posts,
-                bounds: postBounds(posts),
-              });
-              if (decision.type === 'zoom') {
-                fit(decision.bounds);
-                // A large pixel grid may retain the same members after fitting; always advance.
-                if (!destroyed && map.getZoom() <= zoom)
-                  map.setZoom(Math.min(zoom + 1, options.maxZoom), true);
-              } else options.onGroupSelect(decision.posts, button, resolveOrigin);
-            } catch {
-              fail();
+        const onClick = (event: MouseEvent) => {
+          event.stopPropagation();
+          if (destroyed || !active || button.disabled) return;
+          try {
+            if (!grouped) {
+              options.onPostSelect(posts[0]!, button, resolveOrigin);
+              return;
             }
-          },
-          { signal: events.signal },
-        );
-        previousButtons.set(context.marker, { key, button });
-        currentButtons.set(key, button);
-        buttons.add(button);
+            const zoom = map.getZoom();
+            const decision = decideClusterAction({
+              zoom,
+              maxZoom: options.maxZoom,
+              posts,
+              bounds: postBounds(posts),
+            });
+            if (decision.type === 'zoom') {
+              fit(decision.bounds);
+              // A large pixel grid may retain the same members after fitting; always advance.
+              if (!destroyed && map.getZoom() <= zoom)
+                map.setZoom(Math.min(zoom + 1, options.maxZoom), true);
+            } else options.onGroupSelect(decision.posts, button, resolveOrigin);
+          } catch {
+            fail();
+          }
+        };
+        button.addEventListener('click', onClick);
+        const entry = { marker: context.marker, key, button, onClick, awaitingMount: true };
+        previousButtons.set(context.marker, entry);
+        currentButtons.set(key, entry);
+        buttons.set(button, entry);
         context.marker.setContent(button);
         context.marker.setOffset(new api.Pixel(grouped ? -24 : -48, grouped ? -24 : -36));
+        scheduleSweep();
       } catch {
         fail();
       }
