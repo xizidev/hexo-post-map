@@ -1,4 +1,4 @@
-import { access, mkdir, rm } from 'node:fs/promises';
+import { access, copyFile, mkdir, rm } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
@@ -11,6 +11,10 @@ const browserEntries = [];
 
 await rm(distDirectory, { force: true, recursive: true });
 await mkdir(resolve(distDirectory, 'assets'), { recursive: true });
+await copyFile(
+  resolve(projectRoot, 'src/browser/styles/placeholder.svg'),
+  resolve(distDirectory, 'assets/placeholder.svg'),
+);
 
 await build({
   bundle: true,

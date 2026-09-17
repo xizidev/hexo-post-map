@@ -1,5 +1,6 @@
 import type Hexo from 'hexo';
 import { resolveConfig } from '../config/resolve';
+import { createOverviewRoutes } from './generator';
 import { injectMarkedAssets } from './injector';
 import { createPostFilter } from './post-filter';
 import { postMapTag } from './tag';
@@ -12,5 +13,8 @@ export function registerPlugin(instance: Hexo): void {
   instance.extend.filter.register('after_post_render', createPostFilter(config));
   instance.extend.filter.register('after_render:html', (html: string) =>
     injectMarkedAssets(html, instance.config.root),
+  );
+  instance.extend.generator.register('post-map', (locals) =>
+    createOverviewRoutes(locals, config, instance),
   );
 }
