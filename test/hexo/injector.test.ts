@@ -1,7 +1,93 @@
 import { describe, expect, it } from 'vitest';
+import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import { injectMarkedAssets } from '../../src/hexo/injector';
 
+function parsedElements(node: DefaultTreeAdapterMap['node']): DefaultTreeAdapterMap['element'][] {
+  return [
+    ...('tagName' in node ? [node] : []),
+    ...('childNodes' in node ? node.childNodes.flatMap(parsedElements) : []),
+  ];
+}
+
+function injectedScripts(html: string) {
+  return parsedElements(parse(html)).filter(
+    (node) =>
+      node.namespaceURI === 'http://www.w3.org/1999/xhtml' &&
+      node.tagName === 'script' &&
+      node.attrs.some(
+        (attr) => attr.name === 'src' && attr.value === '/hexo-post-map/assets/post-map.js',
+      ) &&
+      !node.attrs.some((attr) => attr.name === 'type'),
+  );
+}
+
 describe('selective asset injection', () => {
+  it.each([
+    '<!-- unfinished',
+    '<textarea>unfinished',
+    '<title>unfinished',
+    '<style>unfinished',
+    '<script>unfinished',
+    '<xmp>unfinished',
+    '<iframe>unfinished',
+    '<noembed>unfinished',
+    '<noframes>unfinished',
+    '<plaintext>unfinished',
+    '<noscript>unfinished',
+    '<template>unfinished',
+    '<svg>unfinished',
+  ])('inserts executable scripts before an unclosed tail: %s', (tail) => {
+    const input = `<section data-hpm-detail></section>${tail}`;
+    const html = injectMarkedAssets(input, '/');
+    expect(injectedScripts(html)).toHaveLength(1);
+    expect(html.endsWith(tail)).toBe(true);
+    expect(injectMarkedAssets(html, '/')).toBe(html);
+  });
+  it.each(['application/json', 'importmap', 'speculationrules', 'text/plain'])(
+    'does not count a %s data block as an executable bundle',
+    (type) => {
+      const input = `<section data-hpm-detail></section><script type="${type}" src="/hexo-post-map/assets/post-map.js"></script>`;
+      const html = injectMarkedAssets(input, '/');
+      expect(injectedScripts(html)).toHaveLength(1);
+      expect(injectMarkedAssets(html, '/')).toBe(html);
+    },
+  );
+  it('does not count a foreign-namespace script as the HTML bundle', () => {
+    const html = injectMarkedAssets(
+      '<section data-hpm-detail></section><svg><script src="/hexo-post-map/assets/post-map.js"></script></svg>',
+      '/',
+    );
+    expect(injectedScripts(html)).toHaveLength(1);
+    expect(injectMarkedAssets(html, '/')).toBe(html);
+  });
+  it.each([
+    '',
+    'module',
+    ' MODULE ',
+    'text/javascript',
+    ' Text/JavaScript ',
+    'application/javascript',
+    'text/ecmascript',
+    'application/x-javascript',
+  ])('recognizes executable script type %j', (type) => {
+    const input = `<link rel="stylesheet" href="/hexo-post-map/assets/style.css"><section data-hpm-detail></section><script type="${type}" src="/hexo-post-map/assets/post-map.js"></script>`;
+    expect(injectMarkedAssets(input, '/')).toBe(input);
+  });
+  it.each([
+    '<link disabled rel="stylesheet" href="/hexo-post-map/assets/style.css">',
+    '<svg><link rel="stylesheet" href="/hexo-post-map/assets/style.css"></link></svg>',
+  ])('does not count an inactive stylesheet as loaded: %s', (link) => {
+    const html = injectMarkedAssets(`<section data-hpm-detail></section>${link}`, '/');
+    const styles = parsedElements(parse(html)).filter(
+      (node) =>
+        node.namespaceURI === 'http://www.w3.org/1999/xhtml' &&
+        node.tagName === 'link' &&
+        node.attrs.some((attr) => attr.name === 'rel' && attr.value === 'stylesheet') &&
+        !node.attrs.some((attr) => attr.name === 'disabled'),
+    );
+    expect(styles).toHaveLength(1);
+    expect(injectMarkedAssets(html, '/')).toBe(html);
+  });
   it.each([
     '<p>Ordinary</p>',
     '<!-- data-hpm-detail -->',
