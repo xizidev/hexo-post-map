@@ -232,6 +232,30 @@ describe('overview generation', () => {
       urls[0],
     );
   });
+  it.each(['/', '/blog/'])(
+    'preserves encoded query and fragment delimiters in absolute post and image paths at root %s',
+    (root) => {
+      const urls = [
+        `https://example.com${root}archives/question%3Fmark/`,
+        `https://example.com${root}images/hash%23name.jpg`,
+        `https://example.com${root}archives/mixed%3fpart%23end/?size=a%3Fb#view%23part`,
+      ];
+      const routes = generate(
+        urls.map((url) => post({ path: undefined, permalink: url, thumbnail: url })),
+        instance(root),
+      );
+      const posts = data(routes).posts;
+      expect(posts.map((p: { url: string }) => p.url)).toEqual(urls);
+      expect(posts.map((p: { image: string }) => p.image)).toEqual(urls);
+      const doc = document(routes);
+      expect(
+        Array.from(doc.querySelectorAll('[data-hpm-fallback] a'), (a) => a.getAttribute('href')),
+      ).toEqual(urls);
+      expect(Array.from(doc.querySelectorAll('img'), (img) => img.getAttribute('src'))).toEqual(
+        urls,
+      );
+    },
+  );
   it('tries safe content images after final URL validation rejects the thumbnail, then falls back to the placeholder', () => {
     const routes = generate(
       [

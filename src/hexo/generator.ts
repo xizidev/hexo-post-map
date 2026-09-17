@@ -38,7 +38,7 @@ interface OverviewLocals {
 /** Compare decoded segments, never confusing a sibling prefix or encoded separator with root. */
 function relativeToRoot(pathname: string, root: string): string | null {
   // Hexo's URL helper decodes percent escapes; keep ambiguous separators/escapes absolute.
-  if (/%(?:2f|5c|25)/iu.test(pathname)) return null;
+  if (/%(?:2f|5c|25|3f|23)/iu.test(pathname)) return null;
   const rootSegments = root.replace(/\/+$/u, '').split('/');
   const segments = pathname.split('/');
   try {
