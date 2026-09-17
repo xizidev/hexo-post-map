@@ -653,6 +653,7 @@ git commit -m "feat: generate clustered map index routes"
 - Create: `src/browser/shared/dom.ts`
 - Create: `src/browser/shared/provider-loader.ts`
 - Create: `src/browser/detail/index.ts`
+- Create: `src/browser/overview/index.ts`
 - Create: `src/browser/styles/index.css`
 - Modify: `scripts/build.mjs`
 - Create: `test/browser/provider-loader.test.ts`
@@ -712,6 +713,8 @@ Use IntersectionObserver with a 300px root margin. Keep fallback visible until s
 
 Configure esbuild entries to emit `dist/assets/post-map.js`, `dist/assets/overview-map.js`, and `dist/assets/style.css` as minified production assets with sourcemaps excluded from the published package.
 
+For this task, `src/browser/overview/index.ts` is a side-effect-free placeholder entry that leaves the server-rendered overview fallback intact. Task 8 modifies this same entry to add clustering and panels; do not mount a partial provider or hide fallback here.
+
 Run: `npm run test:run -- test/browser && npm run build`
 
 Expected: PASS and all three assets exist.
@@ -731,7 +734,7 @@ git commit -m "feat: render lazy post maps with AMap"
 
 - Create: `src/browser/overview/cluster-decision.ts`
 - Create: `src/browser/overview/panel.ts`
-- Create: `src/browser/overview/index.ts`
+- Modify: `src/browser/overview/index.ts`
 - Modify: `src/browser/providers/types.ts`
 - Modify: `src/browser/providers/amap.ts`
 - Modify: `src/browser/styles/index.css`
