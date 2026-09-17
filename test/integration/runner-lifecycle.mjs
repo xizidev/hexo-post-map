@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
-export async function withTemporaryWorkspace(work) {
+export async function withTemporaryWorkspace(work, { afterStop } = {}) {
   const active = new Set();
   let signal;
   let temporary;
@@ -107,9 +107,16 @@ export async function withTemporaryWorkspace(work) {
       const pending = [...active];
       pending.forEach(stop);
       await Promise.all(pending.map((record) => record.closed));
-      if (temporary) {
-        assert.ok(dirname(temporary) === tmpdir() && basename(temporary).startsWith('hpm-packed-'));
-        await rm(temporary, { recursive: true, force: true });
+      try {
+        // Audits run only once children have exited, even after cancellation.
+        await afterStop?.({ temporary });
+      } finally {
+        if (temporary) {
+          assert.ok(
+            dirname(temporary) === tmpdir() && basename(temporary).startsWith('hpm-packed-'),
+          );
+          await rm(temporary, { recursive: true, force: true });
+        }
       }
     } finally {
       process.removeListener('SIGINT', interrupt);

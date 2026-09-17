@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { cp, lstat, readFile, writeFile, readdir, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument, stringify } from 'yaml';
 import { withTemporaryWorkspace } from './runner-lifecycle.mjs';
@@ -23,6 +25,82 @@ const excluded = new Set([
   '.hexo',
   'db.json',
 ]);
+const execute = promisify(execFile);
+const auditExclusions = new Set([
+  '.git',
+  'node_modules',
+  '.superpowers',
+  '.codex',
+  '.agents',
+  '.worktrees',
+]);
+
+async function readOnlyGit(command, args, cwd) {
+  assert.equal(command, 'git');
+  assert.ok(
+    [
+      ['branch', '--show-current'],
+      ['rev-parse', 'HEAD'],
+      ['status', '--porcelain=v1', '--untracked-files=all'],
+      ['diff', '--check'],
+    ].some((allowed) => JSON.stringify(allowed) === JSON.stringify(args)),
+    'Only fixed read-only audit commands are allowed',
+  );
+  const { stdout, stderr } = await execute(
+    'git',
+    ['--no-optional-locks', '-c', 'core.fsmonitor=false', ...args],
+    {
+      cwd,
+      timeout: 10_000,
+      maxBuffer: 8 * 1024 * 1024,
+    },
+  );
+  return { code: 0, stdout, output: stdout + stderr };
+}
+
+export async function withAuditedWorkspace(directories, work) {
+  const baselines = [];
+  return withTemporaryWorkspace(
+    async (context) => {
+      for (const directory of directories) {
+        const baseline = await snapshot(readOnlyGit, directory);
+        baselines.push({ baseline, files: await credentialInventory(baseline.directory) });
+      }
+      return work(context);
+    },
+    {
+      afterStop: async () => {
+        const failures = [];
+        for (const { baseline, files } of baselines) {
+          const checks = await Promise.allSettled([
+            snapshot(readOnlyGit, baseline.directory).then((current) =>
+              assert.deepEqual(current, baseline, 'A real repository changed during smoke'),
+            ),
+            readOnlyGit('git', ['diff', '--check'], baseline.directory).then((result) =>
+              success(result, 'repository diff check'),
+            ),
+            credentialInventory(baseline.directory).then((current) => {
+              const credentialFiles = (inventory) =>
+                Object.fromEntries(
+                  Object.entries(inventory).filter(([, value]) => value.credential),
+                );
+              assert.deepEqual(
+                credentialFiles(current),
+                credentialFiles(files),
+                'Smoke credentials escaped into a repository',
+              );
+            }),
+          ]);
+          const failed = checks.filter((result) => result.status === 'rejected');
+          failures.push(...failed.map((result) => result.reason));
+          if (failed.length === 0) console.log(`PASS repository audit: ${baseline.directory}`);
+        }
+        if (failures.length === 1) throw failures[0];
+        if (failures.length) throw new AggregateError(failures, 'Repository audits failed');
+      },
+    },
+  );
+}
 
 function yamlObject(text) {
   const document = parseDocument(text, { uniqueKeys: true });
@@ -62,6 +140,23 @@ export async function configureCopy(site, root) {
   assert.ok(root === '/' || root === '/blog/');
   const configPath = join(site, '_config.yml');
   const config = yamlObject(await readFile(configPath, 'utf8'));
+  for (const [key, value] of Object.entries(config)) {
+    if (!key.endsWith('_dir')) continue;
+    assert.ok(
+      typeof value === 'string' &&
+        value.length > 0 &&
+        value.trim() === value &&
+        !isAbsolute(value) &&
+        !/[\\\u0000-\u001f\u007f]/u.test(value) &&
+        !/^[a-z]:/iu.test(value) &&
+        value.split('/').every((part) => part !== '.' && part !== '..' && part !== ''),
+      `Unsafe output directory: ${key}`,
+    );
+    const target = resolve(site, value);
+    assert.ok(target.startsWith(`${resolve(site)}${sep}`), `Unsafe output directory: ${key}`);
+  }
+  // Hexo clean removes this directory recursively. Never inherit its destination.
+  config.public_dir = 'public';
   config.url = `https://lifeifan.com${root}`;
   config.root = root;
   config.post_map = {
@@ -107,22 +202,24 @@ async function snapshot(run, directory) {
   };
 }
 
-async function credentialInventory(run, directory) {
-  const paths = success(
-    await run('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], directory),
-    'credential inventory',
-  )
-    .split('\0')
-    .filter(Boolean);
-  const matches = {};
-  for (const path of paths) {
-    const absolute = join(directory, path);
-    if (!(await lstat(absolute)).isFile()) continue;
-    const contents = await readFile(absolute, 'utf8');
-    if (contents.includes(smokeKey) || contents.includes(smokeCode))
-      matches[path] = createHash('sha256').update(contents).digest('hex');
+async function credentialInventory(directory) {
+  const files = {};
+  async function visit(current) {
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      if (auditExclusions.has(entry.name)) continue;
+      const absolute = join(current, entry.name);
+      if (entry.isDirectory()) await visit(absolute);
+      else if (entry.isFile()) {
+        const contents = await readFile(absolute);
+        files[relative(directory, absolute)] = {
+          hash: createHash('sha256').update(contents).digest('hex'),
+          credential: contents.includes(smokeKey) || contents.includes(smokeCode),
+        };
+      }
+    }
   }
-  return matches;
+  await visit(directory);
+  return files;
 }
 
 async function htmlFiles(directory) {
@@ -271,93 +368,70 @@ export async function runRealBlogSmoke(blog = defaultBlog) {
   const environment = { ...process.env, npm_config_ignore_scripts: 'true' };
   for (const key of Object.keys(environment))
     if (key.startsWith('HEXO_POST_MAP_')) delete environment[key];
-  await withTemporaryWorkspace(async ({ temporary, run: child }) => {
+  await withAuditedWorkspace([repository, blog], async ({ temporary, run: child }) => {
     const site = join(temporary, 'site');
     const run = (command, args, cwd, env = {}) =>
       child(command, args, cwd, { ...environment, ...env });
-    const baselines = await Promise.all([snapshot(run, repository), snapshot(run, blog)]);
-    // The committed implementation plan contains these non-secret fixture examples already.
-    // Preserve those exact files, and reject any newly introduced credential-bearing content.
-    const credentials = await Promise.all(
-      baselines.map((baseline) => credentialInventory(run, baseline.directory)),
-    );
-    try {
-      await copyBlog(blog, site);
-      success(await run('npm', ['run', 'build'], repository), 'plugin build');
-      const packed = JSON.parse(
-        success(
-          await run(
-            'npm',
-            ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
-            repository,
-          ),
-          'npm pack',
-        ),
-      )[0];
-      const tarball = resolve(temporary, packed.filename);
-      assert.equal(dirname(tarball), temporary);
-      const integrity = `sha512-${createHash('sha512')
-        .update(await readFile(tarball))
-        .digest('base64')}`;
+    await copyBlog(blog, site);
+    await configureCopy(site, '/');
+    success(await run('npm', ['run', 'build'], repository), 'plugin build');
+    const packed = JSON.parse(
       success(
         await run(
           'npm',
-          ['install', '--no-save', '--ignore-scripts', '--no-audit', '--no-fund', tarball],
-          site,
+          ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
+          repository,
         ),
-        'real blog tarball install',
-      );
-      const installedPath = join(site, 'node_modules/hexo-post-map');
-      assert.ok(!(await lstat(installedPath)).isSymbolicLink());
-      const lock = JSON.parse(
-        await readFile(join(site, 'node_modules/.package-lock.json'), 'utf8'),
-      );
-      assert.equal(lock.packages['node_modules/hexo-post-map'].integrity, integrity);
-      assert.ok(lock.packages['node_modules/hexo-post-map'].resolved.endsWith(packed.filename));
-      // Hexo discovers plugins from dependencies, even when npm installed them --no-save.
-      // Declare the already-installed tarball only in this disposable site's manifest.
-      const manifestPath = join(site, 'package.json');
-      const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-      manifest.dependencies = { ...manifest.dependencies, 'hexo-post-map': `file:${tarball}` };
-      await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
-      const installed = JSON.parse(
-        await readFile(join(site, 'node_modules/hexo/package.json'), 'utf8'),
-      );
-      for (const root of ['/', '/blog/']) {
-        await configureCopy(site, root);
-        for (const path of ['_config.yml', 'themes/cactus/_config.yml']) {
-          const contents = await readFile(join(site, path), 'utf8');
-          assert.ok(!contents.includes(smokeKey) && !contents.includes(smokeCode));
-        }
-        const smokeEnv = {
-          HEXO_POST_MAP_AMAP_KEY: smokeKey,
-          HEXO_POST_MAP_AMAP_SECURITY_JS_CODE: smokeCode,
-        };
-        success(await run('npm', ['run', 'clean'], site, smokeEnv), 'real blog clean');
-        success(await run('npm', ['run', 'build'], site, smokeEnv), 'real blog build');
-        const ordinary = await verifyGenerated(site, root);
-        success(
-          await run(process.execPath, [filename, '--browser', site, root], repository),
-          'real blog browser',
-        );
-        console.log(
-          `PASS real Cactus / Hexo ${installed.version} / ${root}: Shanghai detail, overview image navigation, ${ordinary} unmapped pages`,
-        );
+        'npm pack',
+      ),
+    )[0];
+    const tarball = resolve(temporary, packed.filename);
+    assert.equal(dirname(tarball), temporary);
+    const integrity = `sha512-${createHash('sha512')
+      .update(await readFile(tarball))
+      .digest('base64')}`;
+    success(
+      await run(
+        'npm',
+        ['install', '--no-save', '--ignore-scripts', '--no-audit', '--no-fund', tarball],
+        site,
+      ),
+      'real blog tarball install',
+    );
+    const installedPath = join(site, 'node_modules/hexo-post-map');
+    assert.ok(!(await lstat(installedPath)).isSymbolicLink());
+    const lock = JSON.parse(await readFile(join(site, 'node_modules/.package-lock.json'), 'utf8'));
+    assert.equal(lock.packages['node_modules/hexo-post-map'].integrity, integrity);
+    assert.ok(lock.packages['node_modules/hexo-post-map'].resolved.endsWith(packed.filename));
+    // Hexo discovers plugins from dependencies, even when npm installed them --no-save.
+    // Declare the already-installed tarball only in this disposable site's manifest.
+    const manifestPath = join(site, 'package.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    manifest.dependencies = { ...manifest.dependencies, 'hexo-post-map': `file:${tarball}` };
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+    const installed = JSON.parse(
+      await readFile(join(site, 'node_modules/hexo/package.json'), 'utf8'),
+    );
+    for (const root of ['/', '/blog/']) {
+      await configureCopy(site, root);
+      for (const path of ['_config.yml', 'themes/cactus/_config.yml']) {
+        const contents = await readFile(join(site, path), 'utf8');
+        assert.ok(!contents.includes(smokeKey) && !contents.includes(smokeCode));
       }
-    } finally {
-      for (const [index, baseline] of baselines.entries()) {
-        assert.deepEqual(
-          await snapshot(run, baseline.directory),
-          baseline,
-          'A real repository changed during smoke',
-        );
-        success(await run('git', ['diff', '--check'], baseline.directory), 'repository diff check');
-        assert.deepEqual(
-          await credentialInventory(run, baseline.directory),
-          credentials[index],
-          'Smoke credentials escaped into a repository',
-        );
-      }
+      const smokeEnv = {
+        HEXO_POST_MAP_AMAP_KEY: smokeKey,
+        HEXO_POST_MAP_AMAP_SECURITY_JS_CODE: smokeCode,
+      };
+      success(await run('npm', ['run', 'clean'], site, smokeEnv), 'real blog clean');
+      success(await run('npm', ['run', 'build'], site, smokeEnv), 'real blog build');
+      const ordinary = await verifyGenerated(site, root);
+      success(
+        await run(process.execPath, [filename, '--browser', site, root], repository),
+        'real blog browser',
+      );
+      console.log(
+        `PASS real Cactus / Hexo ${installed.version} / ${root}: Shanghai detail, overview image navigation, ${ordinary} unmapped pages`,
+      );
     }
   });
 }

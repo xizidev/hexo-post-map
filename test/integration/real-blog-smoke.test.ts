@@ -1,11 +1,23 @@
-import { mkdtemp, mkdir, readFile, writeFile, rm, access, symlink } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  readFile,
+  writeFile,
+  rm,
+  access,
+  symlink,
+  chmod,
+  realpath,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
+import { join, resolve, relative } from 'node:path';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { parse } from 'yaml';
 import { expect, it, vi } from 'vitest';
 
 const runner = resolve('test/integration/real-blog-smoke.mjs');
+const execute = promisify(execFile);
 const exists = (path: string) =>
   access(path).then(
     () => true,
@@ -58,6 +70,154 @@ it('copies only source inputs and patches YAML and front matter without changing
     await rm(source, { recursive: true, force: true });
   }
 });
+
+it.each(['absolute', 'parent', 'empty', 'dot', 'windows'])(
+  'rejects unsafe %s output paths before any cleanup can reach an external sentinel',
+  async (kind) => {
+    const source = await fixture();
+    const external = await mkdtemp(join(tmpdir(), 'hpm-output-sentinel-'));
+    await writeFile(join(external, 'keep'), 'must survive');
+    let workspace = '';
+    try {
+      const { withBlogCopy, configureCopy } = await import(runner);
+      await expect(
+        withBlogCopy(source, async ({ site }: { site: string }) => {
+          workspace = site;
+          const unsafe =
+            kind === 'absolute'
+              ? external
+              : kind === 'parent'
+                ? relative(site, external)
+                : kind === 'empty'
+                  ? ''
+                  : kind === 'windows'
+                    ? 'C:\\outside'
+                    : '.';
+          await writeFile(
+            join(site, '_config.yml'),
+            `url: https://lifeifan.com\npublic_dir: ${JSON.stringify(unsafe)}\n`,
+          );
+          await configureCopy(site, '/');
+          throw new Error('unsafe config reached cleanup');
+        }),
+      ).rejects.toThrow(/unsafe.*public_dir/i);
+      expect(await readFile(join(external, 'keep'), 'utf8')).toBe('must survive');
+      expect(await exists(workspace)).toBe(false);
+    } finally {
+      await rm(source, { recursive: true, force: true });
+      await rm(external, { recursive: true, force: true });
+    }
+  },
+);
+
+it.each(['new', 'existing'])(
+  'detects credentials written into a %s ignored log and still cleans the workspace',
+  async (kind) => {
+    const source = await fixture();
+    let workspace = '';
+    try {
+      await execute('git', ['init', '-q'], { cwd: source });
+      await writeFile(join(source, '.gitignore'), 'ignored.log\n');
+      await execute('git', ['add', '.'], { cwd: source });
+      await execute(
+        'git',
+        [
+          '-c',
+          'user.name=Smoke',
+          '-c',
+          'user.email=smoke@example.test',
+          'commit',
+          '-qm',
+          'fixture',
+        ],
+        { cwd: source },
+      );
+      if (kind === 'existing') await writeFile(join(source, 'ignored.log'), 'safe log');
+      const { withAuditedWorkspace } = await import(runner);
+      expect(typeof withAuditedWorkspace).toBe('function');
+      await expect(
+        withAuditedWorkspace([source], async ({ temporary }: { temporary: string }) => {
+          workspace = temporary;
+          await writeFile(join(source, 'ignored.log'), 'build-smoke-' + 'key');
+        }),
+      ).rejects.toThrow(/credentials escaped/i);
+      expect(await exists(workspace)).toBe(false);
+    } finally {
+      await rm(source, { recursive: true, force: true });
+    }
+  },
+);
+
+it.skipIf(process.platform === 'win32')(
+  'full runner SIGTERM completes repository audits before deleting its workspace',
+  async () => {
+    const source = await fixture();
+    const control = await mkdtemp(join(tmpdir(), 'hpm-full-cancel-'));
+    const bin = join(control, 'bin');
+    await mkdir(bin);
+    const npm = join(bin, 'npm');
+    await writeFile(join(source, 'smoke-marker'), control);
+    await writeFile(
+      npm,
+      `#!${process.execPath}
+const { writeFileSync, readFileSync, readdirSync } = require('node:fs');
+const { join } = require('node:path');
+const { tmpdir } = require('node:os');
+const temporary = readdirSync(tmpdir()).filter(name => name.startsWith('hpm-packed-')).map(name => join(tmpdir(), name)).find(path => {
+  try { return readFileSync(join(path, 'site/smoke-marker'), 'utf8') === ${JSON.stringify(control)}; } catch { return false; }
+});
+writeFileSync(${JSON.stringify(join(control, 'ready'))}, JSON.stringify({ temporary }));
+setInterval(() => {}, 1000);
+`,
+    );
+    await chmod(npm, 0o755);
+    await execute('git', ['init', '-q'], { cwd: source });
+    await execute('git', ['add', '.'], { cwd: source });
+    await execute(
+      'git',
+      ['-c', 'user.name=Smoke', '-c', 'user.email=smoke@example.test', 'commit', '-qm', 'fixture'],
+      { cwd: source },
+    );
+    const child = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { runRealBlogSmoke } from ${JSON.stringify(runner)}; await runRealBlogSmoke(${JSON.stringify(source)});`,
+      ],
+      { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, stdio: 'pipe' },
+    );
+    let output = '';
+    child.stdout.on('data', (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      output += chunk;
+    });
+    const closed = new Promise((done) =>
+      child.once('close', (code, signal) => done({ code, signal })),
+    );
+    try {
+      await vi.waitFor(async () => expect(await exists(join(control, 'ready'))).toBe(true), {
+        timeout: 10000,
+      });
+      child.kill('SIGTERM');
+      await expect(closed).resolves.toEqual({ code: 143, signal: null });
+      expect(output).toContain(`PASS repository audit: ${await realpath(source)}`);
+      expect(output).toContain('PASS repository audit: ' + resolve('.'));
+      expect(output).not.toContain('Smoke credentials escaped');
+      const { temporary } = JSON.parse(await readFile(join(control, 'ready'), 'utf8'));
+      expect(typeof temporary).toBe('string');
+      expect(await exists(temporary)).toBe(false);
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      await closed;
+      await rm(source, { recursive: true, force: true });
+      await rm(control, { recursive: true, force: true });
+    }
+  },
+  15000,
+);
 
 it('cleans the temporary copy after exceptions and rejects symlink write-through', async () => {
   const source = await fixture();
