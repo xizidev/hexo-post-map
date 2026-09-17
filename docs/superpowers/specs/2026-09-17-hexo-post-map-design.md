@@ -250,7 +250,7 @@ Responsibilities:
 - `config` owns defaults, environment overrides, and site-level validation.
 - `hexo/filter` inserts detail-map placeholders through `after_post_render`.
 - `hexo/generator` emits the overview page, `posts.json`, browser assets, and fallbacks.
-- `hexo/injector` injects CSS and JavaScript only into relevant pages.
+- `hexo/injector` uses the `after_render:html` filter to inject CSS and JavaScript only when the rendered HTML contains a plugin detail or overview marker. Hexo's page-type Injector API is not sufficiently granular because it cannot distinguish mapped posts from ordinary posts.
 - `hexo/tag` implements manual placement.
 - `providers` isolates AMap loading and rendering behind an internal boundary.
 - `browser` implements maps, clustering, cards, drawers, and error recovery without a UI framework.
@@ -262,7 +262,7 @@ The first public compatibility contracts are the Front Matter schema and `_confi
 The default path uses Hexo's standard APIs and does not edit theme files:
 
 - A post-render filter inserts the detail placeholder into `post.content`.
-- An injector adds scoped assets to matching pages.
+- A marker-aware `after_render:html` filter adds scoped assets only to HTML that contains a plugin detail or overview component.
 - A generator creates the overview route.
 - A tag plugin supports exact manual placement.
 
