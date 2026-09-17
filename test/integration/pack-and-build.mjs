@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { cp, readFile, rm, writeFile, stat, access } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { dirname, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, stringify } from 'yaml';
 import { withTemporaryWorkspace } from './runner-lifecycle.mjs';
@@ -43,23 +44,32 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
   }
   let server;
   try {
-    const pack = JSON.parse(
-      success(
-        await run(
-          'npm',
-          ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
-          repository,
+    let tarball;
+    if (process.env.HPM_PACKED_TARBALL) {
+      tarball = resolve(process.env.HPM_PACKED_TARBALL);
+      assert.ok((await stat(tarball)).isFile(), 'Explicit tarball must be a file');
+    } else {
+      const pack = JSON.parse(
+        success(
+          await run(
+            'npm',
+            ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
+            repository,
+          ),
+          'npm pack',
         ),
-        'npm pack',
-      ),
-    )[0];
-    assert.ok(pack.files.some((file) => file.path === 'dist/index.cjs'));
-    assert.ok(
-      pack.files.every((file) =>
-        /^(dist\/|README(?:\.zh-CN)?\.md$|LICENSE$|package\.json$)/u.test(file.path),
-      ),
-    );
-    const tarball = join(temporary, pack.filename);
+      )[0];
+      assert.ok(pack.files.some((file) => file.path === 'dist/index.cjs'));
+      assert.ok(
+        pack.files.every((file) =>
+          /^(dist\/|README(?:\.zh-CN)?\.md$|LICENSE$|package\.json$)/u.test(file.path),
+        ),
+      );
+      tarball = join(temporary, pack.filename);
+    }
+    const integrity = `sha512-${createHash('sha512')
+      .update(await readFile(tarball))
+      .digest('base64')}`;
     for (const version of versions)
       for (const theme of themes) {
         assert.ok(theme === 'cactus-minimal' || theme in themePackages, 'Unknown theme');
@@ -105,7 +115,8 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
         }
         const lock = JSON.parse(await readFile(join(site, 'package-lock.json'), 'utf8'));
         assert.equal(lock.packages['node_modules/hexo-post-map'].link, undefined);
-        assert.ok(lock.packages['node_modules/hexo-post-map'].resolved.endsWith(pack.filename));
+        assert.ok(lock.packages['node_modules/hexo-post-map'].resolved.endsWith(basename(tarball)));
+        assert.equal(lock.packages['node_modules/hexo-post-map'].integrity, integrity);
         if (theme === 'cactus-minimal')
           await cp(
             join(repository, 'fixtures/themes/cactus-minimal'),

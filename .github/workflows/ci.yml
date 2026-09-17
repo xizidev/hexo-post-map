@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Static checks and unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+
+  integration:
+    name: Node ${{ matrix.node }} / Hexo ${{ matrix.hexo }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+        hexo: ['7.1.1', '7.3.0', '8.1.2']
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run test:integration -- --hexo="$HEXO_VERSION"
+        env:
+          HEXO_VERSION: ${{ matrix.hexo }}
+
+  browser:
+    name: Chromium browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e -- --trace=retain-on-failure
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: chromium-failure-traces
+          path: test-results/**/trace.zip
+          if-no-files-found: ignore
+          retention-days: 7
