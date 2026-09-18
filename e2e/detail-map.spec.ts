@@ -43,7 +43,18 @@ test('detail stays unloaded offscreen and becomes interactive automatically near
 test('route draws ordered coordinates and silent numbered pins with accessible map names', async ({
   page,
 }) => {
+  await page.emulateMedia({ colorScheme: 'dark' });
   await page.goto('/blog/posts/route/');
+  expect(
+    await page.locator('[data-hpm-detail]').evaluate((element) => {
+      const style = getComputedStyle(element);
+      return {
+        route: style.getPropertyValue('--hpm-route-color').trim(),
+        text: style.getPropertyValue('--hpm-text').trim(),
+        muted: style.getPropertyValue('--hpm-muted').trim(),
+      };
+    }),
+  ).toEqual({ route: '#5eead4', text: '#e2e8f0', muted: '#94a3b8' });
   const pins = page.locator('.hpm-detail-marker');
   await expect(pins).toHaveText(['3', '1', '2']);
   await expect(pins.locator('.hpm-detail-marker__label')).toHaveText(['3', '1', '2']);

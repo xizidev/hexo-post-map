@@ -12,6 +12,9 @@ for (const mobile of [false, true]) {
     await expect(root).toHaveAttribute('data-hpm-active', 'true');
     expect(network.sdkRequests).toBe(1);
     const initialCluster = page.getByRole('button', { name: '查看此处的 4 篇文章' });
+    const initialClusterBounds = (await initialCluster.boundingBox())!;
+    expect(initialClusterBounds.width).toBeGreaterThanOrEqual(44);
+    expect(initialClusterBounds.height).toBeGreaterThanOrEqual(44);
     const clusterSurface = initialCluster.locator('.hpm-cluster__surface--small');
     await expect(clusterSurface).toHaveCount(1);
     expect(
@@ -76,6 +79,9 @@ for (const mobile of [false, true]) {
     expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].zoom)).toBe(5);
     await expect(panel.locator('[data-attack]')).toHaveCount(0);
     await expect(panel.getByRole('button', { name: '关闭文章面板' })).toBeFocused();
+    const closeBounds = (await panel.getByRole('button', { name: '关闭文章面板' }).boundingBox())!;
+    expect(closeBounds.width).toBeGreaterThanOrEqual(44);
+    expect(closeBounds.height).toBeGreaterThanOrEqual(44);
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
     await expect(overlap).toBeFocused();

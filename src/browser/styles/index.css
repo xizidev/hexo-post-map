@@ -5,6 +5,8 @@
   --hpm-accent-contrast: #ffffff;
   --hpm-surface: #f1f5f9;
   --hpm-text: #172033;
+  --hpm-muted: #64748b;
+  --hpm-route-color: #0f766e;
   position: relative;
   margin-block: 1rem;
   color: var(--hpm-text);
@@ -44,7 +46,7 @@
   width: 18px;
   height: 24px;
   place-items: center;
-  border: 2px solid white;
+  border: 2px solid var(--hpm-accent-contrast);
   border-radius: 12px 12px 12px 2px;
   background: var(--hpm-accent);
   box-shadow: 0 3px 9px rgb(15 23 42 / 30%);
@@ -74,8 +76,11 @@
   --hpm-panel-surface: rgb(255 255 255 / 88%);
   --hpm-panel-border: rgb(148 163 184 / 48%);
   --hpm-panel-shadow: 0 12px 36px rgb(15 23 42 / 20%);
+  --hpm-panel-radius: 18px;
+  --hpm-card-radius: 14px;
   --hpm-surface: #f1f5f9;
   --hpm-text: #172033;
+  --hpm-muted: #64748b;
   position: relative;
   color: var(--hpm-text);
 }
@@ -119,9 +124,9 @@
 .hpm-panel__close {
   min-height: 2.75rem;
   padding: 0.5rem 0.75rem;
-  border: 1px solid #64748b;
+  border: 1px solid var(--hpm-muted);
   border-radius: 0.35rem;
-  background: white;
+  background: var(--hpm-card-surface);
   color: var(--hpm-text, #172033);
   font: inherit;
   cursor: pointer;
@@ -155,7 +160,7 @@
   width: 72px;
   height: 54px;
   overflow: hidden;
-  border: 2px solid rgb(255 255 255 / 92%);
+  border: 2px solid var(--hpm-cluster-border);
   border-radius: 10px;
   background: var(--hpm-card-surface);
   box-shadow: 0 5px 16px rgb(15 23 42 / 26%);
@@ -179,7 +184,7 @@
   box-sizing: border-box;
   width: 8px;
   height: 8px;
-  border: 2px solid white;
+  border: 2px solid var(--hpm-accent-contrast);
   border-radius: 50%;
   background: var(--hpm-accent);
 }
@@ -245,8 +250,8 @@
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--hpm-panel-border);
-  border-radius: var(--hpm-panel-radius, 18px);
-  background: #fff;
+  border-radius: var(--hpm-panel-radius);
+  background: var(--hpm-card-surface);
   color: var(--hpm-text, #172033);
   box-shadow: var(--hpm-panel-shadow);
   font: 1rem/1.5 sans-serif;
@@ -309,7 +314,7 @@
   grid-template-columns: 88px minmax(0, 1fr);
   gap: 12px;
   padding: 8px;
-  border-radius: var(--hpm-card-radius, 14px);
+  border-radius: var(--hpm-card-radius);
   background: var(--hpm-card-surface);
   color: inherit;
   text-decoration: none;
@@ -339,6 +344,7 @@
 
 .hpm-post__date,
 .hpm-post__location {
+  color: var(--hpm-muted);
   font-size: 0.875rem;
 }
 
@@ -375,12 +381,69 @@
   text-decoration: underline;
 }
 
+.hpm-detail [data-hpm-canvas]:focus-visible,
+.hpm-overview [data-hpm-canvas]:focus-visible,
 .hpm-overview button:focus-visible,
 .hpm-overview a:focus-visible,
 .hpm-panel button:focus-visible,
 .hpm-panel a:focus-visible {
   outline: 3px solid var(--hpm-accent, #2563eb);
   outline-offset: 2px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .hpm-detail {
+    --hpm-accent: #60a5fa;
+    --hpm-accent-contrast: #0f172a;
+    --hpm-surface: #0f172a;
+    --hpm-text: #e2e8f0;
+    --hpm-muted: #94a3b8;
+    --hpm-route-color: #5eead4;
+  }
+
+  .hpm-overview {
+    --hpm-accent: #5eead4;
+    --hpm-accent-contrast: #ffffff;
+    --hpm-cluster-surface: rgb(15 118 110 / 96%);
+    --hpm-cluster-border: rgb(226 232 240 / 72%);
+    --hpm-panel-surface: rgb(15 23 42 / 90%);
+    --hpm-panel-border: rgb(148 163 184 / 58%);
+    --hpm-card-surface: #1e293b;
+    --hpm-panel-shadow: 0 12px 36px rgb(0 0 0 / 38%);
+    --hpm-surface: #0f172a;
+    --hpm-text: #e2e8f0;
+    --hpm-muted: #94a3b8;
+  }
+}
+
+@media (forced-colors: active) {
+  .hpm-detail,
+  .hpm-overview {
+    --hpm-accent: Highlight;
+    --hpm-accent-contrast: HighlightText;
+    --hpm-surface: Canvas;
+    --hpm-text: CanvasText;
+    --hpm-muted: GrayText;
+  }
+
+  .hpm-detail {
+    --hpm-route-color: CanvasText;
+  }
+
+  .hpm-overview {
+    --hpm-cluster-surface: Highlight;
+    --hpm-cluster-border: ButtonText;
+    --hpm-panel-surface: Canvas;
+    --hpm-panel-border: CanvasText;
+    --hpm-card-surface: Canvas;
+  }
+
+  .hpm-detail-marker,
+  .hpm-image-marker__card,
+  .hpm-cluster__surface,
+  .hpm-panel {
+    box-shadow: none;
+  }
 }
 
 @media (max-width: 600px) {
@@ -411,7 +474,7 @@
     width: 100%;
     max-height: 65vh;
     max-height: 65dvh;
-    border-radius: var(--hpm-panel-radius, 18px) var(--hpm-panel-radius, 18px) 0 0;
+    border-radius: var(--hpm-panel-radius) var(--hpm-panel-radius) 0 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }

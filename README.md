@@ -137,17 +137,38 @@ Use at most one tag per post. A tag also overrides automatic placement in `befor
 
 The card loads near the viewport and becomes interactive automatically. Routine loading and success messages stay hidden; when JavaScript, the provider, or map initialization fails, a concise error and the place links remain available. An SDK load timeout requires a **page reload** to retry.
 
+Detail locations use silent pins and never open provider popups. Route points are numbered, and `route` always remains a straight, schematic sequence rather than a navigable path.
+
 The overview chooses the first safe image in this order: `thumbnail`, an image in rendered article content, then the bundled placeholder. A chosen image that later fails to load is replaced with the placeholder. Only one representative image per article is used.
 
 ## Overview and repeated visits
 
 Open `/map/` after building and add it to your theme's navigation using that theme's own menu settings. The plugin does not modify menus or theme files. With Hexo `root: /blog/`, the page is `/blog/map/` and its data is `/blog/map/posts.json`; keep `overview.path: map/` relative, without repeating the root.
 
-The overview fits every article's representative point. Pixel-distance clustering merges nearby posts and separates them as you zoom. A cluster zooms toward its contents; if zoom cannot separate them, or the configured maximum zoom is reached, it opens a list (desktop panel or mobile drawer). Individual image markers open a preview; its image or title links to the article. A chronological article list remains usable without the map.
+The overview fits every article's representative point. Each thumbnail sits above a stem and visible coordinate dot, so the image does not hide its anchor. Pixel-distance clustering merges nearby posts and separates them as you zoom; its circle also grows across small, medium, and large count ranges. A cluster zooms toward its contents. If zoom cannot separate them, or the configured maximum zoom is reached, it opens the same bounded article panel used by thumbnail previews and the **All posts** control (a bottom drawer on mobile). Its image or title links to the article. A chronological article list remains usable without the map.
 
 `cluster.grid_size` is a finite positive pixel size; `cluster.max_zoom` must be between 2 and 20 inclusive. The default maximum is 18. Multiple articles may use exactly the same coordinates.
 
 The default overview requests the theme's `page` layout, with a standalone fallback when unavailable. Set `overview.layout: standalone` to use the independent page explicitly. Conventional themes rendering `post.content` are the target; SPA/PJAX themes may need their own navigation integration and are not automatically rehydrated. The compatibility fixtures cover Landscape, NexT, and a minimal Cactus-style layout; they do not guarantee every theme customization.
+
+### Theme customization
+
+Themes customize the map only through the variables below, scoped on `.hpm-detail`, `.hpm-overview`, or both. Do not depend on the plugin's internal component selectors. Safe light, dark, forced-colors, and reduced-motion defaults are built in.
+
+| Variable                | Purpose                                                 |
+| ----------------------- | ------------------------------------------------------- |
+| `--hpm-accent`          | Pins, anchors, links, and focus rings                   |
+| `--hpm-accent-contrast` | Text and borders placed on the accent                   |
+| `--hpm-cluster-surface` | Cluster circle surface                                  |
+| `--hpm-cluster-border`  | Cluster and thumbnail border                            |
+| `--hpm-panel-surface`   | Glass panel surface when backdrop filters are supported |
+| `--hpm-panel-border`    | Article panel border                                    |
+| `--hpm-card-surface`    | Article cards, controls, and the opaque panel fallback  |
+| `--hpm-text`            | Primary text                                            |
+| `--hpm-muted`           | Dates, locations, and subdued borders                   |
+| `--hpm-route-color`     | Straight detail route segments                          |
+| `--hpm-panel-radius`    | Desktop panel and mobile drawer radius                  |
+| `--hpm-card-radius`     | Article card radius                                     |
 
 ## Troubleshooting and privacy
 

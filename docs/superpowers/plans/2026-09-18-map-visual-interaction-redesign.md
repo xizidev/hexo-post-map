@@ -29,6 +29,7 @@
 The worktree already contains the reviewed automatic-loading change. Land it separately before the visual redesign so later reviews can distinguish behavior removal from new UI construction.
 
 **Files:**
+
 - Modify: `README.md`
 - Modify: `src/browser/detail/index.ts`
 - Modify: `src/browser/overview/index.ts`
@@ -42,6 +43,7 @@ The worktree already contains the reviewed automatic-loading change. Land it sep
 - Modify: `e2e/overview-map.spec.ts`
 
 **Interfaces:**
+
 - Consumes: existing `MapHandle.setInteractive(active: boolean)`.
 - Produces: detail and overview roots set `data-hpm-active="true"` automatically; no `[data-hpm-activate]` element exists.
 
@@ -78,12 +80,14 @@ git commit -m "feat: activate maps automatically"
 ### Task 2: Build provider-independent overview marker elements
 
 **Files:**
+
 - Create: `src/browser/overview/markers.ts`
 - Create: `test/browser/markers.test.ts`
 - Modify: `src/browser/overview/panel.ts`
 - Modify: `src/browser/overview/index.ts`
 
 **Interfaces:**
+
 - Consumes: `OverviewPost` and `safeUrl`.
 - Produces:
 
@@ -93,15 +97,9 @@ export interface MarkerElement {
   readonly offset: readonly [x: number, y: number];
 }
 
-export function createPostImage(
-  post: OverviewPost,
-  placeholderUrl: string,
-): HTMLImageElement;
+export function createPostImage(post: OverviewPost, placeholderUrl: string): HTMLImageElement;
 
-export function installImageFallback(
-  image: HTMLImageElement,
-  placeholderUrl: string,
-): () => void;
+export function installImageFallback(image: HTMLImageElement, placeholderUrl: string): () => void;
 
 export function createClusterMarker(count: number): MarkerElement;
 
@@ -225,6 +223,7 @@ git commit -m "refactor: isolate overview marker elements"
 ### Task 3: Wire compact clusters and anchored thumbnails into AMap
 
 **Files:**
+
 - Modify: `src/browser/providers/amap.ts`
 - Modify: `src/browser/styles/index.css`
 - Modify: `test/browser/overview.test.ts`
@@ -233,6 +232,7 @@ git commit -m "refactor: isolate overview marker elements"
 - Modify: `e2e/overview-map.spec.ts`
 
 **Interfaces:**
+
 - Consumes: `createClusterMarker(count)` and `createImageMarker(post, placeholderUrl, compact)` from Task 2.
 - Produces: AMap cluster renderers whose DOM and offsets come only from `MarkerElement`.
 
@@ -314,9 +314,18 @@ Replace the former fixed `.hpm-cluster` and `.hpm-image-marker` blocks with CSS 
   box-shadow: 0 4px 14px rgb(15 23 42 / 24%);
 }
 
-.hpm-cluster__surface--small { width: 34px; height: 34px; }
-.hpm-cluster__surface--medium { width: 38px; height: 38px; }
-.hpm-cluster__surface--large { width: 42px; height: 42px; }
+.hpm-cluster__surface--small {
+  width: 34px;
+  height: 34px;
+}
+.hpm-cluster__surface--medium {
+  width: 38px;
+  height: 38px;
+}
+.hpm-cluster__surface--large {
+  width: 42px;
+  height: 42px;
+}
 
 .hpm-image-marker {
   display: grid;
@@ -340,7 +349,11 @@ Replace the former fixed `.hpm-cluster` and `.hpm-image-marker` blocks with CSS 
   box-shadow: 0 5px 16px rgb(15 23 42 / 26%);
 }
 
-.hpm-image-marker__stem { width: 1px; height: 10px; background: var(--hpm-accent); }
+.hpm-image-marker__stem {
+  width: 1px;
+  height: 10px;
+  background: var(--hpm-accent);
+}
 .hpm-image-marker__dot {
   width: 8px;
   height: 8px;
@@ -385,6 +398,7 @@ git commit -m "feat: anchor compact overview markers"
 ### Task 4: Replace article lists with one bounded glass panel
 
 **Files:**
+
 - Modify: `src/browser/overview/panel.ts`
 - Modify: `src/browser/overview/index.ts`
 - Modify: `src/browser/styles/index.css`
@@ -394,6 +408,7 @@ git commit -m "feat: anchor compact overview markers"
 - Modify: `e2e/overview-map.spec.ts`
 
 **Interfaces:**
+
 - Consumes: `createPostImage`, `sortPosts`, and existing focus-origin resolvers.
 - Produces: unchanged `renderPostPanel(posts, viewport, options): PanelHandle`, extended options with `onClose?: () => void`, and an in-map `[data-hpm-show-list]` control labeled `全部文章 N`.
 
@@ -507,8 +522,15 @@ Use a sticky header and a scroll-only body:
   backdrop-filter: blur(18px) saturate(135%);
 }
 
-.hpm-panel__scroller { overflow: auto; overscroll-behavior: contain; }
-.hpm-panel__close { width: 44px; height: 44px; border-radius: 50%; }
+.hpm-panel__scroller {
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.hpm-panel__close {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+}
 .hpm-post__link {
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr);
@@ -554,6 +576,7 @@ git commit -m "feat: add bounded glass article panel"
 ### Task 5: Replace detail buttons and place popups with route pins
 
 **Files:**
+
 - Modify: `src/browser/detail/index.ts`
 - Modify: `src/browser/providers/amap.ts`
 - Modify: `src/browser/styles/index.css`
@@ -566,6 +589,7 @@ git commit -m "feat: add bounded glass article panel"
 - Modify: `e2e/bfcache.spec.ts`
 
 **Interfaces:**
+
 - Consumes: `DetailMapModel.map.points`, `DetailMapModel.map.route`, and `MapHandle`.
 - Produces: non-interactive `.hpm-detail-marker` elements and no `AMap.InfoWindow` dependency.
 
@@ -576,9 +600,9 @@ Change the provider tests to require:
 ```ts
 expect(markers.map((marker) => marker.options.content.tagName)).toEqual(['SPAN', 'SPAN', 'SPAN']);
 expect(markers.map((marker) => marker.options.content.textContent)).toEqual(['2', '1', '']);
-expect(markers.every((marker) => marker.options.content.getAttribute('aria-hidden') === 'true')).toBe(
-  true,
-);
+expect(
+  markers.every((marker) => marker.options.content.getAttribute('aria-hidden') === 'true'),
+).toBe(true);
 expect(markers.every((marker) => marker.options.content.querySelector('a') === null)).toBe(true);
 ```
 
@@ -612,11 +636,13 @@ if (sequence >= 0) {
   label.textContent = String(sequence + 1);
   marker.append(label);
 }
-markers.push(new api.Marker({
-  position: point.coordinate,
-  content: marker,
-  anchor: 'bottom-center',
-}));
+markers.push(
+  new api.Marker({
+    position: point.coordinate,
+    content: marker,
+    anchor: 'bottom-center',
+  }),
+);
 ```
 
 Keep `setFitView` and route path ordering unchanged. Read `--hpm-route-color` from the container with a `#0f766e` fallback and use a 3px route stroke.
@@ -646,12 +672,19 @@ The no-JavaScript/failure place list remains readable. A successful map hides th
   background: var(--hpm-accent);
   box-shadow: 0 3px 9px rgb(15 23 42 / 30%);
   color: var(--hpm-accent-contrast);
-  font: 700 11px/1 system-ui, sans-serif;
+  font:
+    700 11px/1 system-ui,
+    sans-serif;
   transform: rotate(-45deg);
 }
 
-.hpm-detail-marker--numbered { width: 24px; height: 30px; }
-.hpm-detail-marker__label { transform: rotate(45deg); }
+.hpm-detail-marker--numbered {
+  width: 24px;
+  height: 30px;
+}
+.hpm-detail-marker__label {
+  transform: rotate(45deg);
+}
 ```
 
 - [ ] **Step 6: Update fake SDK and E2E detail assertions**
@@ -687,6 +720,7 @@ git commit -m "feat: simplify detail maps to route pins"
 ### Task 6: Complete theme tokens, documentation, and regression coverage
 
 **Files:**
+
 - Modify: `src/browser/styles/index.css`
 - Modify: `README.md`
 - Modify: `README.zh-CN.md`
@@ -696,6 +730,7 @@ git commit -m "feat: simplify detail maps to route pins"
 - Modify: `e2e/detail-map.spec.ts`
 
 **Interfaces:**
+
 - Consumes: all components from Tasks 2-5.
 - Produces: documented CSS variables and complete cross-component acceptance coverage.
 
@@ -776,12 +811,14 @@ git commit -m "docs: document map visual customization"
 ### Task 7: Validate the packaged plugin in the real blog
 
 **Files:**
+
 - Modify only if required: `/Users/hif/blog/blog_source/themes/cactus/source/css/_partial/post-map.styl`
 - Verify: `/Users/hif/blog/blog_source/package.json`
 - Verify: `/Users/hif/blog/blog_source/_config.yml`
 - Verify: `/Users/hif/blog/blog_source/source/_posts/*.md`
 
 **Interfaces:**
+
 - Consumes: built `dist/` from the plugin and the blog's existing local AMap environment variables.
 - Produces: local screenshots and browser assertions; no deployment, bucket upload, npm publication, or committed credentials.
 
