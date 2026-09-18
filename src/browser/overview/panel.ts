@@ -1,36 +1,13 @@
 import { safeUrl } from '../../presentation/safe-html';
 import type { OverviewPost } from '../../templates/overview';
 import { sortPosts } from './cluster-decision';
+import { createPostImage } from './markers';
+
+export { createPostImage } from './markers';
 
 export interface PanelHandle {
   readonly element: HTMLElement;
   destroy(): void;
-}
-
-/** One replacement only: a missing placeholder cannot produce an error loop. */
-export function installImageFallback(image: HTMLImageElement, placeholderUrl: string): () => void {
-  const fallback = () => {
-    const safe = safeUrl(placeholderUrl, 'image');
-    if (safe) image.src = safe;
-  };
-  image.addEventListener('error', fallback, { once: true });
-  if (image.complete && image.naturalWidth === 0) {
-    image.removeEventListener('error', fallback);
-    fallback();
-  }
-  return () => image.removeEventListener('error', fallback);
-}
-
-export function createPostImage(post: OverviewPost, placeholderUrl: string): HTMLImageElement {
-  const image = document.createElement('img');
-  image.alt = post.title;
-  image.width = 96;
-  image.height = 72;
-  image.loading = 'lazy';
-  const source = safeUrl(post.image, 'image') ?? safeUrl(placeholderUrl, 'image');
-  if (source) image.src = source;
-  installImageFallback(image, placeholderUrl);
-  return image;
 }
 
 export function renderPostPanel(

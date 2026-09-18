@@ -8,7 +8,8 @@ import type {
 } from '../providers/types';
 import { setStatus, showFallback } from '../shared/dom';
 import { loadProvider } from '../shared/provider-loader';
-import { installImageFallback, renderPostPanel, type PanelHandle } from './panel';
+import { installImageFallback } from './markers';
+import { renderPostPanel, type PanelHandle } from './panel';
 
 interface OverviewController {
   destroy(): void;
