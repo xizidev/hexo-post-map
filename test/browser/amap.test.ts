@@ -174,7 +174,7 @@ describe('AMap adapter', () => {
     expect(line.options).toMatchObject({ strokeColor: '#0f766e', strokeWeight: 3 });
     instance.emit('complete');
     const handle = await pending;
-    expect(instance.setFitView).toHaveBeenCalledWith(markers, true, [24, 24, 24, 24]);
+    expect(instance.setFitView).toHaveBeenCalledWith(markers, true, [44, 24, 24, 24]);
     handle.destroy();
   });
 

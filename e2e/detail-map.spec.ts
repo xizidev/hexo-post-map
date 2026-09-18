@@ -58,6 +58,19 @@ test('route draws ordered coordinates and silent numbered pins with accessible m
   const pins = page.locator('.hpm-detail-marker');
   await expect(pins).toHaveText(['3', '1', '2']);
   await expect(pins.locator('.hpm-detail-marker__label')).toHaveText(['3', '1', '2']);
+  // Bottom-anchored rotated pins extend above their coordinates. The SDK fit
+  // must reserve their full painted height, plus a small gap, above the bounds.
+  expect(
+    await page.evaluate(() => {
+      const padding = Reflect.get(window, '__hpmSdk').maps[0].fitPadding;
+      const height = Math.max(
+        ...Array.from(document.querySelectorAll('.hpm-detail-marker')).map(
+          (pin) => pin.getBoundingClientRect().height,
+        ),
+      );
+      return padding[0] >= Math.ceil(height) + 4;
+    }),
+  ).toBe(true);
   await expect(page.locator('[data-hpm-canvas]')).toHaveAttribute(
     'aria-label',
     '文章地点地图：Summit GCJ-02、Visitor center GCJ-02、Cableway GCJ-02',

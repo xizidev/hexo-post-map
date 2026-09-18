@@ -13,7 +13,7 @@ export const fakeSdk = String.raw`
     off(event, callback) { this.events[event]?.delete(callback); }
     emit(event) { this.events[event]?.forEach(callback => callback()); }
     add(overlays) { overlays.forEach(overlay => { if (overlay.options.content) this.container.append(overlay.options.content); }); }
-    setFitView() { this.fitted = true; }
+    setFitView(overlays, immediately, padding) { this.fitted = true; this.fitPadding = padding; }
     setStatus(status) { this.status = status; }
     destroy() { this.container.replaceChildren(); }
     getZoom() { return this.zoom; }

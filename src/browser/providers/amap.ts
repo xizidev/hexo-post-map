@@ -248,7 +248,9 @@ function mountDetail(
     function ready() {
       if (destroyed || complete) return;
       try {
-        if (markers.length > 1) map.setFitView(markers, true, [24, 24, 24, 24]);
+        // AMap's avoid order is top, bottom, left, right. Bottom-anchored,
+        // rotated numbered pins paint roughly 39px above their coordinates.
+        if (markers.length > 1) map.setFitView(markers, true, [44, 24, 24, 24]);
         clearTimeout(timeout);
         complete = true;
         resolve({
