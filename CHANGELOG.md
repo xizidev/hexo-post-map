@@ -1,8 +1,8 @@
 # Changelog
 
-Changes will be recorded through release pull requests. No public release is recorded yet.
+Changes are recorded through release pull requests.
 
-## Unreleased
+## [0.1.0](https://github.com/xizidev/hexo-post-map/releases/tag/v0.1.0) (2026-09-18)
 
 - Strict opt-in site configuration and GCJ-02 post metadata.
 - Compact detail maps for single points, multiple points, and schematic itineraries.
