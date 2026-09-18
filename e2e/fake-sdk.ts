@@ -22,11 +22,6 @@ export const fakeSdk = String.raw`
   }
   class Marker { constructor(options) { this.options = options; } }
   class Polyline { constructor(options) { this.options = options; window.__hpmSdk.paths.push(options.path); } }
-  class InfoWindow {
-    constructor(options) { this.options = options; }
-    open(map) { map.container.append(this.options.content); }
-    close() { this.options.content.remove(); }
-  }
   class Bounds { constructor(southwest, northeast) { this.southwest = southwest; this.northeast = northeast; } }
   class Pixel { constructor(x, y) { this.x = x; this.y = y; } }
   class MarkerCluster {
@@ -51,7 +46,7 @@ export const fakeSdk = String.raw`
     }
     setMap(map) { if (!map) this.map.container.replaceChildren(); }
   }
-  window.AMap = { version: '2.0', Map, Marker, Polyline, InfoWindow, Bounds, Pixel, MarkerCluster, plugin(names, callback) { callback(); } };
+  window.AMap = { version: '2.0', Map, Marker, Polyline, Bounds, Pixel, MarkerCluster, plugin(names, callback) { callback(); } };
   window.___onAPILoaded();
 })();
 `;

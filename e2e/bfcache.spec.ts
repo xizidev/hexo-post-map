@@ -45,11 +45,15 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
     page.setDefaultNavigationTimeout(5_000);
     await page.goto(`${origin}/blog/posts/single/`);
     await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
-    const detailMarker = page.getByRole('button', { name: 'Shanghai GCJ-02', exact: true });
-    await expect(detailMarker).toBeEnabled();
+    const detailMarker = page.locator('.hpm-detail-marker');
+    await expect(detailMarker).toBeVisible();
+    await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true');
     const detailId = await page.evaluate(() => Reflect.get(window, '__hpmCache').id);
-    await detailMarker.click();
-    await expect(page.getByRole('link', { name: '在高德地图中查看' })).toBeVisible();
+    await page.locator('[data-hpm-canvas]').focus();
+    await page.keyboard.press('ArrowRight');
+    expect(
+      await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].status.keyboardEnable),
+    ).toBe(true);
 
     await page.goto(`${origin}/blog/map/`);
     await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
@@ -67,8 +71,17 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
         .toEqual({ id: detailId, restores: visit });
       expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.length)).toBe(1);
       await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
-      await page.getByRole('button', { name: 'Shanghai GCJ-02', exact: true }).click();
-      await expect(page.getByRole('link', { name: '在高德地图中查看' })).toBeVisible();
+      await expect(detailMarker).toBeVisible();
+      await expect(detailMarker).toBeEmpty();
+      const canvas = page.locator('[data-hpm-canvas]');
+      await canvas.focus();
+      await page.keyboard.press('ArrowRight');
+      await expect(canvas).toBeFocused();
+      expect(
+        await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].status.keyboardEnable),
+      ).toBe(true);
+      await expect(canvas.locator('button, a, .hpm-place-card')).toHaveCount(0);
+      await expect(page.locator('[data-hpm-fallback]')).toBeHidden();
 
       await page.goForward({ waitUntil: 'commit' });
       await expect(page).toHaveURL(`${origin}/blog/map/`);

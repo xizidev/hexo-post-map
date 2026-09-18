@@ -23,15 +23,10 @@ interface AMapMap {
   setZoom(zoom: number, immediately: boolean): void;
   setBounds(bounds: unknown, immediately: boolean, padding: number[]): void;
 }
-interface AMapInfoWindow {
-  open(map: AMapMap, coordinate: Coordinate): void;
-  close(): void;
-}
 interface AMapApi {
   Map: new (container: HTMLElement, options: Record<string, unknown>) => AMapMap;
   Marker: new (options: Record<string, unknown>) => unknown;
   Polyline: new (options: Record<string, unknown>) => unknown;
-  InfoWindow: new (options: Record<string, unknown>) => AMapInfoWindow;
   Bounds: new (southwest: Coordinate, northeast: Coordinate) => unknown;
   Pixel: new (x: number, y: number) => unknown;
   plugin(names: string[], ready: () => void): void;
@@ -78,7 +73,7 @@ function existingApi(value: unknown): value is AMapApi {
   return (
     typeof api.version === 'string' &&
     /^2(?:\.|$)/u.test(api.version) &&
-    ['Map', 'Marker', 'Polyline', 'InfoWindow'].every((name) => typeof api[name] === 'function')
+    ['Map', 'Marker', 'Polyline'].every((name) => typeof api[name] === 'function')
   );
 }
 
@@ -228,9 +223,6 @@ function mountDetail(
     });
     let complete = false;
     let destroyed = false;
-    let info: AMapInfoWindow | undefined;
-    const buttons: HTMLButtonElement[] = [];
-    const cleanups: (() => void)[] = [];
     const markers: unknown[] = [];
     const timeout = window.setTimeout(fail, LOAD_TIMEOUT_MS);
 
@@ -241,8 +233,6 @@ function mountDetail(
       map.off('complete', ready);
       map.off('error', fail);
       model.signal?.removeEventListener('abort', cancel);
-      cleanups.forEach((cleanup) => cleanup());
-      info?.close();
       map.destroy();
     }
     function fail() {
@@ -267,10 +257,6 @@ function mountDetail(
             if (destroyed) return;
             try {
               map.setStatus(interaction(active));
-              buttons.forEach((button) => {
-                button.tabIndex = active ? 0 : -1;
-                button.disabled = !active;
-              });
             } catch {
               fail();
             }
@@ -286,43 +272,19 @@ function mountDetail(
 
     try {
       for (const point of model.map.points) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'hpm-marker';
-        button.setAttribute('aria-label', point.name);
-        button.tabIndex = -1;
-        button.disabled = true;
-        const sequence = model.map.route.flatMap((item, index) =>
-          item.id === point.id ? [index + 1] : [],
-        );
-        button.textContent = sequence.length ? sequence.join(', ') : point.name;
-        const select = () => {
-          if (destroyed) return;
-          try {
-            info?.close();
-            const content = document.createElement('div');
-            content.className = 'hpm-place-card';
-            const name = document.createElement('p');
-            name.textContent = point.name;
-            const link = document.createElement('a');
-            const url = new URL('https://uri.amap.com/marker');
-            url.searchParams.set('position', point.coordinate.join(','));
-            url.searchParams.set('name', point.name);
-            url.searchParams.set('coordinate', 'gaode');
-            link.href = url.href;
-            link.textContent = '在高德地图中查看';
-            content.append(name, link);
-            info = new api.InfoWindow({ content });
-            info.open(map, point.coordinate);
-          } catch {
-            fail();
-          }
-        };
-        button.addEventListener('click', select);
-        cleanups.push(() => button.removeEventListener('click', select));
-        buttons.push(button);
+        const marker = document.createElement('span');
+        marker.className = 'hpm-detail-marker';
+        marker.setAttribute('aria-hidden', 'true');
+        const sequence = model.map.route.findIndex((item) => item.id === point.id);
+        if (sequence >= 0) {
+          marker.classList.add('hpm-detail-marker--numbered');
+          const label = document.createElement('span');
+          label.className = 'hpm-detail-marker__label';
+          label.textContent = String(sequence + 1);
+          marker.append(label);
+        }
         markers.push(
-          new api.Marker({ position: point.coordinate, content: button, anchor: 'bottom-center' }),
+          new api.Marker({ position: point.coordinate, content: marker, anchor: 'bottom-center' }),
         );
       }
       const overlays = [...markers];
@@ -330,8 +292,9 @@ function mountDetail(
         overlays.push(
           new api.Polyline({
             path: model.map.route.map((point) => point.coordinate),
-            strokeColor: '#2563eb',
-            strokeWeight: 4,
+            strokeColor:
+              getComputedStyle(container).getPropertyValue('--hpm-route-color').trim() || '#0f766e',
+            strokeWeight: 3,
           }),
         );
       map.add(overlays);

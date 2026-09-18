@@ -41,14 +41,6 @@ class FakeMarker {
 class FakePolyline {
   constructor(readonly options: { path: number[][] }) {}
 }
-class FakeInfoWindow {
-  static latest: FakeInfoWindow;
-  open = vi.fn();
-  close = vi.fn();
-  constructor(readonly options: { content: HTMLElement }) {
-    FakeInfoWindow.latest = this;
-  }
-}
 function model(extra = {}): DetailMapModel {
   return {
     map: normalizePostMap(
@@ -66,7 +58,6 @@ beforeEach(() => {
     Map: FakeMap,
     Marker: FakeMarker,
     Polyline: FakePolyline,
-    InfoWindow: FakeInfoWindow,
   });
   sdk.reset.mockReset();
 });
@@ -155,7 +146,24 @@ describe('AMap adapter', () => {
       [122, 32],
       [123, 33],
     ]);
-    expect(markers.map((marker) => marker.options.content.textContent)).toEqual(['2', '1', 'C']);
+    expect(markers.map((marker) => marker.options.content.tagName)).toEqual([
+      'SPAN',
+      'SPAN',
+      'SPAN',
+    ]);
+    expect(markers.map((marker) => marker.options.content.textContent)).toEqual(['2', '1', '']);
+    expect(
+      markers.every((marker) => marker.options.content.getAttribute('aria-hidden') === 'true'),
+    ).toBe(true);
+    expect(markers.every((marker) => marker.options.content.querySelector('a') === null)).toBe(
+      true,
+    );
+    expect(
+      markers.map(
+        (marker) =>
+          marker.options.content.querySelector('.hpm-detail-marker__label')?.textContent ?? '',
+      ),
+    ).toEqual(['2', '1', '']);
     const line = instance.overlays.find(
       (overlay) => overlay instanceof FakePolyline,
     ) as FakePolyline;
@@ -163,29 +171,65 @@ describe('AMap adapter', () => {
       [122, 32],
       [121, 31],
     ]);
+    expect(line.options).toMatchObject({ strokeColor: '#0f766e', strokeWeight: 3 });
     instance.emit('complete');
     const handle = await pending;
     expect(instance.setFitView).toHaveBeenCalledWith(markers, true, [24, 24, 24, 24]);
     handle.destroy();
   });
 
-  it('opens a safe place link through a keyboard-operable marker', async () => {
+  it('keeps single-point pins silent and non-interactive when map interaction changes', async () => {
     const provider = await createAMapProvider(config);
     const pending = provider.mountDetail(document.createElement('div'), model());
     const marker = instance.overlays[0] as FakeMarker;
-    const button = marker.options.content as HTMLButtonElement;
-    expect(button.tagName).toBe('BUTTON');
-    expect(button.querySelector('img')).toBe(null);
+    const pin = marker.options.content;
+    expect(pin.tagName).toBe('SPAN');
+    expect(pin.className).toBe('hpm-detail-marker');
+    expect(pin.textContent).toBe('');
+    expect(pin.getAttribute('aria-hidden')).toBe('true');
+    expect(pin.tabIndex).toBe(-1);
+    expect(pin.querySelector('button, a, img')).toBe(null);
+    const initial = pin.outerHTML;
     instance.emit('complete');
     const handle = await pending;
     handle.setInteractive(true);
-    button.click();
-    const content = FakeInfoWindow.latest.options.content;
-    expect(content.textContent).toContain('<img onerror=alert(1)>');
-    expect(content.querySelector('img')).toBe(null);
-    expect(content.querySelector('a')!.href).toContain('https://uri.amap.com/marker?');
-    expect(new URL(content.querySelector('a')!.href).searchParams.get('position')).toBe('121,31');
+    expect(instance.setStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyboardEnable: true, dragEnable: true }),
+    );
+    expect(pin.outerHTML).toBe(initial);
+    pin.click();
+    expect(instance.destroy).not.toHaveBeenCalled();
+    handle.setInteractive(false);
+    expect(instance.setStatus).toHaveBeenLastCalledWith(
+      expect.objectContaining({ keyboardEnable: false, dragEnable: false }),
+    );
+    expect(pin.outerHTML).toBe(initial);
     handle.destroy();
+  });
+
+  it('uses the container route color for route strokes', async () => {
+    const provider = await createAMapProvider(config);
+    const container = document.createElement('div');
+    container.style.setProperty('--hpm-route-color', '#a855f7');
+    document.body.append(container);
+    const pending = provider.mountDetail(
+      container,
+      model({
+        representative: 'a',
+        points: [
+          { id: 'a', name: 'A', longitude: 121, latitude: 31 },
+          { id: 'b', name: 'B', longitude: 122, latitude: 32 },
+        ],
+        route: ['b', 'a'],
+      }),
+    );
+    const line = instance.overlays.find(
+      (overlay) => overlay instanceof FakePolyline,
+    ) as FakePolyline;
+    expect(line.options).toMatchObject({ strokeColor: '#a855f7', strokeWeight: 3 });
+    instance.emit('complete');
+    (await pending).destroy();
+    container.remove();
   });
 
   it('destroys a pending map on abort and rejects initialization', async () => {

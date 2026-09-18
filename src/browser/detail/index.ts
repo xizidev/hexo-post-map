@@ -62,7 +62,8 @@ export function hydrateDetail(
     if (!canvas) throw new Error('Missing map canvas');
     root.style.setProperty('--hpm-detail-height', config.height);
     canvas.tabIndex = -1;
-    canvas.setAttribute('aria-label', '文章地点地图');
+    const names = config.map.points.map((point) => point.name).join('、');
+    canvas.setAttribute('aria-label', `文章地点地图：${names}`);
   } catch {
     fail();
     return controller;

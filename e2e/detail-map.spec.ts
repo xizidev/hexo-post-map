@@ -20,23 +20,40 @@ test('detail stays unloaded offscreen and becomes interactive automatically near
   expect(network.sdkRequests).toBe(0);
   await expect(root.locator('[data-hpm-fallback]')).toBeVisible();
   await root.scrollIntoViewIfNeeded();
-  await expect(root.getByRole('button', { name: 'Shanghai GCJ-02', exact: true })).toBeEnabled();
+  const pin = root.locator('.hpm-detail-marker');
+  await expect(pin).toBeVisible();
+  await expect(pin).toBeEmpty();
+  await expect(pin).toHaveAttribute('aria-hidden', 'true');
+  await expect(root.locator('[data-hpm-canvas]')).toHaveAttribute(
+    'aria-label',
+    '文章地点地图：Shanghai GCJ-02',
+  );
   expect(network.sdkRequests).toBe(1);
   await expect(root.locator('[data-hpm-canvas]')).toHaveCSS('pointer-events', 'auto');
   await expect(root).toHaveAttribute('data-hpm-active', 'true');
   await expect(root.locator('[data-hpm-status]')).toBeEmpty();
-  await root.getByRole('button', { name: 'Shanghai GCJ-02', exact: true }).click();
-  await expect(root.getByRole('link', { name: '在高德地图中查看' })).toHaveAttribute(
-    'href',
-    /coordinate=gaode/,
-  );
+  await expect(root.locator('[data-hpm-fallback]')).toBeHidden();
+  await pin.click();
+  await expect(
+    root.locator('[data-hpm-canvas] button, [data-hpm-canvas] a, .hpm-place-card'),
+  ).toHaveCount(0);
+  await expect(root).toHaveAttribute('data-hpm-active', 'true');
 });
 
-test('route draws ordered coordinates and numbered accessible markers', async ({ page }) => {
+test('route draws ordered coordinates and silent numbered pins with accessible map names', async ({
+  page,
+}) => {
   await page.goto('/blog/posts/route/');
-  await expect(page.getByRole('button', { name: 'Visitor center GCJ-02' })).toHaveText('1');
-  await expect(page.getByRole('button', { name: 'Cableway GCJ-02' })).toHaveText('2');
-  await expect(page.getByRole('button', { name: 'Summit GCJ-02' })).toHaveText('3');
+  const pins = page.locator('.hpm-detail-marker');
+  await expect(pins).toHaveText(['3', '1', '2']);
+  await expect(pins.locator('.hpm-detail-marker__label')).toHaveText(['3', '1', '2']);
+  await expect(page.locator('[data-hpm-canvas]')).toHaveAttribute(
+    'aria-label',
+    '文章地点地图：Summit GCJ-02、Visitor center GCJ-02、Cableway GCJ-02',
+  );
+  await expect(
+    page.locator('[data-hpm-canvas] button, [data-hpm-canvas] a, .hpm-place-card'),
+  ).toHaveCount(0);
   expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').paths)).toEqual([
     [
       [114.1501, 27.4682],
@@ -48,7 +65,10 @@ test('route draws ordered coordinates and numbered accessible markers', async ({
 
 test('multi-point article fits its points without inventing a route', async ({ page }) => {
   await page.goto('/blog/posts/multi/');
-  await expect(page.getByRole('button', { name: 'Old city GCJ-02' })).toBeEnabled();
+  await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true');
+  const pins = page.locator('.hpm-detail-marker');
+  await expect(pins).toHaveText(['', '']);
+  await expect(pins.locator('.hpm-detail-marker__label')).toHaveCount(0);
   expect(
     await page.evaluate(() => ({
       paths: Reflect.get(window, '__hpmSdk').paths,
@@ -83,6 +103,7 @@ test('multiple detail maps reuse one SDK load and ordinary pages request none', 
   });
   await page.goto('/blog/posts/single/');
   await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Shanghai GCJ-02', exact: true })).toHaveCount(2);
+  await expect(page.locator('.hpm-detail-marker')).toHaveCount(2);
+  await expect(page.locator('[data-hpm-detail][data-hpm-active="true"]')).toHaveCount(2);
   expect(network.sdkRequests).toBe(1);
 });

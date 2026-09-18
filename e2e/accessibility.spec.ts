@@ -77,10 +77,20 @@ for (const mobile of [false, true]) {
     await tabTo(page, preview.locator('a.hpm-post__link'));
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/blog\/posts\/route\/$/);
-    const marker = page.getByRole('button', { name: 'Visitor center GCJ-02' });
-    await tabTo(page, marker);
-    await page.keyboard.press('Enter');
-    await expect(page.getByRole('link', { name: '在高德地图中查看' })).toBeVisible();
+    await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true');
+    const canvas = page.locator('[data-hpm-canvas]');
+    await expect(canvas).toHaveAttribute(
+      'aria-label',
+      '文章地点地图：Summit GCJ-02、Visitor center GCJ-02、Cableway GCJ-02',
+    );
+    await canvas.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(canvas).toBeFocused();
+    expect(
+      await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].status.keyboardEnable),
+    ).toBe(true);
+    await expect(canvas.locator('button, a, [tabindex="0"]')).toHaveCount(0);
+    await expect(page.locator('[data-hpm-fallback]')).toBeHidden();
     expect(
       await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].options.animateEnable),
     ).toBe(false);

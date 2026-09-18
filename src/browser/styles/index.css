@@ -2,6 +2,7 @@
   --hpm-detail-height: 220px;
   --hpm-mobile-height: 180px;
   --hpm-accent: #2563eb;
+  --hpm-accent-contrast: #ffffff;
   --hpm-surface: #f1f5f9;
   --hpm-text: #172033;
   position: relative;
@@ -16,11 +17,6 @@
   background: var(--hpm-surface);
   pointer-events: auto;
   touch-action: auto;
-}
-.hpm-marker:focus-visible,
-.hpm-place-card a:focus-visible {
-  outline: 3px solid var(--hpm-accent, #2563eb);
-  outline-offset: 2px;
 }
 
 .hpm-detail [hidden] {
@@ -42,27 +38,30 @@
   padding-inline-start: 1.5rem;
 }
 
-.hpm-marker {
-  display: inline-block;
-  min-width: 2.75rem;
-  min-height: 2.75rem;
-  padding: 0.35rem 0.65rem;
+.hpm-detail-marker {
+  box-sizing: border-box;
+  display: grid;
+  width: 18px;
+  height: 24px;
+  place-items: center;
   border: 2px solid white;
-  border-radius: 1.5rem;
-  background: var(--hpm-accent, #2563eb);
-  color: white;
-  font: inherit;
-  line-height: 1.25;
-  white-space: nowrap;
-  cursor: pointer;
-  opacity: 1;
+  border-radius: 12px 12px 12px 2px;
+  background: var(--hpm-accent);
+  box-shadow: 0 3px 9px rgb(15 23 42 / 30%);
+  color: var(--hpm-accent-contrast);
+  font:
+    700 11px/1 system-ui,
+    sans-serif;
+  transform: rotate(-45deg);
 }
 
-.hpm-place-card {
-  max-width: 16rem;
-  color: var(--hpm-text, #172033);
-  overflow-wrap: anywhere;
-  font: 1rem/1.5 sans-serif;
+.hpm-detail-marker--numbered {
+  width: 24px;
+  height: 30px;
+}
+
+.hpm-detail-marker__label {
+  transform: rotate(45deg);
 }
 
 .hpm-overview {
