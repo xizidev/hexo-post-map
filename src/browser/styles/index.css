@@ -70,7 +70,7 @@
   --hpm-overview-height: min(65vh, 36rem);
   --hpm-accent: #0f766e;
   --hpm-accent-contrast: #ffffff;
-  --hpm-cluster-surface: rgb(15 118 110 / 88%);
+  --hpm-cluster-surface: rgb(15 118 110 / 96%);
   --hpm-cluster-border: rgb(255 255 255 / 78%);
   --hpm-card-surface: #f1f5f9;
   --hpm-panel-surface: rgb(255 255 255 / 88%);
@@ -200,11 +200,13 @@
 }
 
 .hpm-cluster {
+  box-sizing: border-box;
   display: grid;
   position: relative;
   place-items: center;
   width: 44px;
   height: 44px;
+  padding: 0;
   border: 0;
   border-radius: 999px;
   background: transparent;

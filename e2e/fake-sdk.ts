@@ -18,7 +18,7 @@ export const fakeSdk = String.raw`
     destroy() { this.container.replaceChildren(); }
     getZoom() { return this.zoom; }
     setZoom(zoom) { this.zoom = zoom; this.cluster?.render(); }
-    setBounds(bounds) { this.bounds.push(bounds); }
+    setBounds(bounds, immediately, padding) { this.bounds.push(bounds); (this.boundsPadding ??= []).push(padding); }
   }
   class Marker { constructor(options) { this.options = options; } }
   class Polyline { constructor(options) { this.options = options; window.__hpmSdk.paths.push(options.path); } }

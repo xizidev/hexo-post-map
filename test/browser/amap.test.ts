@@ -67,6 +67,41 @@ afterEach(() => {
 });
 
 describe('AMap adapter', () => {
+  it('preserves every visit and numbered marker in an out-and-back route', async () => {
+    const provider = await createAMapProvider(config);
+    const pending = provider.mountDetail(
+      document.createElement('div'),
+      model({
+        representative: 'a',
+        points: [
+          { id: 'a', name: 'A', longitude: 121, latitude: 31 },
+          { id: 'b', name: 'B', longitude: 122, latitude: 32 },
+          { id: 'c', name: 'Independent', longitude: 123, latitude: 33 },
+        ],
+        route: ['a', 'b', 'a'],
+      }),
+    );
+    const markers = instance.overlays.filter(
+      (item): item is FakeMarker => item instanceof FakeMarker,
+    );
+    expect(
+      markers.map((item) => [item.options.content.textContent, item.options.position]),
+    ).toEqual([
+      ['1', [121, 31]],
+      ['2', [122, 32]],
+      ['3', [121, 31]],
+      ['', [123, 33]],
+    ]);
+    expect(
+      (instance.overlays.find((item) => item instanceof FakePolyline) as FakePolyline).options.path,
+    ).toEqual([
+      [121, 31],
+      [122, 32],
+      [121, 31],
+    ]);
+    instance.emit('complete');
+    (await pending).destroy();
+  });
   it('honors reduced motion for map animations', async () => {
     vi.stubGlobal('matchMedia', () => ({ matches: true }));
     const provider = await createAMapProvider(config);
@@ -142,8 +177,8 @@ describe('AMap adapter', () => {
       (overlay): overlay is FakeMarker => overlay instanceof FakeMarker,
     );
     expect(markers.map((marker) => marker.options.position)).toEqual([
-      [121, 31],
       [122, 32],
+      [121, 31],
       [123, 33],
     ]);
     expect(markers.map((marker) => marker.options.content.tagName)).toEqual([
@@ -151,7 +186,7 @@ describe('AMap adapter', () => {
       'SPAN',
       'SPAN',
     ]);
-    expect(markers.map((marker) => marker.options.content.textContent)).toEqual(['2', '1', '']);
+    expect(markers.map((marker) => marker.options.content.textContent)).toEqual(['1', '2', '']);
     expect(
       markers.every((marker) => marker.options.content.getAttribute('aria-hidden') === 'true'),
     ).toBe(true);
@@ -163,7 +198,7 @@ describe('AMap adapter', () => {
         (marker) =>
           marker.options.content.querySelector('.hpm-detail-marker__label')?.textContent ?? '',
       ),
-    ).toEqual(['2', '1', '']);
+    ).toEqual(['1', '2', '']);
     const line = instance.overlays.find(
       (overlay) => overlay instanceof FakePolyline,
     ) as FakePolyline;

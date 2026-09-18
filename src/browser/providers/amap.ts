@@ -2,7 +2,7 @@ import AMapLoader from '@amap/amap-jsapi-loader';
 import type { Coordinate } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
 import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
-import { createClusterMarker, createImageMarker } from '../overview/markers';
+import { createClusterMarker, createImageMarker, overviewFitPadding } from '../overview/markers';
 import type {
   BrowserProviderConfig,
   DetailMapModel,
@@ -273,16 +273,22 @@ function mountDetail(
     model.signal?.addEventListener('abort', cancel, { once: true });
 
     try {
-      for (const point of model.map.points) {
+      const routeIds = new Set(model.map.route.map((point) => point.id));
+      const visits = [
+        ...model.map.route.map((point, index) => ({ point, sequence: index + 1 })),
+        ...model.map.points
+          .filter((point) => !routeIds.has(point.id))
+          .map((point) => ({ point, sequence: undefined })),
+      ];
+      for (const { point, sequence } of visits) {
         const marker = document.createElement('span');
         marker.className = 'hpm-detail-marker';
         marker.setAttribute('aria-hidden', 'true');
-        const sequence = model.map.route.findIndex((item) => item.id === point.id);
-        if (sequence >= 0) {
+        if (sequence !== undefined) {
           marker.classList.add('hpm-detail-marker--numbered');
           const label = document.createElement('span');
           label.className = 'hpm-detail-marker__label';
-          label.textContent = String(sequence + 1);
+          label.textContent = String(sequence);
           marker.append(label);
         }
         markers.push(
@@ -453,11 +459,19 @@ async function mountOverview(
       if (!complete) reject(new Error('Map initialization cancelled'));
     }
     function fit(bounds: Bounds) {
-      map.setBounds(
-        new api.Bounds([bounds.west, bounds.south], [bounds.east, bounds.north]),
-        true,
-        [48, 48, 48, 48],
-      );
+      // AMap also gates programmatic fit zooms on zoomEnable. Initial fitting
+      // happens before activation, so temporarily permit it without enabling
+      // wheel, touch or keyboard interaction, then restore the current state.
+      map.setStatus({ zoomEnable: true });
+      try {
+        map.setBounds(
+          new api.Bounds([bounds.west, bounds.south], [bounds.east, bounds.north]),
+          true,
+          overviewFitPadding,
+        );
+      } finally {
+        map.setStatus({ zoomEnable: active });
+      }
     }
     function ready() {
       if (destroyed || complete) return;

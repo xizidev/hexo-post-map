@@ -62,7 +62,7 @@ for (const mobile of [false, true]) {
         );
         return marker.offset;
       }),
-    ).toEqual(mobile ? { x: -32, y: -66 } : { x: -36, y: -72 });
+    ).toEqual(mobile ? { x: -32, y: -62 } : { x: -36, y: -68 });
     expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].zoom)).toBe(5);
     const overlap = page.getByRole('button', { name: '查看此处的 2 篇文章' });
     await overlap.focus();

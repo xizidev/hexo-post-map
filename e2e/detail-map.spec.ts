@@ -56,8 +56,8 @@ test('route draws ordered coordinates and silent numbered pins with accessible m
     }),
   ).toEqual({ route: '#5eead4', text: '#e2e8f0', muted: '#94a3b8' });
   const pins = page.locator('.hpm-detail-marker');
-  await expect(pins).toHaveText(['3', '1', '2']);
-  await expect(pins.locator('.hpm-detail-marker__label')).toHaveText(['3', '1', '2']);
+  await expect(pins).toHaveText(['1', '2', '3']);
+  await expect(pins.locator('.hpm-detail-marker__label')).toHaveText(['1', '2', '3']);
   // Bottom-anchored rotated pins extend above their coordinates. The SDK fit
   // must reserve their full painted height, plus a small gap, above the bounds.
   expect(
@@ -85,6 +85,28 @@ test('route draws ordered coordinates and silent numbered pins with accessible m
       [114.1735, 27.4568],
     ],
   ]);
+});
+
+test('out-and-back route retains each visit label and its return segment', async ({ page }) => {
+  await page.route('**/posts/route/', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace(
+      /(<script type="application\/json" data-hpm-data>)([\s\S]*?)(<\/script>)/u,
+      (_all, start, json, end) => {
+        const data = JSON.parse(json);
+        data.map.route = [data.map.points[0], data.map.points[1], data.map.points[0]];
+        return start + JSON.stringify(data).replaceAll('<', '\\u003c') + end;
+      },
+    );
+    await route.fulfill({ response, body });
+  });
+  await page.goto('/blog/posts/route/');
+  await expect(page.locator('.hpm-detail-marker__label')).toHaveText(['1', '2', '3']);
+  await expect(page.locator('.hpm-detail-marker')).toHaveCount(4);
+  const path = await page.evaluate(() => Reflect.get(window, '__hpmSdk').paths[0]);
+  expect(path).toHaveLength(3);
+  expect(path[0]).toEqual(path[2]);
+  expect(path[0]).not.toEqual(path[1]);
 });
 
 test('multi-point article fits its points without inventing a route', async ({ page }) => {

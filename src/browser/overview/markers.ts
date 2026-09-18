@@ -6,6 +6,20 @@ export interface MarkerElement {
   readonly offset: readonly [x: number, y: number];
 }
 
+// Match the painted card, stem and dot in index.css; browser geometry tests
+// enforce the relationship rather than assuming these offsets stay correct.
+const leafGeometry = {
+  desktop: { width: 72, cardHeight: 54, stemHeight: 10, dotDiameter: 8 },
+  compact: { width: 64, cardHeight: 48, stemHeight: 10, dotDiameter: 8 },
+};
+function dotCenterY(geometry: (typeof leafGeometry)['desktop']): number {
+  return geometry.cardHeight + geometry.stemHeight + geometry.dotDiameter / 2;
+}
+
+// Reserve the largest responsive footprint and a 32px edge gutter. AMap's
+// avoid order is top, bottom, left, right; both initial and cluster fits use it.
+export const overviewFitPadding = [dotCenterY(leafGeometry.desktop) + 32, 48, 48, 48];
+
 /** One replacement only: a missing placeholder cannot produce an error loop. */
 export function installImageFallback(image: HTMLImageElement, placeholderUrl: string): () => void {
   const fallback = () => {
@@ -66,5 +80,6 @@ export function createImageMarker(
   dot.className = 'hpm-image-marker__dot';
   dot.setAttribute('aria-hidden', 'true');
   element.append(card, stem, dot);
-  return { element, offset: compact ? [-32, -66] : [-36, -72] };
+  const geometry = compact ? leafGeometry.compact : leafGeometry.desktop;
+  return { element, offset: [-geometry.width / 2, -dotCenterY(geometry)] };
 }

@@ -40,11 +40,11 @@ describe('overview marker elements', () => {
     expect(marker.element.querySelector('.hpm-image-marker__stem')).not.toBeNull();
     expect(marker.element.querySelector('.hpm-image-marker__dot')).not.toBeNull();
     expect(marker.element.getAttribute('aria-label')).toBe(`预览文章：${post.title}`);
-    expect(marker.offset).toEqual([-36, -72]);
+    expect(marker.offset).toEqual([-36, -68]);
   });
 
   it('uses the compact thumbnail anchor when requested', () => {
-    expect(createImageMarker(post, '/placeholder.svg', true).offset).toEqual([-32, -66]);
+    expect(createImageMarker(post, '/placeholder.svg', true).offset).toEqual([-32, -62]);
   });
 
   it('replaces an image source with the placeholder after one error', () => {

@@ -194,6 +194,25 @@ function overviewOptions(overrides: Partial<OverviewMapOptions> = {}): OverviewM
   };
 }
 describe('AMap overview clustering boundary', () => {
+  it('allows programmatic initial fitting while restoring inactive zoom controls', async () => {
+    const provider = await adapter();
+    const pending = provider.mountOverview(document.createElement('div'), overviewOptions());
+    await flush();
+    let zoomEnabled = mapInstance.options.zoomEnable;
+    let fittedWithZoom = false;
+    mapInstance.setStatus.mockImplementation((status: Record<string, boolean>) => {
+      if (status.zoomEnable !== undefined) zoomEnabled = status.zoomEnable;
+    });
+    // Real AMap ignores a requested fit zoom while zoomEnable is false.
+    mapInstance.setBounds.mockImplementation(() => {
+      fittedWithZoom = zoomEnabled === true;
+    });
+    mapInstance.emit('complete');
+    const handle = await pending;
+    expect(fittedWithZoom).toBe(true);
+    expect(zoomEnabled).toBe(false);
+    handle.destroy();
+  });
   it.each(['cluster', 'leaf'])(
     'retains coincident articles when the SDK collapses %s callback data',
     async (kind) => {
@@ -399,13 +418,13 @@ describe('AMap overview clustering boundary', () => {
     expect(button.querySelector('.hpm-image-marker__stem')).not.toBeNull();
     expect(button.querySelector('.hpm-image-marker__dot')).not.toBeNull();
     expect(button.querySelector('img')!.width).toBe(96);
-    expect(marker.offset).toEqual({ x: -36, y: -72 });
+    expect(marker.offset).toEqual({ x: -36, y: -68 });
     mapInstance.emit('complete');
     const handle = await pending;
     expect(mapInstance.setBounds).toHaveBeenCalledWith(
       expect.objectContaining({ southwest: [121, 31], northeast: [122, 32] }),
       true,
-      [48, 48, 48, 48],
+      [100, 48, 48, 48],
     );
     handle.setInteractive(true);
     button.click();
@@ -446,24 +465,24 @@ describe('AMap overview clustering boundary', () => {
       marker: group,
       clusterData: clusterInstance.data.slice(0, 2),
     });
-    expect(leaf.offset).toEqual({ x: -36, y: -72 });
+    expect(leaf.offset).toEqual({ x: -36, y: -68 });
     expect(group.offset).toEqual({ x: -22, y: -22 });
     const leafOffsets = vi.spyOn(leaf, 'setOffset');
     const groupOffsets = vi.spyOn(group, 'setOffset');
 
     media.change(true);
-    expect(leaf.offset).toEqual({ x: -32, y: -66 });
+    expect(leaf.offset).toEqual({ x: -32, y: -62 });
     expect(leafOffsets).toHaveBeenCalledOnce();
     expect(groupOffsets).not.toHaveBeenCalled();
 
     media.change(false);
-    expect(leaf.offset).toEqual({ x: -36, y: -72 });
+    expect(leaf.offset).toEqual({ x: -36, y: -68 });
     expect(leafOffsets).toHaveBeenCalledTimes(2);
 
     handle.destroy();
     expect(media.query.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function));
     media.change(true);
-    expect(leaf.offset).toEqual({ x: -36, y: -72 });
+    expect(leaf.offset).toEqual({ x: -36, y: -68 });
     expect(leafOffsets).toHaveBeenCalledTimes(2);
   });
   it.each(['separable', 'maximum', 'identical'])(
