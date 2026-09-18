@@ -33,11 +33,18 @@ export const fakeSdk = String.raw`
     constructor(map, data, options) { this.map = map; this.data = data; this.options = options; map.cluster = this; this.render(); }
     render() {
       this.map.container.replaceChildren();
+      this.markers = [];
       const groups = this.map.zoom <= 4 ? [this.data] : Object.values(this.data.reduce((groups, point) => {
         (groups[point.lnglat.join(',')] ??= []).push(point); return groups;
       }, {}));
       for (const group of groups) {
-        const marker = { setContent: content => this.map.container.append(content), setOffset() {} };
+        const marker = {
+          content: undefined,
+          offset: undefined,
+          setContent: content => { marker.content = content; this.map.container.append(content); },
+          setOffset: offset => { marker.offset = offset; },
+        };
+        this.markers.push(marker);
         if (group.length > 1) this.options.renderClusterMarker({ marker, clusterData: group });
         else this.options.renderMarker({ marker, data: group });
       }

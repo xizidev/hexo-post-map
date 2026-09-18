@@ -11,8 +11,48 @@ for (const mobile of [false, true]) {
     await expect(root.locator('[data-hpm-activate]')).toHaveCount(0);
     await expect(root).toHaveAttribute('data-hpm-active', 'true');
     expect(network.sdkRequests).toBe(1);
-    await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
-    await expect(page.getByRole('button', { name: '预览文章：Mountain itinerary' })).toBeVisible();
+    const initialCluster = page.getByRole('button', { name: '查看此处的 4 篇文章' });
+    await expect(initialCluster.locator('.hpm-cluster__surface--small')).toHaveCount(1);
+    expect(
+      await page.evaluate(() => {
+        const sdk = Reflect.get(window, '__hpmSdk');
+        return sdk.maps[0].cluster.markers.find(
+          (item: { content: HTMLElement }) =>
+            item.content.getAttribute('aria-label') === '查看此处的 4 篇文章',
+        ).offset;
+      }),
+    ).toEqual({ x: -22, y: -22 });
+    await initialCluster.click();
+    const leaf = page.getByRole('button', { name: '预览文章：Mountain itinerary' });
+    await expect(leaf).toBeVisible();
+    await expect(leaf.locator('.hpm-image-marker__card')).toHaveCount(1);
+    await expect(leaf.locator('.hpm-image-marker__stem')).toHaveCount(1);
+    await expect(leaf.locator('.hpm-image-marker__dot')).toHaveCount(1);
+    await expect(leaf.locator('.hpm-image-marker__card')).toHaveCSS(
+      'width',
+      mobile ? '64px' : '72px',
+    );
+    await expect(leaf.locator('.hpm-image-marker__card')).toHaveCSS(
+      'height',
+      mobile ? '48px' : '54px',
+    );
+    expect(
+      await leaf.evaluate((button) => {
+        const image = button.querySelector('img')!.getBoundingClientRect();
+        const anchor = button.querySelector('.hpm-image-marker__dot')!.getBoundingClientRect();
+        return image.bottom <= anchor.top;
+      }),
+    ).toBe(true);
+    expect(
+      await page.evaluate(() => {
+        const sdk = Reflect.get(window, '__hpmSdk');
+        const marker = sdk.maps[0].cluster.markers.find(
+          (item: { content: HTMLElement }) =>
+            item.content.getAttribute('aria-label') === '预览文章：Mountain itinerary',
+        );
+        return marker.offset;
+      }),
+    ).toEqual(mobile ? { x: -32, y: -66 } : { x: -36, y: -72 });
     expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].zoom)).toBe(5);
     const overlap = page.getByRole('button', { name: '查看此处的 2 篇文章' });
     await overlap.focus();

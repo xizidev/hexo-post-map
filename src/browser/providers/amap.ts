@@ -2,7 +2,7 @@ import AMapLoader from '@amap/amap-jsapi-loader';
 import type { Coordinate } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
 import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
-import { createPostImage } from '../overview/panel';
+import { createClusterMarker, createImageMarker } from '../overview/markers';
 import type {
   BrowserProviderConfig,
   DetailMapModel,
@@ -521,22 +521,17 @@ async function mountOverview(
         if (old) release(old);
         const replacement = currentButtons.get(key);
         if (replacement) release(replacement);
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = grouped ? 'hpm-marker hpm-cluster' : 'hpm-image-marker';
+        const compact = window.matchMedia?.('(max-width: 600px)').matches ?? false;
+        const view = grouped
+          ? createClusterMarker(posts.length)
+          : createImageMarker(posts[0]!, options.placeholderUrl, compact);
+        const button = view.element;
         button.disabled = !active;
         button.tabIndex = active ? 0 : -1;
         const resolveOrigin = () => {
           const current = currentButtons.get(key)?.button;
           return !destroyed && current?.isConnected && !current.disabled ? current : undefined;
         };
-        if (grouped) {
-          button.textContent = String(posts.length);
-          button.setAttribute('aria-label', `查看此处的 ${posts.length} 篇文章`);
-        } else {
-          button.setAttribute('aria-label', `预览文章：${posts[0]!.title}`);
-          button.append(createPostImage(posts[0]!, options.placeholderUrl));
-        }
         const onClick = (event: MouseEvent) => {
           event.stopPropagation();
           if (destroyed || !active || button.disabled) return;
@@ -568,7 +563,7 @@ async function mountOverview(
         currentButtons.set(key, entry);
         buttons.set(button, entry);
         context.marker.setContent(button);
-        context.marker.setOffset(new api.Pixel(grouped ? -24 : -48, grouped ? -24 : -36));
+        context.marker.setOffset(new api.Pixel(...view.offset));
         scheduleSweep();
       } catch {
         fail();

@@ -110,10 +110,13 @@ class OverviewFakeMap {
 }
 class ClusterMarker {
   content: HTMLElement | undefined;
+  offset: { x: number; y: number } | undefined;
   setContent(content: HTMLElement) {
     this.content = content;
   }
-  setOffset() {}
+  setOffset(pixel: { x: number; y: number }) {
+    this.offset = pixel;
+  }
 }
 class FakeBounds {
   constructor(
@@ -137,7 +140,12 @@ async function adapter(plugin?: (names: string[], ready: () => void) => void) {
     Map: OverviewFakeMap,
     MarkerCluster: FakeCluster,
     Bounds: FakeBounds,
-    Pixel: class {},
+    Pixel: class {
+      constructor(
+        readonly x: number,
+        readonly y: number,
+      ) {}
+    },
     plugin,
   };
   if (plugin) Reflect.deleteProperty(api, 'MarkerCluster');
@@ -314,7 +322,11 @@ describe('AMap overview clustering boundary', () => {
     expect(button.tagName).toBe('BUTTON');
     expect(button.disabled).toBe(true);
     expect(button.getAttribute('aria-label')).toContain(a.title);
+    expect(button.querySelector('.hpm-image-marker__card')).not.toBeNull();
+    expect(button.querySelector('.hpm-image-marker__stem')).not.toBeNull();
+    expect(button.querySelector('.hpm-image-marker__dot')).not.toBeNull();
     expect(button.querySelector('img')!.width).toBe(96);
+    expect(marker.offset).toEqual({ x: -36, y: -72 });
     mapInstance.emit('complete');
     const handle = await pending;
     expect(mapInstance.setBounds).toHaveBeenCalledWith(
@@ -355,6 +367,8 @@ describe('AMap overview clustering boundary', () => {
       const button = marker.content as HTMLButtonElement;
       expect(button.textContent).toBe('2');
       expect(button.getAttribute('aria-label')).toContain('2');
+      expect(button.querySelector('.hpm-cluster__surface--small')).not.toBeNull();
+      expect(marker.offset).toEqual({ x: -22, y: -22 });
       mapInstance.setBounds.mockClear();
       mapInstance.zoom = kind === 'maximum' ? 18 : 6;
       button.click();
