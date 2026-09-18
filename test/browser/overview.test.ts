@@ -228,7 +228,7 @@ describe('AMap overview clustering boundary', () => {
       await flush();
       mapInstance.emit('complete');
       await flush();
-      root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
+      expect(root.querySelector('[data-hpm-activate]')).toBe(null);
       const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]')!;
       const marker = new ClusterMarker();
       clusterInstance.options.renderClusterMarker({ marker, clusterData: clusterInstance.data });
@@ -470,14 +470,13 @@ describe('overview hydration', () => {
     const origin = document.createElement('button');
     root.querySelector('[data-hpm-canvas]')!.append(origin);
     for (let visit = 0; visit < 2; visit++) {
-      root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
       mountOverview.mock.calls[0]![1].onPostSelect(a, origin);
       expect(root.querySelectorAll('.hpm-panel')).toHaveLength(1);
       pageTransition('pagehide', true);
       pageTransition('pageshow', true);
       pageTransition('pageshow', true);
       await flush();
-      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
       expect(root.querySelectorAll('[data-hpm-show-list]')).toHaveLength(1);
       expect(root.dataset.hpmActive).toBe('true');
       expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
@@ -486,9 +485,8 @@ describe('overview hydration', () => {
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       expect(root.querySelectorAll('.hpm-panel')).toHaveLength(0);
       expect(document.activeElement).toBe(origin);
-      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      expect(root.dataset.hpmActive).toBe('false');
-      expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
+      expect(root.dataset.hpmActive).toBe('true');
+      expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     }
     expect(load).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -511,17 +509,16 @@ describe('overview hydration', () => {
       signal = init?.signal;
       return response.promise;
     });
-    const mountOverview = vi.fn<MapProvider['mountOverview']>(async () => ({
-      destroy: vi.fn(),
-      setInteractive: vi.fn(),
-    }));
+    const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
+    const mountOverview = vi.fn<MapProvider['mountOverview']>(async () => handle);
     hydrateOverview(root, async () => ({ mountOverview, mountDetail: vi.fn() }), fetcher);
     pageTransition('pagehide', true);
     pageTransition('pageshow', true);
     expect(signal?.aborted).toBe(false);
     response.resolve(new Response(JSON.stringify({ version: 1, posts: [a] })));
     await flush();
-    expect(root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.disabled).toBe(false);
+    expect(root.querySelector('[data-hpm-activate]')).toBe(null);
+    expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(mountOverview).toHaveBeenCalledTimes(1);
@@ -585,21 +582,16 @@ describe('overview hydration', () => {
     await flush();
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
     expect(root.querySelector('[data-hpm-show-list]')).not.toBe(null);
+    expect(root.querySelector('[data-hpm-activate]')).toBe(null);
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
+    expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     (root.querySelector('[data-hpm-show-list]') as HTMLButtonElement).click();
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
-    const activate = root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!;
-    expect(handle.setInteractive).not.toHaveBeenCalledWith(true);
-    activate.click();
-    expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
-    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
-    expect(document.activeElement).toBe(activate);
     controller.destroy();
   });
-  it('opens a selected leaf or terminal group and closes panels before map Escape', async () => {
+  it('opens a selected leaf or terminal group and closes panels with Escape', async () => {
     const { root, mountOverview, controller, handle } = setup();
     await flush();
-    root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
     const model = mountOverview.mock.calls[0]![1];
     const origin = document.createElement('button');
     root.append(origin);

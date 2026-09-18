@@ -68,12 +68,6 @@ export function hydrateOverview(
   let failed = false;
   const cleanups: (() => void)[] = [];
   const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]');
-  const activate = document.createElement('button');
-  activate.type = 'button';
-  activate.className = 'hpm-overview__activate';
-  activate.dataset.hpmActivate = '';
-  activate.textContent = '点击或按 Enter 激活地图';
-  activate.disabled = true;
   const showList = document.createElement('button');
   showList.type = 'button';
   showList.className = 'hpm-overview__list-toggle';
@@ -88,28 +82,10 @@ export function hydrateOverview(
     panel?.destroy();
     handle?.destroy();
     root.dataset.hpmActive = 'false';
-    activate.hidden = true;
     showList.hidden = true;
     showFallback(root, true);
     setStatus(root, '地图暂时无法加载，请使用下方文章列表。');
   }
-  function interact(active: boolean) {
-    if (!handle || failed || disposed) return;
-    try {
-      handle.setInteractive(active);
-    } catch {
-      fail();
-    }
-    if (failed) return;
-    root.dataset.hpmActive = String(active);
-    activate.hidden = active;
-    if (active) canvas?.focus();
-    else activate.focus();
-  }
-  const onActivate = () => interact(true);
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') interact(false);
-  };
   const onPageHide = (event: PageTransitionEvent) => {
     // BFCache freezes this controller and its SDK ownership for the next pageshow.
     if (!event.persisted) destroy();
@@ -128,11 +104,8 @@ export function hydrateOverview(
     panel?.destroy();
     handle?.destroy();
     cleanups.forEach((cleanup) => cleanup());
-    activate.removeEventListener('click', onActivate);
     showList.removeEventListener('click', onList);
-    root.removeEventListener('keydown', onKey);
     window.removeEventListener('pagehide', onPageHide);
-    activate.remove();
     showList.remove();
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
@@ -157,8 +130,7 @@ export function hydrateOverview(
     )
       throw new Error('Invalid map configuration');
     canvas.tabIndex = -1;
-    canvas.setAttribute('aria-label', '文章地图，按 Esc 退出交互');
-    canvas.insertAdjacentElement('afterend', activate);
+    canvas.setAttribute('aria-label', '文章地图');
     root.append(showList);
     root
       .querySelectorAll<HTMLImageElement>('[data-hpm-image]')
@@ -167,9 +139,7 @@ export function hydrateOverview(
     fail();
     return controller;
   }
-  activate.addEventListener('click', onActivate);
   showList.addEventListener('click', onList);
-  root.addEventListener('keydown', onKey);
   function select(
     posts: readonly OverviewPost[],
     origin: HTMLElement,
@@ -185,12 +155,12 @@ export function hydrateOverview(
         placeholderUrl: config.placeholderUrl,
         origin,
         resolveOrigin,
-        fallback: canvas ?? activate,
+        fallback: canvas ?? undefined,
       },
     );
   }
   async function start() {
-    setStatus(root, '地图加载中…');
+    setStatus(root, '');
     try {
       const response = await fetcher(config.dataUrl, { signal: abort.signal });
       if (disposed || failed) return;
@@ -199,7 +169,6 @@ export function hydrateOverview(
       if (disposed || failed) return;
       const posts = readPosts(data);
       if (posts.length === 0) {
-        activate.hidden = true;
         setStatus(
           root,
           root.querySelector('[data-hpm-empty]')?.textContent ?? '暂无标注地点的文章。',
@@ -222,10 +191,12 @@ export function hydrateOverview(
         return;
       }
       handle = mounted;
+      handle.setInteractive(true);
+      if (disposed || failed) return;
+      root.dataset.hpmActive = 'true';
       showFallback(root, false);
-      activate.disabled = false;
       showList.hidden = false;
-      setStatus(root, '地图加载完成，可激活地图交互，按 Esc 退出。');
+      setStatus(root, '');
     } catch {
       fail();
     }

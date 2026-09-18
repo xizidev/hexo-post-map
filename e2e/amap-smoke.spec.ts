@@ -20,7 +20,10 @@ test('optional live AMap initializes one map', async ({ page }) => {
   });
   await runOptionalAmapSmoke({
     navigate: (timeout) => page.goto('/blog/posts/single/', { timeout }),
-    initialize: (timeout) => expect(page.locator('[data-hpm-activate]')).toBeEnabled({ timeout }),
+    initialize: (timeout) =>
+      expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true', {
+        timeout,
+      }),
     annotate: (annotation) => test.info().annotations.push(annotation),
     warn: (message) => console.warn(message),
   });

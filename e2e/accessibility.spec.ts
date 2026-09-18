@@ -42,17 +42,15 @@ test.describe('without JavaScript', () => {
 });
 
 for (const mobile of [false, true]) {
-  test(`reduced motion and keyboard-only map navigation on ${mobile ? 'mobile' : 'desktop'}`, async ({
+  test(`reduced motion and automatic keyboard map navigation on ${mobile ? 'mobile' : 'desktop'}`, async ({
     page,
   }) => {
     await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/blog/map/');
-    const activate = page.locator('[data-hpm-activate]');
-    await expect(activate).toBeEnabled();
-    await tabTo(page, activate);
-    await page.keyboard.press('Enter');
-    await tabTo(page, page.getByRole('button', { name: '查看此处的 4 篇文章' }));
+    expect(await page.locator('[data-hpm-activate]').count()).toBe(0);
+    const allPosts = page.getByRole('button', { name: '查看此处的 4 篇文章' });
+    await tabTo(page, allPosts);
     await page.keyboard.press('Enter');
     const overlap = page.getByRole('button', { name: '查看此处的 2 篇文章' });
     await tabTo(page, overlap);
@@ -73,9 +71,6 @@ for (const mobile of [false, true]) {
     await tabTo(page, preview.locator('a').filter({ has: page.locator('img') }));
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/blog\/posts\/route\/$/);
-    await expect(page.locator('[data-hpm-activate]')).toBeEnabled();
-    await tabTo(page, page.locator('[data-hpm-activate]'));
-    await page.keyboard.press('Enter');
     const marker = page.getByRole('button', { name: 'Visitor center GCJ-02' });
     await tabTo(page, marker);
     await page.keyboard.press('Enter');
@@ -83,8 +78,8 @@ for (const mobile of [false, true]) {
     expect(
       await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].options.animateEnable),
     ).toBe(false);
-    await page.keyboard.press('Escape');
-    await expect(page.locator('[data-hpm-activate]')).toBeFocused();
+    await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
+    await expect(page.locator('[data-hpm-status]')).toBeEmpty();
     await expect(
       page.getByText('The route differs from point declaration order to detect incorrect sorting.'),
     ).toBeVisible();

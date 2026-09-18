@@ -14,35 +14,9 @@
   overflow: hidden;
   border-radius: 0.5rem;
   background: var(--hpm-surface);
-  pointer-events: none;
-  touch-action: pan-y;
-}
-
-.hpm-detail[data-hpm-active='true'] .hpm-detail__canvas {
   pointer-events: auto;
   touch-action: auto;
 }
-
-.hpm-detail__activate {
-  position: absolute;
-  inset: 0 0 auto;
-  width: 100%;
-  height: var(--hpm-detail-height);
-  border: 1px solid #64748b;
-  border-radius: 0.5rem;
-  background: rgb(241 245 249 / 48%);
-  color: var(--hpm-text);
-  cursor: pointer;
-  touch-action: pan-y;
-  font: inherit;
-  text-shadow: 0 1px 3px white;
-}
-
-.hpm-detail__activate:disabled {
-  cursor: progress;
-}
-
-.hpm-detail__activate:focus-visible,
 .hpm-marker:focus-visible,
 .hpm-place-card a:focus-visible {
   outline: 3px solid var(--hpm-accent, #2563eb);
@@ -57,6 +31,11 @@
   min-height: 1.5em;
   margin-block: 0.25rem;
   font-size: 0.875rem;
+}
+
+.hpm-detail__status:empty,
+.hpm-overview__status:empty {
+  display: none;
 }
 
 .hpm-place-list {
@@ -105,33 +84,8 @@
   border-radius: 0.5rem;
   background: var(--hpm-surface);
   overflow: hidden;
-  pointer-events: none;
-  touch-action: pan-y;
-}
-
-.hpm-overview[data-hpm-active='true'] .hpm-overview__canvas {
   pointer-events: auto;
   touch-action: auto;
-}
-
-.hpm-overview__activate {
-  position: relative;
-  display: block;
-  width: 100%;
-  height: var(--hpm-overview-height);
-  min-height: 16rem;
-  margin-top: calc(-1 * max(16rem, var(--hpm-overview-height)));
-  border: 1px solid #64748b;
-  border-radius: 0.5rem;
-  background: rgb(241 245 249 / 48%);
-  color: var(--hpm-text);
-  cursor: pointer;
-  touch-action: pan-y;
-  font: inherit;
-}
-
-.hpm-overview__activate:disabled {
-  cursor: progress;
 }
 
 .hpm-overview__status {
@@ -246,8 +200,7 @@
 }
 
 @media (max-width: 600px) {
-  .hpm-detail__canvas,
-  .hpm-detail__activate {
+  .hpm-detail__canvas {
     height: var(--hpm-mobile-height);
   }
 

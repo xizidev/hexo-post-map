@@ -44,17 +44,17 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
     page.setDefaultTimeout(5_000);
     page.setDefaultNavigationTimeout(5_000);
     await page.goto(`${origin}/blog/posts/single/`);
-    const activate = page.locator('[data-hpm-activate]');
-    await expect(activate).toBeEnabled();
+    await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
+    const detailMarker = page.getByRole('button', { name: 'Shanghai GCJ-02', exact: true });
+    await expect(detailMarker).toBeEnabled();
     const detailId = await page.evaluate(() => Reflect.get(window, '__hpmCache').id);
-    await activate.click();
-    await page.getByRole('button', { name: 'Shanghai GCJ-02', exact: true }).click();
+    await detailMarker.click();
     await expect(page.getByRole('link', { name: '在高德地图中查看' })).toBeVisible();
 
     await page.goto(`${origin}/blog/map/`);
-    await expect(activate).toBeEnabled();
+    await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: '查看此处的 4 篇文章' })).toBeEnabled();
     const overviewId = await page.evaluate(() => Reflect.get(window, '__hpmCache').id);
-    await activate.click();
     await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
     await page.getByRole('button', { name: '查看此处的 2 篇文章' }).click();
     await expect(page.getByRole('dialog', { name: '此处的文章' })).toBeVisible();
@@ -66,10 +66,7 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
         .poll(() => page.evaluate(() => Reflect.get(window, '__hpmCache')))
         .toEqual({ id: detailId, restores: visit });
       expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.length)).toBe(1);
-      await expect(activate).toHaveCount(1);
-      await page.keyboard.press('Escape');
-      await expect(activate).toBeFocused();
-      await page.keyboard.press('Enter');
+      await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
       await page.getByRole('button', { name: 'Shanghai GCJ-02', exact: true }).click();
       await expect(page.getByRole('link', { name: '在高德地图中查看' })).toBeVisible();
 
@@ -79,7 +76,7 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
         .poll(() => page.evaluate(() => Reflect.get(window, '__hpmCache')))
         .toEqual({ id: overviewId, restores: visit });
       expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.length)).toBe(1);
-      await expect(activate).toHaveCount(1);
+      await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
       await expect(page.locator('[data-hpm-show-list]')).toHaveCount(1);
       const panel = page.getByRole('dialog', { name: '此处的文章' });
       await expect(panel.locator('li')).toHaveCount(2);

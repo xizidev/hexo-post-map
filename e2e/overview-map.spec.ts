@@ -7,7 +7,9 @@ for (const mobile of [false, true]) {
   }) => {
     await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
     await page.goto('/blog/map/');
-    await page.locator('[data-hpm-activate]').click();
+    const root = page.locator('[data-hpm-overview]');
+    await expect(root.locator('[data-hpm-activate]')).toHaveCount(0);
+    await expect(root).toHaveAttribute('data-hpm-active', 'true');
     expect(network.sdkRequests).toBe(1);
     await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
     await expect(page.getByRole('button', { name: '预览文章：Mountain itinerary' })).toBeVisible();
@@ -72,7 +74,6 @@ test('failed representative images use the packaged placeholder and the list rem
   page,
 }) => {
   await page.goto('/blog/map/');
-  await page.locator('[data-hpm-activate]').click();
   await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
   await page.getByRole('button', { name: '预览文章：Quzhou multiple places' }).click();
   const preview = page.getByRole('dialog', { name: '文章预览' });
@@ -89,7 +90,7 @@ test('a surviving cluster at maximum zoom opens its list without another zoom', 
   page,
 }) => {
   await page.goto('/blog/map/');
-  await page.locator('[data-hpm-activate]').click();
+  await expect(page.getByRole('button', { name: '查看此处的 4 篇文章' })).toBeEnabled();
   // The SDK supplies the current zoom; retain a large pixel-grid cluster at its limit.
   await page.evaluate(() => {
     Reflect.get(window, '__hpmSdk').maps[0].zoom = 18;
@@ -101,7 +102,8 @@ test('a surviving cluster at maximum zoom opens its list without another zoom', 
 
 test('SDK failure and later map errors reveal the overview fallback', async ({ page }) => {
   await page.goto('/blog/map/');
-  await expect(page.locator('[data-hpm-activate]')).toBeEnabled();
+  await expect(page.locator('[data-hpm-show-list]')).toBeVisible();
+  await expect(page.locator('[data-hpm-status]')).toBeEmpty();
   await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].emit('error'));
   await expect(page.locator('[data-hpm-fallback]')).toBeVisible();
   await expect(page.locator('[data-hpm-status]')).toContainText('无法加载');

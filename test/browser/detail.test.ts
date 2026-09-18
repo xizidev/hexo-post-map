@@ -56,14 +56,10 @@ describe('detail hydration', () => {
       pageTransition('pageshow', true);
       pageTransition('pageshow', true);
       await flush();
-      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
       expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
-      root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
       expect(root.dataset.hpmActive).toBe('true');
       expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
-      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      expect(root.dataset.hpmActive).toBe('false');
-      expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
     }
     expect(load).toHaveBeenCalledTimes(1);
     expect(mountDetail).toHaveBeenCalledTimes(1);
@@ -94,7 +90,8 @@ describe('detail hydration', () => {
     const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
     pending.resolve(handle);
     await flush();
-    expect(root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.disabled).toBe(false);
+    expect(root.querySelector('[data-hpm-activate]')).toBe(null);
+    expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
     expect(handle.destroy).not.toHaveBeenCalled();
   });
@@ -130,7 +127,7 @@ describe('detail hydration', () => {
     otherBundle.initializeDetailMaps(document, load);
     expect(otherBundle.hydrateDetail(root, load)).toBe(first);
     await flush();
-    expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+    expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
     expect(mountDetail).toHaveBeenCalledTimes(1);
     expect(load).toHaveBeenCalledTimes(1);
     first.destroy();
@@ -159,7 +156,8 @@ describe('detail hydration', () => {
       expect(second).not.toBe(first);
       await flush();
       expect(mountDetail).toHaveBeenCalledTimes(2);
-      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
+      expect(handles[1]!.setInteractive).toHaveBeenLastCalledWith(true);
       expect(handles[0]!.destroy).toHaveBeenCalledTimes(1);
       second.destroy();
     },
@@ -194,18 +192,19 @@ describe('detail hydration', () => {
     await flush();
     expect(load).toHaveBeenCalledTimes(1);
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
-    expect(root.querySelector('[data-hpm-status]')!.textContent).toContain('加载');
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
     expect(mountDetail.mock.calls[0]?.[1]).toMatchObject({ map, defaultZoom: 11 });
     pending.resolve(handle);
     await flush();
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
-    expect(root.querySelector('[data-hpm-status]')!.textContent).toContain('加载完成');
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
+    expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     expect(disconnect).toHaveBeenCalled();
     controller.destroy();
     expect(handle.destroy).toHaveBeenCalledTimes(1);
   });
 
-  it('requires intentional activation and releases interaction with Escape', async () => {
+  it('enables interaction automatically without an activation overlay or success prompt', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const root = fixture();
     const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
@@ -214,18 +213,10 @@ describe('detail hydration', () => {
       mountOverview: vi.fn(),
     }));
     await flush();
-    const activate = root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!;
-    expect(activate.type).toBe('button');
-    expect(root.dataset.hpmActive).not.toBe('true');
-    expect(handle.setInteractive).not.toHaveBeenCalledWith(true);
-    root.dispatchEvent(new WheelEvent('wheel', { cancelable: true }));
-    expect(handle.setInteractive).not.toHaveBeenCalledWith(true);
-    activate.click();
+    expect(root.querySelector('[data-hpm-activate]')).toBe(null);
     expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     expect(root.dataset.hpmActive).toBe('true');
-    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
-    expect(document.activeElement).toBe(activate);
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
     controller.destroy();
   });
 

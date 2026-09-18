@@ -135,7 +135,7 @@ The default card is 220px high (180px on small screens), before the article. Use
 
 Use at most one tag per post. A tag also overrides automatic placement in `before` or `after` mode. Manual mode without a tag renders no detail card; the article still participates in the overview. Set `post.enabled: false` to hide detail cards across the site.
 
-The card loads near the viewport. Click its activation button or focus it and press Enter to interact; Esc releases interaction. Wheel zoom and touch dragging stay disabled before activation. Place links remain available when JavaScript, the provider, or map initialization fails. An SDK load timeout requires a **page reload** to retry.
+The card loads near the viewport and becomes interactive automatically. Routine loading and success messages stay hidden; when JavaScript, the provider, or map initialization fails, a concise error and the place links remain available. An SDK load timeout requires a **page reload** to retry.
 
 The overview chooses the first safe image in this order: `thumbnail`, an image in rendered article content, then the bundled placeholder. A chosen image that later fails to load is replaced with the placeholder. Only one representative image per article is used.
 
@@ -155,7 +155,7 @@ The default overview requests the theme's `page` layout, with a standalone fallb
 - Build fails: read the source path and field in the plugin error. Enabled invalid configuration is a build error; missing configuration is a no-op.
 - Blank or failed map: check Web key type, allowed deployment domain, exactly one security mode, proxy availability, browser console/CSP reports, and network access. Reload after correcting configuration or an SDK timeout.
 - Broken image: use a safe HTTP(S) or site-relative image URL and verify it is publicly accessible.
-- Sensitive location: publish a city or an intentionally approximate point. All generated detail coordinates and overview locations are public. The plugin does not request the visitor's geolocation; loading AMap still contacts a third-party service before map interaction is activated.
+- Sensitive location: publish a city or an intentionally approximate point. All generated detail coordinates and overview locations are public. The plugin does not request the visitor's geolocation; loading AMap still contacts a third-party service as the map approaches the viewport.
 
 Read [security, CSP, and privacy](https://github.com/xizidev/hexo-post-map/blob/main/docs/security.md) before deployment. There is no universal copy-paste CSP for the externally loaded SDK; documented origins and a Report-Only rollout are provided there.
 
