@@ -20,6 +20,11 @@ test.describe('without JavaScript', () => {
     await page.goto('/blog/map/');
     const fallback = page.locator('[data-hpm-fallback]');
     await expect(fallback).toBeVisible();
+    await expect(page.locator('[data-hpm-overview]')).toHaveCSS('display', 'block');
+    const mapBounds = await page.locator('[data-hpm-canvas]').boundingBox();
+    expect((await fallback.boundingBox())!.y).toBeGreaterThanOrEqual(
+      mapBounds!.y + mapBounds!.height,
+    );
     await expect(fallback.locator('li')).toHaveCount(4);
     await expect(fallback.locator('[data-attack]')).toHaveCount(0);
     const article = fallback.getByRole('link', { name: 'Mountain itinerary', exact: true });
@@ -55,7 +60,7 @@ for (const mobile of [false, true]) {
     const overlap = page.getByRole('button', { name: '查看此处的 2 篇文章' });
     await tabTo(page, overlap);
     await page.keyboard.press('Enter');
-    const group = page.getByRole('dialog', { name: '此处的文章' });
+    const group = page.getByRole('dialog', { name: '2 篇文章' });
     await expect(group.locator('li')).toHaveCount(2);
     await expect(group.getByRole('button', { name: '关闭文章面板' })).toBeFocused();
     await expect(group).toHaveCSS('transition-duration', '0s');
@@ -67,8 +72,9 @@ for (const mobile of [false, true]) {
     await expect(overlap).toBeFocused();
     await tabTo(page, page.getByRole('button', { name: '预览文章：Mountain itinerary' }));
     await page.keyboard.press('Enter');
-    const preview = page.getByRole('dialog', { name: '文章预览' });
-    await tabTo(page, preview.locator('a').filter({ has: page.locator('img') }));
+    const preview = page.getByRole('dialog', { name: '1 篇文章' });
+    await expect(preview.locator('a')).toHaveCount(1);
+    await tabTo(page, preview.locator('a.hpm-post__link'));
     await page.keyboard.press('Enter');
     await expect(page).toHaveURL(/\/blog\/posts\/route\/$/);
     const marker = page.getByRole('button', { name: 'Visitor center GCJ-02' });

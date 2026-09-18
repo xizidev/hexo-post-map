@@ -493,25 +493,31 @@ describe('article panels', () => {
       const origin = document.createElement('button');
       document.body.append(origin);
       origin.focus();
+      const onClose = vi.fn();
       const panel = renderPostPanel([a, b], viewport, {
         container: document.body,
         placeholderUrl: '/placeholder.svg',
         origin,
+        onClose,
       });
       expect(panel.element.getAttribute('role')).toBe('dialog');
       expect(panel.element.dataset.hpmViewport).toBe(viewport);
-      expect(panel.element.getAttribute('aria-label')).toContain('文章');
+      expect(panel.element.getAttribute('aria-label')).toBe('2 篇文章');
+      expect(panel.element.id).toMatch(/^hpm-panel-\d+$/);
+      expect(panel.element.querySelector('.hpm-panel__header')).not.toBeNull();
+      expect(panel.element.querySelector('.hpm-panel__scroller > .hpm-post-list')).not.toBeNull();
+      expect(panel.element.querySelector('.hpm-panel__close')?.textContent).toBe('×');
+      expect(panel.element.querySelector('.hpm-panel__close')?.getAttribute('aria-label')).toBe(
+        '关闭文章面板',
+      );
+      expect(panel.element.querySelectorAll('a.hpm-post__link')).toHaveLength(2);
+      expect(panel.element.querySelectorAll('.hpm-post__link img')).toHaveLength(2);
       expect(Array.from(panel.element.querySelectorAll('time')).map((el) => el.dateTime)).toEqual([
         b.date,
         a.date,
       ]);
       const links = Array.from(panel.element.querySelectorAll('a'));
-      expect(links.map((link) => link.getAttribute('href'))).toEqual([
-        '/blog/b/',
-        '/blog/b/',
-        '/blog/a/',
-        '/blog/a/',
-      ]);
+      expect(links.map((link) => link.getAttribute('href'))).toEqual(['/blog/b/', '/blog/a/']);
       expect(panel.element.querySelector('[onerror]')).toBe(null);
       expect(panel.element.textContent).toContain(a.title);
       const image = panel.element.querySelector('img')!;
@@ -527,6 +533,7 @@ describe('article panels', () => {
       expect(panel.element.isConnected).toBe(false);
       expect(document.activeElement).toBe(origin);
       panel.destroy();
+      expect(onClose).toHaveBeenCalledTimes(1);
     },
   );
   it('rejects executable post and image URLs even when used without the controller', () => {
@@ -536,6 +543,8 @@ describe('article panels', () => {
       { container: document.body, placeholderUrl: '/placeholder.svg' },
     );
     expect(panel.element.querySelector('a')).toBe(null);
+    expect(panel.element.getAttribute('aria-label')).toBe('1 篇文章');
+    expect(panel.element.querySelector('div.hpm-post__link > .hpm-post__body')).not.toBeNull();
     expect(panel.element.querySelector('img')!.getAttribute('src')).toBe('/placeholder.svg');
     panel.destroy();
   });
@@ -664,7 +673,48 @@ describe('overview hydration', () => {
     expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
     expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     (root.querySelector('[data-hpm-show-list]') as HTMLButtonElement).click();
-    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+    expect(root.querySelectorAll('.hpm-panel .hpm-post')).toHaveLength(2);
+    controller.destroy();
+  });
+  it('shares one panel across all posts and marker selections with valid controls and close state', async () => {
+    const { root, mountOverview, controller } = setup({ version: 1, posts: [a, b] });
+    await flush();
+    const toggle = root.querySelector<HTMLButtonElement>('[data-hpm-show-list]')!;
+    expect(toggle.textContent).toBe('全部文章 2');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.hasAttribute('aria-controls')).toBe(false);
+    toggle.click();
+    const first = root.querySelector<HTMLElement>('.hpm-panel')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-controls')).toBe(first.id);
+    expect(Array.from(first.querySelectorAll('time')).map((time) => time.dateTime)).toEqual([
+      b.date,
+      a.date,
+    ]);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+    toggle.click();
+    expect(root.querySelector('.hpm-panel')).toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.hasAttribute('aria-controls')).toBe(false);
+    toggle.click();
+    const next = root.querySelector<HTMLElement>('.hpm-panel')!;
+    expect(next.id).not.toBe(first.id);
+    expect(toggle.getAttribute('aria-controls')).toBe(next.id);
+    const origin = document.createElement('button');
+    root.append(origin);
+    mountOverview.mock.calls[0]![1].onPostSelect(a, origin);
+    expect(root.querySelectorAll('.hpm-panel')).toHaveLength(1);
+    expect(root.querySelectorAll('.hpm-panel .hpm-post')).toHaveLength(1);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.hasAttribute('aria-controls')).toBe(false);
+    toggle.click();
+    expect(root.querySelectorAll('.hpm-panel')).toHaveLength(1);
+    root.querySelector<HTMLButtonElement>('.hpm-panel__close')!.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.hasAttribute('aria-controls')).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
     controller.destroy();
   });
   it('opens a selected leaf or terminal group and closes panels with Escape', async () => {

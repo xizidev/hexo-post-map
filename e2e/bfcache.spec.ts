@@ -57,7 +57,7 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
     const overviewId = await page.evaluate(() => Reflect.get(window, '__hpmCache').id);
     await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
     await page.getByRole('button', { name: '查看此处的 2 篇文章' }).click();
-    await expect(page.getByRole('dialog', { name: '此处的文章' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '2 篇文章' })).toBeVisible();
 
     for (let visit = 1; visit <= 2; visit++) {
       await page.goBack({ waitUntil: 'commit' });
@@ -78,7 +78,7 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
       expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.length)).toBe(1);
       await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
       await expect(page.locator('[data-hpm-show-list]')).toHaveCount(1);
-      const panel = page.getByRole('dialog', { name: '此处的文章' });
+      const panel = page.getByRole('dialog', { name: '2 篇文章' });
       await expect(panel.locator('li')).toHaveCount(2);
       await panel.getByRole('button', { name: '关闭文章面板' }).click();
       const overlap = page.getByRole('button', { name: '查看此处的 2 篇文章' });

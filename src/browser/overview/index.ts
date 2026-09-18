@@ -65,6 +65,7 @@ export function hydrateOverview(
   const abort = new AbortController();
   let handle: MapHandle | undefined;
   let panel: PanelHandle | undefined;
+  let posts: readonly OverviewPost[] = [];
   let disposed = false;
   let failed = false;
   const cleanups: (() => void)[] = [];
@@ -73,7 +74,7 @@ export function hydrateOverview(
   showList.type = 'button';
   showList.className = 'hpm-overview__list-toggle';
   showList.dataset.hpmShowList = '';
-  showList.textContent = '显示全部文章列表';
+  showList.textContent = '全部文章 0';
   showList.hidden = true;
   showList.setAttribute('aria-expanded', 'false');
   function fail() {
@@ -92,10 +93,8 @@ export function hydrateOverview(
     if (!event.persisted) destroy();
   };
   const onList = () => {
-    const visible = showList.getAttribute('aria-expanded') !== 'true';
-    showFallback(root, visible);
-    showList.setAttribute('aria-expanded', String(visible));
-    showList.textContent = visible ? '收起全部文章列表' : '显示全部文章列表';
+    if (showList.getAttribute('aria-expanded') === 'true') panel?.destroy();
+    else select(posts, showList, () => showList);
   };
   function destroy() {
     if (disposed) return;
@@ -157,8 +156,19 @@ export function hydrateOverview(
         origin,
         resolveOrigin,
         fallback: canvas ?? undefined,
+        onClose: () => {
+          if (origin === showList) {
+            showList.setAttribute('aria-expanded', 'false');
+            showList.removeAttribute('aria-controls');
+          }
+          panel = undefined;
+        },
       },
     );
+    if (origin === showList) {
+      showList.setAttribute('aria-expanded', 'true');
+      showList.setAttribute('aria-controls', panel.element.id);
+    }
   }
   async function start() {
     setStatus(root, '');
@@ -168,7 +178,7 @@ export function hydrateOverview(
       if (!response.ok) throw new Error('Overview fetch failed');
       const data: unknown = await response.json();
       if (disposed || failed) return;
-      const posts = readPosts(data);
+      posts = readPosts(data);
       if (posts.length === 0) {
         setStatus(
           root,
@@ -196,6 +206,7 @@ export function hydrateOverview(
       if (disposed || failed) return;
       root.dataset.hpmActive = 'true';
       showFallback(root, false);
+      showList.textContent = `全部文章 ${posts.length}`;
       showList.hidden = false;
       setStatus(root, '');
     } catch {

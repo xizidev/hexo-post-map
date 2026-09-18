@@ -64,7 +64,7 @@ for (const mobile of [false, true]) {
     const overlap = page.getByRole('button', { name: '查看此处的 2 篇文章' });
     await overlap.focus();
     await page.keyboard.press('Enter');
-    const panel = page.getByRole('dialog', { name: '此处的文章' });
+    const panel = page.getByRole('dialog', { name: '2 篇文章' });
     await expect(panel).toHaveAttribute('data-hpm-viewport', mobile ? 'mobile' : 'desktop');
     await expect(panel.locator('li')).toHaveCount(2);
     await expect(panel.locator('time')).toHaveText(['2025-05-01', '2025-02-01']);
@@ -81,7 +81,7 @@ for (const mobile of [false, true]) {
     await expect(overlap).toBeFocused();
     const marker = page.getByRole('button', { name: '预览文章：Mountain itinerary' });
     await marker.click();
-    const preview = page.getByRole('dialog', { name: '文章预览' });
+    const preview = page.getByRole('dialog', { name: '1 篇文章' });
     await expect(preview.locator('img')).toHaveAttribute(
       'src',
       '/blog/hexo-post-map/assets/placeholder.svg',
@@ -92,6 +92,66 @@ for (const mobile of [false, true]) {
       .click();
     await expect(page).toHaveURL(/\/blog\/posts\/route\/$/);
     await expect(page.locator('[data-hpm-detail]')).toBeVisible();
+  });
+
+  test(`all-posts panel scrolls within its bounds without growing the page on ${mobile ? 'mobile' : 'desktop'}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
+    await page.route('**/map/posts.json', (route) =>
+      route.fulfill({
+        json: {
+          version: 1,
+          posts: Array.from({ length: 30 }, (_, index) => ({
+            title: `Article ${index + 1}`,
+            url: '/blog/posts/route/',
+            image: '/blog/hexo-post-map/assets/placeholder.svg',
+            date: `2025-06-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
+            location: { name: 'Shanghai', longitude: 121, latitude: 31 },
+          })),
+        },
+      }),
+    );
+    await page.goto('/blog/map/');
+    const toggle = page.getByRole('button', { name: '全部文章 30', exact: true });
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+    await toggle.click();
+    const panel = page.getByRole('dialog', { name: '30 篇文章', exact: true });
+    await expect(panel.locator('.hpm-post__link')).toHaveCount(30);
+    await expect(panel.locator('.hpm-post__title').first()).toHaveText('Article 30');
+    await expect(toggle).toHaveAttribute('aria-controls', (await panel.getAttribute('id'))!);
+    await expect(page.locator('[data-hpm-fallback]')).toBeHidden();
+    const bounds = await panel.boundingBox();
+    const mapBounds = await page.locator('[data-hpm-canvas]').boundingBox();
+    const titleBounds = await page.locator('[data-hpm-overview] > h1').boundingBox();
+    expect(titleBounds!.y + titleBounds!.height).toBeLessThanOrEqual(mapBounds!.y);
+    expect(bounds!.height).toBeLessThanOrEqual(
+      mobile ? 844 * 0.65 + 1 : mapBounds!.height * 0.7 + 1,
+    );
+    if (!mobile) expect(bounds!.y).toBe(mapBounds!.y + 16);
+    const toggleBounds = await toggle.boundingBox();
+    expect(toggleBounds!.y).toBeGreaterThanOrEqual(mapBounds!.y);
+    expect(toggleBounds!.y + toggleBounds!.height).toBeLessThanOrEqual(
+      mapBounds!.y + mapBounds!.height,
+    );
+    const scroller = panel.locator('.hpm-panel__scroller');
+    expect(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+    const headerY = (await panel.locator('.hpm-panel__header').boundingBox())!.y;
+    await scroller.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    expect((await panel.locator('.hpm-panel__header').boundingBox())!.y).toBe(headerY);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(pageHeight);
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(toggle).toBeFocused();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).not.toHaveAttribute('aria-controls');
+    await toggle.click();
+    await panel.locator('.hpm-post__location').first().click();
+    await expect(page).toHaveURL(/\/blog\/posts\/route\/$/);
   });
 }
 
@@ -106,6 +166,11 @@ for (const failure of ['http', 'network']) {
     await expect(page.locator('[data-hpm-status]')).toContainText('无法加载');
     const fallback = page.locator('[data-hpm-fallback]');
     await expect(fallback).toBeVisible();
+    await expect(page.locator('[data-hpm-overview]')).toHaveCSS('display', 'block');
+    const mapBounds = await page.locator('[data-hpm-canvas]').boundingBox();
+    expect((await fallback.boundingBox())!.y).toBeGreaterThanOrEqual(
+      mapBounds!.y + mapBounds!.height,
+    );
     await expect(fallback.locator('time')).toHaveText([
       '2025-05-01',
       '2025-04-01',
@@ -123,14 +188,15 @@ test('failed representative images use the packaged placeholder and the list rem
   await page.goto('/blog/map/');
   await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
   await page.getByRole('button', { name: '预览文章：Quzhou multiple places' }).click();
-  const preview = page.getByRole('dialog', { name: '文章预览' });
+  const preview = page.getByRole('dialog', { name: '1 篇文章' });
   await expect(preview.locator('img')).toHaveAttribute(
     'src',
     '/blog/hexo-post-map/assets/placeholder.svg',
   );
   await preview.getByRole('button', { name: '关闭文章面板' }).click();
-  await page.getByRole('button', { name: '显示全部文章列表' }).click();
-  await expect(page.locator('[data-hpm-fallback]')).toBeVisible();
+  await page.getByRole('button', { name: '全部文章 4' }).click();
+  await expect(page.getByRole('dialog', { name: '4 篇文章' }).locator('li')).toHaveCount(4);
+  await expect(page.locator('[data-hpm-fallback]')).toBeHidden();
 });
 
 test('a surviving cluster at maximum zoom opens its list without another zoom', async ({
@@ -143,7 +209,7 @@ test('a surviving cluster at maximum zoom opens its list without another zoom', 
     Reflect.get(window, '__hpmSdk').maps[0].zoom = 18;
   });
   await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
-  await expect(page.getByRole('dialog', { name: '此处的文章' }).locator('li')).toHaveCount(4);
+  await expect(page.getByRole('dialog', { name: '4 篇文章' }).locator('li')).toHaveCount(4);
   expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].zoom)).toBe(18);
 });
 
