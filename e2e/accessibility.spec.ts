@@ -83,7 +83,7 @@ for (const mobile of [false, true]) {
       'aria-label',
       '文章地点地图：Summit GCJ-02、Visitor center GCJ-02、Cableway GCJ-02',
     );
-    await canvas.focus();
+    await tabTo(page, canvas);
     await page.keyboard.press('ArrowRight');
     await expect(canvas).toBeFocused();
     expect(

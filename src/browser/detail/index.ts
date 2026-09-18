@@ -35,6 +35,7 @@ export function hydrateDetail(
   function fail() {
     if (disposed) return;
     failed = true;
+    if (canvas) canvas.tabIndex = -1;
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
     setStatus(root, '地图暂时无法加载，请使用下方地点链接。');
@@ -47,6 +48,7 @@ export function hydrateDetail(
   function destroy() {
     if (disposed) return;
     disposed = true;
+    if (canvas) canvas.tabIndex = -1;
     if (registry.get(root) === controller) registry.delete(root);
     observer?.disconnect();
     abort.abort();
@@ -90,6 +92,7 @@ export function hydrateDetail(
       handle = mounted;
       handle.setInteractive(true);
       if (disposed || failed) return;
+      canvas!.tabIndex = 0;
       root.dataset.hpmActive = 'true';
       showFallback(root, false);
       setStatus(root, '');

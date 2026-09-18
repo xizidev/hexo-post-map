@@ -1,6 +1,16 @@
 import { createServer } from 'node:http';
-import { chromium, expect, test, type Browser } from 'playwright/test';
+import { chromium, expect, test, type Browser, type Locator, type Page } from 'playwright/test';
 import { fakeSdk } from './fake-sdk';
+
+async function tabTo(page: Page, target: Locator) {
+  await expect(target).toBeVisible();
+  // Always leave any restored focus first so each visit tests actual Tab navigation.
+  for (let press = 0; press < 30; press++) {
+    await page.keyboard.press('Tab');
+    if (await target.evaluate((element) => element === document.activeElement)) return;
+  }
+  await expect(target).toBeFocused();
+}
 
 test('real Chromium back/forward cache preserves usable detail and overview controllers', async () => {
   // Request interception disables BFCache. Serve the packed fixture unchanged except for a
@@ -49,7 +59,8 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
     await expect(detailMarker).toBeVisible();
     await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true');
     const detailId = await page.evaluate(() => Reflect.get(window, '__hpmCache').id);
-    await page.locator('[data-hpm-canvas]').focus();
+    await expect(page.locator('[data-hpm-canvas]')).toHaveAttribute('tabindex', '0');
+    await tabTo(page, page.locator('[data-hpm-canvas]'));
     await page.keyboard.press('ArrowRight');
     expect(
       await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].status.keyboardEnable),
@@ -74,7 +85,8 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
       await expect(detailMarker).toBeVisible();
       await expect(detailMarker).toBeEmpty();
       const canvas = page.locator('[data-hpm-canvas]');
-      await canvas.focus();
+      await expect(canvas).toHaveAttribute('tabindex', '0');
+      await tabTo(page, canvas);
       await page.keyboard.press('ArrowRight');
       await expect(canvas).toBeFocused();
       expect(
@@ -98,6 +110,23 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
       await expect(overlap).toBeFocused();
       await page.keyboard.press('Enter');
       await expect(panel).toBeVisible();
+    }
+
+    await page.goBack({ waitUntil: 'commit' });
+    await expect(page).toHaveURL(`${origin}/blog/posts/single/`);
+    const canvas = page.locator('[data-hpm-canvas]');
+    await tabTo(page, canvas);
+    // Dispatch ordinary pagehide in place to inspect the destroyed document's Tab order.
+    await page.evaluate(() =>
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: false })),
+    );
+    await expect(canvas).toHaveAttribute('tabindex', '-1');
+    await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'false');
+    await expect(detailMarker).toHaveCount(0);
+    await expect(page.locator('[data-hpm-fallback]')).toBeVisible();
+    for (let press = 0; press < 8; press++) {
+      await page.keyboard.press('Tab');
+      await expect(canvas).not.toBeFocused();
     }
   } finally {
     await browser?.close();
