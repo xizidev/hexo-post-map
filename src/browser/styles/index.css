@@ -182,6 +182,7 @@
 }
 
 .hpm-cluster__surface {
+  box-sizing: border-box;
   display: grid;
   place-items: center;
   border: 1px solid var(--hpm-cluster-border);

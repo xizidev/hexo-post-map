@@ -38,6 +38,36 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+function responsiveMedia(initial: boolean) {
+  let matches = initial;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const query = {
+    media: '(max-width: 600px)',
+    get matches() {
+      return matches;
+    },
+    addEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.add(listener);
+    }),
+    removeEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.delete(listener);
+    }),
+  } as unknown as MediaQueryList;
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((media: string) =>
+      media === query.media ? query : ({ matches: false } as MediaQueryList),
+    ),
+  );
+  return {
+    query,
+    change(next: boolean) {
+      matches = next;
+      const event = { matches: next, media: query.media } as MediaQueryListEvent;
+      listeners.forEach((listener) => listener(event));
+    },
+  };
+}
 function fixture() {
   document.body.innerHTML = renderOverview({
     posts: [b, a],
@@ -344,6 +374,40 @@ describe('AMap overview clustering boundary', () => {
     expect(clusterInstance.setMap).toHaveBeenCalledWith(null);
     button.click();
     expect(options.onPostSelect).toHaveBeenCalledTimes(1);
+  });
+  it('reanchors mounted leaves across responsive breakpoints and removes the listener on destroy', async () => {
+    const media = responsiveMedia(false);
+    const provider = await adapter();
+    const pending = provider.mountOverview(document.createElement('div'), overviewOptions());
+    await flush();
+    mapInstance.emit('complete');
+    const handle = await pending;
+    const leaf = new ClusterMarker();
+    clusterInstance.options.renderMarker({ marker: leaf, data: [clusterInstance.data[0]!] });
+    const group = new ClusterMarker();
+    clusterInstance.options.renderClusterMarker({
+      marker: group,
+      clusterData: clusterInstance.data,
+    });
+    expect(leaf.offset).toEqual({ x: -36, y: -72 });
+    expect(group.offset).toEqual({ x: -22, y: -22 });
+    const leafOffsets = vi.spyOn(leaf, 'setOffset');
+    const groupOffsets = vi.spyOn(group, 'setOffset');
+
+    media.change(true);
+    expect(leaf.offset).toEqual({ x: -32, y: -66 });
+    expect(leafOffsets).toHaveBeenCalledOnce();
+    expect(groupOffsets).not.toHaveBeenCalled();
+
+    media.change(false);
+    expect(leaf.offset).toEqual({ x: -36, y: -72 });
+    expect(leafOffsets).toHaveBeenCalledTimes(2);
+
+    handle.destroy();
+    expect(media.query.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function));
+    media.change(true);
+    expect(leaf.offset).toEqual({ x: -36, y: -72 });
+    expect(leafOffsets).toHaveBeenCalledTimes(2);
   });
   it.each(['separable', 'maximum', 'identical'])(
     'handles a %s cluster through the pure decision',

@@ -12,7 +12,14 @@ for (const mobile of [false, true]) {
     await expect(root).toHaveAttribute('data-hpm-active', 'true');
     expect(network.sdkRequests).toBe(1);
     const initialCluster = page.getByRole('button', { name: '查看此处的 4 篇文章' });
-    await expect(initialCluster.locator('.hpm-cluster__surface--small')).toHaveCount(1);
+    const clusterSurface = initialCluster.locator('.hpm-cluster__surface--small');
+    await expect(clusterSurface).toHaveCount(1);
+    expect(
+      await clusterSurface.evaluate((surface) => {
+        const bounds = surface.getBoundingClientRect();
+        return { width: bounds.width, height: bounds.height };
+      }),
+    ).toEqual({ width: 34, height: 34 });
     expect(
       await page.evaluate(() => {
         const sdk = Reflect.get(window, '__hpmSdk');

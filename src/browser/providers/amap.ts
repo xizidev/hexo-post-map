@@ -400,6 +400,7 @@ async function mountOverview(
   if (options.signal?.aborted) throw new Error('Map initialization cancelled');
   if (!options.posts.length) throw new Error('Missing overview posts');
   return new Promise((resolve, reject) => {
+    const compactMedia = window.matchMedia?.('(max-width: 600px)');
     const map = new api.Map(container, {
       zoom: Math.min(4, options.maxZoom),
       // Keep overlapping points clustered at the terminal level, including manual zooming.
@@ -417,10 +418,12 @@ async function mountOverview(
       button: HTMLButtonElement;
       onClick: (event: MouseEvent) => void;
       awaitingMount: boolean;
+      post?: OverviewPost;
     }
     const buttons = new Map<HTMLButtonElement, RenderedButton>();
     const previousButtons = new WeakMap<ClusterMarker, RenderedButton>();
     const currentButtons = new Map<string, RenderedButton>();
+    const leafOffsets = new Map<boolean, readonly [x: number, y: number]>();
     let sweepFrame: number | undefined;
     function release(entry: RenderedButton) {
       buttons.delete(entry.button);
@@ -456,6 +459,7 @@ async function mountOverview(
       clearTimeout(timer);
       map.off('complete', ready);
       map.off('error', fail);
+      compactMedia?.removeEventListener('change', reanchorLeaves);
       options.signal?.removeEventListener('abort', cancel);
       observer.disconnect();
       if (sweepFrame !== undefined) window.cancelAnimationFrame(sweepFrame);
@@ -506,6 +510,22 @@ async function mountOverview(
         fail();
       }
     }
+    function reanchorLeaves(event: MediaQueryListEvent) {
+      if (destroyed) return;
+      try {
+        const leaves = Array.from(buttons.values()).filter(
+          (entry): entry is RenderedButton & { post: OverviewPost } => entry.post !== undefined,
+        );
+        if (!leaves.length) return;
+        const offset =
+          leafOffsets.get(event.matches) ??
+          createImageMarker(leaves[0]!.post, options.placeholderUrl, event.matches).offset;
+        leafOffsets.set(event.matches, offset);
+        leaves.forEach(({ marker }) => marker.setOffset(new api.Pixel(...offset)));
+      } catch {
+        fail();
+      }
+    }
     function render(context: ClusterContext, grouped: boolean) {
       if (destroyed) return;
       try {
@@ -521,10 +541,11 @@ async function mountOverview(
         if (old) release(old);
         const replacement = currentButtons.get(key);
         if (replacement) release(replacement);
-        const compact = window.matchMedia?.('(max-width: 600px)').matches ?? false;
+        const compact = compactMedia?.matches ?? false;
         const view = grouped
           ? createClusterMarker(posts.length)
           : createImageMarker(posts[0]!, options.placeholderUrl, compact);
+        if (!grouped) leafOffsets.set(compact, view.offset);
         const button = view.element;
         button.disabled = !active;
         button.tabIndex = active ? 0 : -1;
@@ -558,7 +579,14 @@ async function mountOverview(
           }
         };
         button.addEventListener('click', onClick);
-        const entry = { marker: context.marker, key, button, onClick, awaitingMount: true };
+        const entry = {
+          marker: context.marker,
+          key,
+          button,
+          onClick,
+          awaitingMount: true,
+          post: grouped ? undefined : posts[0],
+        };
         previousButtons.set(context.marker, entry);
         currentButtons.set(key, entry);
         buttons.set(button, entry);
@@ -571,6 +599,7 @@ async function mountOverview(
     }
     map.on('complete', ready);
     map.on('error', fail);
+    compactMedia?.addEventListener('change', reanchorLeaves);
     options.signal?.addEventListener('abort', cancel, { once: true });
     try {
       cluster = new api.MarkerCluster!(
