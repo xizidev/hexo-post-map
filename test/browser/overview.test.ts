@@ -194,6 +194,52 @@ function overviewOptions(overrides: Partial<OverviewMapOptions> = {}): OverviewM
   };
 }
 describe('AMap overview clustering boundary', () => {
+  it.each(['cluster', 'leaf'])(
+    'retains coincident articles when the SDK collapses %s callback data',
+    async (kind) => {
+      const provider = await adapter();
+      const third = {
+        ...b,
+        title: 'Elsewhere',
+        url: '/elsewhere/',
+        location: { name: 'B', longitude: 122, latitude: 32 },
+      };
+      const options = overviewOptions({ posts: [a, b, third] });
+      const pending = provider.mountOverview(document.createElement('div'), options);
+      await flush();
+      mapInstance.emit('complete');
+      const handle = await pending;
+      handle.setInteractive(true);
+      const marker = new ClusterMarker();
+      if (kind === 'cluster') {
+        clusterInstance.options.renderClusterMarker({
+          marker,
+          clusterData: [clusterInstance.data[0]!, clusterInstance.data[2]!],
+        });
+        expect(marker.content?.textContent).toBe('3');
+      }
+      // Real AMap returns one representative for the two exact-coordinate posts.
+      const terminal = new ClusterMarker();
+      if (kind === 'cluster')
+        clusterInstance.options.renderClusterMarker({
+          marker: terminal,
+          clusterData: [clusterInstance.data[0]!],
+        });
+      else
+        clusterInstance.options.renderMarker({
+          marker: terminal,
+          data: [clusterInstance.data[0]!],
+        });
+      expect(terminal.content?.textContent).toBe('2');
+      (terminal.content as HTMLButtonElement).click();
+      expect(vi.mocked(options.onGroupSelect).mock.calls[0]?.[0].map((post) => post.url)).toEqual([
+        b.url,
+        a.url,
+      ]);
+      expect(options.onPostSelect).not.toHaveBeenCalled();
+      handle.destroy();
+    },
+  );
   it.each([
     { start: 6, maxZoom: 8, steps: [7, 8] },
     { start: 6.25, maxZoom: 8.5, steps: [7.25, 8.25, 8.5] },
@@ -276,10 +322,7 @@ describe('AMap overview clustering boundary', () => {
       expect(root.querySelector('.hpm-panel')!.contains(document.activeElement)).toBe(true);
       const replacementMarker = redraw === 'new-marker' ? new ClusterMarker() : marker;
       if (redraw === 'removed-group') {
-        clusterInstance.options.renderMarker({
-          marker: replacementMarker,
-          data: [clusterInstance.data[0]!],
-        });
+        original.remove();
       } else {
         clusterInstance.options.renderClusterMarker({
           marker: replacementMarker,
@@ -287,7 +330,7 @@ describe('AMap overview clustering boundary', () => {
         });
       }
       const replacement = replacementMarker.content!;
-      original.replaceWith(replacement);
+      if (redraw !== 'removed-group') original.replaceWith(replacement);
       root
         .querySelector('.hpm-panel')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -378,16 +421,30 @@ describe('AMap overview clustering boundary', () => {
   it('reanchors mounted leaves across responsive breakpoints and removes the listener on destroy', async () => {
     const media = responsiveMedia(false);
     const provider = await adapter();
-    const pending = provider.mountOverview(document.createElement('div'), overviewOptions());
+    const pending = provider.mountOverview(
+      document.createElement('div'),
+      overviewOptions({
+        posts: [
+          a,
+          b,
+          {
+            ...a,
+            title: 'Elsewhere',
+            url: '/elsewhere/',
+            location: { name: 'B', longitude: 122, latitude: 32 },
+          },
+        ],
+      }),
+    );
     await flush();
     mapInstance.emit('complete');
     const handle = await pending;
     const leaf = new ClusterMarker();
-    clusterInstance.options.renderMarker({ marker: leaf, data: [clusterInstance.data[0]!] });
+    clusterInstance.options.renderMarker({ marker: leaf, data: [clusterInstance.data[2]!] });
     const group = new ClusterMarker();
     clusterInstance.options.renderClusterMarker({
       marker: group,
-      clusterData: clusterInstance.data,
+      clusterData: clusterInstance.data.slice(0, 2),
     });
     expect(leaf.offset).toEqual({ x: -36, y: -72 });
     expect(group.offset).toEqual({ x: -22, y: -22 });

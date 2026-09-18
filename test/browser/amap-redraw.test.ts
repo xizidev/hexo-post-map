@@ -88,7 +88,7 @@ async function setup() {
       url: `/post-${index}/`,
       image: '/image.jpg',
       date: '2026-01-01T00:00:00Z',
-      location: { name: 'Shanghai', longitude: 121, latitude: 31 },
+      location: { name: 'Shanghai', longitude: 121 + index / 1000, latitude: 31 },
     })),
     gridSize: 60,
     maxZoom: 18,

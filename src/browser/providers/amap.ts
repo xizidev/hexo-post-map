@@ -362,6 +362,16 @@ async function mountOverview(
   await loadCluster(api, options.signal);
   if (options.signal?.aborted) throw new Error('Map initialization cancelled');
   if (!options.posts.length) throw new Error('Missing overview posts');
+  // AMap can collapse exact-coordinate duplicates in renderer data. Preserve the
+  // full article membership ourselves instead of trusting the representative list.
+  const coordinateGroups = new Map<string, number[]>();
+  const groupsByPostId = options.posts.map((post, postId) => {
+    const key = `${post.location.longitude},${post.location.latitude}`;
+    let members = coordinateGroups.get(key);
+    if (!members) coordinateGroups.set(key, (members = []));
+    members.push(postId);
+    return members;
+  });
   return new Promise((resolve, reject) => {
     const compactMedia = window.matchMedia?.('(max-width: 600px)');
     const map = new api.Map(container, {
@@ -493,22 +503,23 @@ async function mountOverview(
       if (destroyed) return;
       try {
         const points = grouped ? context.clusterData : context.data;
-        const posts = points?.map((point) => point.post);
-        if (!posts?.length) throw new Error('Missing cluster data');
+        const postIds = [
+          ...new Set(points?.map((point) => groupsByPostId[point.postId] ?? [])),
+        ].flat();
+        const posts = postIds.map((postId) => options.posts[postId]!);
+        if (!posts.length) throw new Error('Missing cluster data');
+        const isGroup = posts.length > 1;
         // Stable membership survives vendor marker replacement and renderer ordering changes.
-        const key = points!
-          .map((point) => point.postId)
-          .sort((a, b) => a - b)
-          .join(',');
+        const key = postIds.sort((a, b) => a - b).join(',');
         const old = previousButtons.get(context.marker);
         if (old) release(old);
         const replacement = currentButtons.get(key);
         if (replacement) release(replacement);
         const compact = compactMedia?.matches ?? false;
-        const view = grouped
+        const view = isGroup
           ? createClusterMarker(posts.length)
           : createImageMarker(posts[0]!, options.placeholderUrl, compact);
-        if (!grouped) leafOffsets.set(compact, view.offset);
+        if (!isGroup) leafOffsets.set(compact, view.offset);
         const button = view.element;
         button.disabled = !active;
         button.tabIndex = active ? 0 : -1;
@@ -520,7 +531,7 @@ async function mountOverview(
           event.stopPropagation();
           if (destroyed || !active || button.disabled) return;
           try {
-            if (!grouped) {
+            if (!isGroup) {
               options.onPostSelect(posts[0]!, button, resolveOrigin);
               return;
             }
@@ -548,7 +559,7 @@ async function mountOverview(
           button,
           onClick,
           awaitingMount: true,
-          post: grouped ? undefined : posts[0],
+          post: isGroup ? undefined : posts[0],
         };
         previousButtons.set(context.marker, entry);
         currentButtons.set(key, entry);

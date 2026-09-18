@@ -40,7 +40,9 @@ export const fakeSdk = String.raw`
           setOffset: offset => { marker.offset = offset; },
         };
         this.markers.push(marker);
-        if (group.length > 1) this.options.renderClusterMarker({ marker, clusterData: group });
+        // Real AMap keeps count but collapses exact-coordinate representatives.
+        const representatives = [...new window.Map(group.map(point => [point.lnglat.join(','), point])).values()];
+        if (group.length > 1) this.options.renderClusterMarker({ marker, count: group.length, clusterData: representatives });
         else this.options.renderMarker({ marker, data: group });
       }
     }
