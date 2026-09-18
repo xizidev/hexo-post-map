@@ -132,8 +132,8 @@
   grid-area: map;
   position: absolute;
   z-index: 10;
-  bottom: 16px;
-  left: 16px;
+  top: 16px;
+  right: 16px;
 }
 
 .hpm-image-marker {
@@ -238,7 +238,7 @@
   box-sizing: border-box;
   position: absolute;
   z-index: 20;
-  top: 16px;
+  top: 72px;
   right: 16px;
   display: grid;
   width: min(320px, calc(100% - 32px));

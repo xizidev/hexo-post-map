@@ -115,6 +115,16 @@ for (const mobile of [false, true]) {
     await page.goto('/blog/map/');
     const toggle = page.getByRole('button', { name: '全部文章 30', exact: true });
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const initialMap = (await page.locator('[data-hpm-canvas]').boundingBox())!;
+    const initialToggle = (await toggle.boundingBox())!;
+    expect(Math.abs(initialToggle.y - initialMap.y - 16)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(initialMap.x + initialMap.width - initialToggle.x - initialToggle.width - 16),
+    ).toBeLessThanOrEqual(1);
+    expect(initialToggle.x).toBeGreaterThanOrEqual(initialMap.x);
+    expect(initialToggle.y + initialToggle.height).toBeLessThanOrEqual(
+      initialMap.y + initialMap.height,
+    );
     const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
     await toggle.click();
     const panel = page.getByRole('dialog', { name: '30 篇文章', exact: true });
@@ -129,12 +139,22 @@ for (const mobile of [false, true]) {
     expect(bounds!.height).toBeLessThanOrEqual(
       mobile ? 844 * 0.65 + 1 : mapBounds!.height * 0.7 + 1,
     );
-    if (!mobile) expect(bounds!.y).toBe(mapBounds!.y + 16);
+    if (!mobile) {
+      expect(bounds!.y).toBe(mapBounds!.y + 72);
+      expect(bounds!.x).toBeGreaterThanOrEqual(mapBounds!.x);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(mapBounds!.x + mapBounds!.width);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(mapBounds!.y + mapBounds!.height);
+    }
     const toggleBounds = await toggle.boundingBox();
+    expect(Math.abs(toggleBounds!.y - mapBounds!.y - 16)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(mapBounds!.x + mapBounds!.width - toggleBounds!.x - toggleBounds!.width - 16),
+    ).toBeLessThanOrEqual(1);
     expect(toggleBounds!.y).toBeGreaterThanOrEqual(mapBounds!.y);
     expect(toggleBounds!.y + toggleBounds!.height).toBeLessThanOrEqual(
       mapBounds!.y + mapBounds!.height,
     );
+    if (!mobile) expect(toggleBounds!.y + toggleBounds!.height).toBeLessThanOrEqual(bounds!.y);
     const scroller = panel.locator('.hpm-panel__scroller');
     expect(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
     const headerY = (await panel.locator('.hpm-panel__header').boundingBox())!.y;
@@ -147,6 +167,12 @@ for (const mobile of [false, true]) {
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
     await expect(toggle).toBeFocused();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(toggle).not.toHaveAttribute('aria-controls');
+    await toggle.click();
+    await expect(panel).toBeVisible();
+    await toggle.click();
+    await expect(panel).toHaveCount(0);
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await expect(toggle).not.toHaveAttribute('aria-controls');
     await toggle.click();
