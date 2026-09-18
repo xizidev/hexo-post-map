@@ -5,7 +5,7 @@
   --hpm-accent-contrast: #ffffff;
   --hpm-surface: #f1f5f9;
   --hpm-text: #172033;
-  --hpm-muted: #64748b;
+  --hpm-muted: #5b667a;
   --hpm-route-color: #0f766e;
   position: relative;
   margin-block: 1rem;
@@ -80,7 +80,7 @@
   --hpm-card-radius: 14px;
   --hpm-surface: #f1f5f9;
   --hpm-text: #172033;
-  --hpm-muted: #64748b;
+  --hpm-muted: #5b667a;
   position: relative;
   color: var(--hpm-text);
 }

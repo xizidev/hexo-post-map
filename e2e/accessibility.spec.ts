@@ -205,3 +205,35 @@ test('the article panel remains opaque when backdrop filters are unavailable', a
   expect(fallback.alpha).toBe(1);
   expect(fallback.contrast).toBeGreaterThanOrEqual(4.5);
 });
+
+test('article dates and locations meet normal-text contrast against their cards', async ({
+  page,
+}) => {
+  await page.goto('/blog/map/');
+  await page.getByRole('button', { name: '查看此处的 4 篇文章' }).click();
+  await page.getByRole('button', { name: '查看此处的 2 篇文章' }).click();
+  const metadataContrast = await page
+    .getByRole('dialog', { name: '2 篇文章' })
+    .locator('.hpm-post__link')
+    .first()
+    .evaluate((card) => {
+      const parse = (value: string) =>
+        (value.match(/[\d.]+/gu) ?? []).slice(0, 3).map((component) => Number(component));
+      const luminance = (components: number[]) => {
+        const [red, green, blue] = components.map((component) => {
+          const channel = component / 255;
+          return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+        });
+        return 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+      };
+      const surface = luminance(parse(getComputedStyle(card).backgroundColor));
+      return Array.from(card.querySelectorAll('.hpm-post__date, .hpm-post__location')).map(
+        (element) => {
+          const text = luminance(parse(getComputedStyle(element).color));
+          return (Math.max(surface, text) + 0.05) / (Math.min(surface, text) + 0.05);
+        },
+      );
+    });
+  expect(metadataContrast).toHaveLength(2);
+  for (const ratio of metadataContrast) expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
