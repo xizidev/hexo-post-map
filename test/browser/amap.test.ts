@@ -39,6 +39,10 @@ class FakeMap {
   destroy = vi.fn();
 }
 class FakeMarker {
+  isTop = false;
+  setTop = vi.fn((top: boolean) => {
+    this.isTop = top;
+  });
   constructor(readonly options: { position: number[]; content: HTMLElement }) {}
 }
 class FakePolyline {
@@ -260,11 +264,15 @@ describe('AMap adapter', () => {
     expect(first!.className).toContain('hpm-detail-marker');
     expect(first!.getAttribute('aria-expanded')).toBe('false');
     first!.click();
+    expect(markers[0]!.isTop).toBe(true);
+    expect(markers[1]!.isTop).toBe(false);
     expect(first!.getAttribute('aria-expanded')).toBe('true');
     expect(first!.getAttribute('aria-describedby')).toBe(firstTooltip.id);
     expect(firstTooltip.hidden).toBe(false);
 
     second!.click();
+    expect(markers[0]!.isTop).toBe(false);
+    expect(markers[1]!.isTop).toBe(true);
     expect(first!.getAttribute('aria-expanded')).toBe('false');
     expect(first!.hasAttribute('aria-describedby')).toBe(false);
     expect(firstTooltip.hidden).toBe(true);
@@ -272,20 +280,28 @@ describe('AMap adapter', () => {
     expect(secondTooltip.hidden).toBe(false);
 
     second!.click();
+    expect(markers[1]!.isTop).toBe(false);
     expect(second!.getAttribute('aria-expanded')).toBe('false');
     first!.click();
     instance.emit('click');
     expect(first!.getAttribute('aria-expanded')).toBe('false');
+    expect(markers[0]!.isTop).toBe(false);
 
     first!.click();
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
     expect(first!.getAttribute('aria-expanded')).toBe('false');
+    expect(markers[0]!.isTop).toBe(false);
+    first!.click();
+    instance.emit('zoomstart');
+    expect(first!.getAttribute('aria-expanded')).toBe('false');
+    expect(markers[0]!.isTop).toBe(false);
     second!.click();
     expect(second!.getAttribute('aria-expanded')).toBe('true');
 
     second!.focus();
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(second!.getAttribute('aria-expanded')).toBe('false');
+    expect(markers[1]!.isTop).toBe(false);
     expect(document.activeElement).toBe(second);
 
     instance.emit('complete');
@@ -295,10 +311,44 @@ describe('AMap adapter', () => {
       expect.objectContaining({ keyboardEnable: true, dragEnable: true }),
     );
     handle.destroy();
+    expect(markers.every((marker) => marker.isTop === false)).toBe(true);
     first!.click();
     expect(first!.getAttribute('aria-expanded')).toBe('false');
     expect(instance.listeners.size).toBe(0);
     container.remove();
+  });
+
+  it('raises the active marker across mouse and keyboard-style clicks at identical coordinates', async () => {
+    const provider = await createAMapProvider(config);
+    const container = document.createElement('div');
+    const pending = provider.mountDetail(
+      container,
+      model({
+        representative: 'a',
+        points: [
+          { id: 'a', name: 'First visit', longitude: 121, latitude: 31 },
+          { id: 'b', name: 'Second visit', longitude: 121, latitude: 31 },
+        ],
+        route: ['a', 'b'],
+      }),
+    );
+    const markers = instance.overlays.filter(
+      (overlay): overlay is FakeMarker => overlay instanceof FakeMarker,
+    );
+    const first = markers[0]!.options.content;
+    const second = markers[1]!.options.content;
+
+    first.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    expect(markers.map((marker) => marker.isTop)).toEqual([true, false]);
+
+    second.focus();
+    second.click();
+    expect(markers.map((marker) => marker.isTop)).toEqual([false, true]);
+
+    instance.emit('complete');
+    const handle = await pending;
+    handle.destroy();
+    expect(markers.map((marker) => marker.isTop)).toEqual([false, false]);
   });
 
   it('removes tooltip listeners when initialization fails', async () => {
@@ -306,12 +356,16 @@ describe('AMap adapter', () => {
     const container = document.createElement('div');
     const pending = provider.mountDetail(container, model());
     const pin = (instance.overlays[0] as FakeMarker).options.content;
+    const marker = instance.overlays[0] as FakeMarker;
     expect(pin.className).toBe('hpm-detail-marker');
     expect(pin.getAttribute('aria-expanded')).toBe('false');
+    pin.click();
+    expect(marker.isTop).toBe(true);
     instance.emit('error');
     await expect(pending).rejects.toThrow();
     pin.click();
     expect(pin.getAttribute('aria-expanded')).toBe('false');
+    expect(marker.isTop).toBe(false);
     expect(instance.listeners.size).toBe(0);
   });
 
@@ -347,8 +401,12 @@ describe('AMap adapter', () => {
       ...model(),
       signal: abort.signal,
     });
+    const marker = instance.overlays[0] as FakeMarker;
+    marker.options.content.click();
+    expect(marker.isTop).toBe(true);
     abort.abort();
     await expect(pending).rejects.toThrow();
+    expect(marker.isTop).toBe(false);
     expect(instance.destroy).toHaveBeenCalledTimes(1);
   });
 

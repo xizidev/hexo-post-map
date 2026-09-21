@@ -9,7 +9,10 @@ export interface DetailMarkerElement {
   readonly element: HTMLButtonElement;
   readonly tooltip: HTMLSpanElement;
   setExpanded(expanded: boolean): void;
+  fitTooltip(container: HTMLElement): void;
 }
+
+const TOOLTIP_EDGE_GAP = 4;
 
 export function createDetailMarker(name: string, sequence?: number): DetailMarkerElement {
   const marker = document.createElement('button');
@@ -67,6 +70,45 @@ export function createDetailMarker(name: string, sequence?: number): DetailMarke
       tooltip.hidden = !expanded;
       if (expanded) marker.setAttribute('aria-describedby', tooltip.id);
       else marker.removeAttribute('aria-describedby');
+    },
+    fitTooltip(container) {
+      if (tooltip.hidden) return;
+      const bounds = container.getBoundingClientRect();
+      const availableWidth = Math.max(1, bounds.width - TOOLTIP_EDGE_GAP * 2);
+      const availableHeight = Math.max(1, bounds.height - TOOLTIP_EDGE_GAP * 2);
+      tooltip.style.setProperty('--hpm-tooltip-max-width', `${availableWidth}px`);
+      tooltip.style.setProperty('--hpm-tooltip-max-height', `${availableHeight}px`);
+      tooltip.style.setProperty('--hpm-tooltip-shift-x', '0px');
+      tooltip.style.setProperty('--hpm-tooltip-shift-y', '0px');
+      marker.classList.remove('hpm-detail-marker--tooltip-below');
+
+      const markerBounds = marker.getBoundingClientRect();
+      let tooltipBounds = tooltip.getBoundingClientRect();
+      const top = bounds.top + TOOLTIP_EDGE_GAP;
+      const bottom = bounds.bottom - TOOLTIP_EDGE_GAP;
+      const availableAbove = markerBounds.top - top;
+      const availableBelow = bottom - markerBounds.bottom;
+      if (tooltipBounds.height > availableAbove && availableBelow > availableAbove) {
+        marker.classList.add('hpm-detail-marker--tooltip-below');
+        tooltipBounds = tooltip.getBoundingClientRect();
+      }
+
+      const left = bounds.left + TOOLTIP_EDGE_GAP;
+      const right = bounds.right - TOOLTIP_EDGE_GAP;
+      const shiftX =
+        tooltipBounds.left < left
+          ? left - tooltipBounds.left
+          : tooltipBounds.right > right
+            ? right - tooltipBounds.right
+            : 0;
+      const shiftY =
+        tooltipBounds.top < top
+          ? top - tooltipBounds.top
+          : tooltipBounds.bottom > bottom
+            ? bottom - tooltipBounds.bottom
+            : 0;
+      tooltip.style.setProperty('--hpm-tooltip-shift-x', `${shiftX}px`);
+      tooltip.style.setProperty('--hpm-tooltip-shift-y', `${shiftY}px`);
     },
   };
 }

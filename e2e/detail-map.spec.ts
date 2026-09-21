@@ -10,6 +10,15 @@ async function tabTo(page: Page, target: Locator) {
   await expect(target).toBeFocused();
 }
 
+async function expectTooltipInsideCanvas(canvas: Locator, tooltip: Locator) {
+  await expect(tooltip).toBeVisible();
+  const [canvasBox, tooltipBox] = await Promise.all([canvas.boundingBox(), tooltip.boundingBox()]);
+  expect(tooltipBox!.x).toBeGreaterThanOrEqual(canvasBox!.x);
+  expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(canvasBox!.x + canvasBox!.width);
+  expect(tooltipBox!.y).toBeGreaterThanOrEqual(canvasBox!.y);
+  expect(tooltipBox!.y + tooltipBox!.height).toBeLessThanOrEqual(canvasBox!.y + canvasBox!.height);
+}
+
 test('detail stays unloaded offscreen and becomes interactive automatically near the viewport', async ({
   page,
   network,
@@ -162,6 +171,63 @@ test('route place tooltips switch across mouse and keyboard and close without lo
   await expect(page.locator('.amap-info-window, [data-hpm-canvas] a')).toHaveCount(0);
 });
 
+test('an identical-coordinate marker rises above its sibling for mouse and keyboard activation', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Reflect.set(window, '__hpmSdkMarkerLayout', [
+      { left: 'calc(50% - 22px)', top: 'calc(50% - 22px)' },
+      { left: 'calc(50% - 22px)', top: 'calc(50% - 22px)' },
+    ]);
+  });
+  await page.route('**/posts/route/', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace(
+      /(<script type="application\/json" data-hpm-data>)([\s\S]*?)(<\/script>)/u,
+      (_all, start, json, end) => {
+        const data = JSON.parse(json);
+        data.map.points[1].longitude = data.map.points[0].longitude;
+        data.map.points[1].latitude = data.map.points[0].latitude;
+        data.map.route[1].longitude = data.map.route[0].longitude;
+        data.map.route[1].latitude = data.map.route[0].latitude;
+        data.map.route = data.map.route.slice(0, 2);
+        return start + JSON.stringify(data).replaceAll('<', '\\u003c') + end;
+      },
+    );
+    await route.fulfill({ response, body });
+  });
+  await page.goto('/blog/posts/route/');
+  const pins = page.locator('.hpm-detail-marker');
+  const first = pins.nth(0);
+  const second = pins.nth(1);
+
+  await second.click();
+  await expect(second.getByRole('tooltip')).toBeVisible();
+  expect(
+    await second.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return document
+        .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+        ?.closest('button')
+        ?.getAttribute('aria-label');
+    }),
+  ).toBe('显示地点 2：Cableway GCJ-02');
+
+  await first.focus();
+  await page.keyboard.press('Enter');
+  await expect(first.getByRole('tooltip')).toBeVisible();
+  await expect(second.getByRole('tooltip')).toBeHidden();
+  expect(
+    await first.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      return document
+        .elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)
+        ?.closest('button')
+        ?.getAttribute('aria-label');
+    }),
+  ).toBe('显示地点 1：Visitor center GCJ-02');
+});
+
 test('place tooltip keeps readable contrast when a host theme overrides map text', async ({
   page,
 }) => {
@@ -190,43 +256,71 @@ test('place tooltip keeps readable contrast when a host theme overrides map text
   expect(contrast).toBeGreaterThanOrEqual(4.5);
 });
 
-for (const viewport of [
-  { width: 1440, height: 900 },
-  { width: 390, height: 900 },
+for (const testCase of [
+  { pageName: 'single', width: 1440, positions: [{ left: '0px', top: '0px' }] },
+  { pageName: 'single', width: 390, positions: [{ left: 'calc(100% - 44px)', top: '0px' }] },
+  {
+    pageName: 'route',
+    width: 1440,
+    positions: [
+      { left: '0px', top: '0px' },
+      { left: 'calc(100% - 44px)', top: '0px' },
+    ],
+  },
+  {
+    pageName: 'route',
+    width: 390,
+    positions: [
+      { left: '0px', top: '0px' },
+      { left: 'calc(100% - 44px)', top: '0px' },
+    ],
+  },
 ]) {
-  test(`long place tooltip stays inside the detail canvas at ${viewport.width}px`, async ({
+  test(`long ${testCase.pageName} tooltips stay inside ${testCase.width}px canvas edges at 200% root text`, async ({
     page,
   }) => {
-    await page.setViewportSize(viewport);
-    await page.route('**/posts/route/', async (route) => {
+    await page.setViewportSize({ width: testCase.width, height: 900 });
+    await page.addInitScript((positions) => {
+      document.documentElement.style.fontSize = '32px';
+      Reflect.set(window, '__hpmSdkMarkerLayout', positions);
+    }, testCase.positions);
+    await page.route(`**/posts/${testCase.pageName}/`, async (route) => {
       const response = await route.fetch();
       const body = (await response.text()).replace(
         /(<script type="application\/json" data-hpm-data>)([\s\S]*?)(<\/script>)/u,
         (_all, start, json, end) => {
           const data = JSON.parse(json);
           data.map.points[0].name =
-            'A deliberately long place name that must wrap without leaving the visible map canvas';
-          data.map.route[0].name = data.map.points[0].name;
+            'A deliberately long place name near the canvas edge that must wrap and remain completely visible at two hundred percent root text size';
+          if (data.map.route[0]) data.map.route[0].name = data.map.points[0].name;
+          if (data.map.points[1]) {
+            data.map.points[1].name =
+              'A second deliberately long place name against the opposite edge that must also remain completely visible';
+            if (data.map.route[1]) data.map.route[1].name = data.map.points[1].name;
+          }
           return start + JSON.stringify(data).replaceAll('<', '\\u003c') + end;
         },
       );
       await route.fulfill({ response, body });
     });
-    await page.goto('/blog/posts/route/');
-    await page.locator('.hpm-detail-marker').first().click();
+    await page.goto(`/blog/posts/${testCase.pageName}/`);
     const canvas = page.locator('[data-hpm-canvas]');
-    const tooltip = page.getByRole('tooltip', { name: /A deliberately long place name/u });
-    await expect(tooltip).toBeVisible();
-    const [canvasBox, tooltipBox] = await Promise.all([
-      canvas.boundingBox(),
-      tooltip.boundingBox(),
-    ]);
-    expect(tooltipBox!.x).toBeGreaterThanOrEqual(canvasBox!.x);
-    expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(canvasBox!.x + canvasBox!.width);
-    expect(tooltipBox!.y).toBeGreaterThanOrEqual(canvasBox!.y);
-    expect(tooltipBox!.y + tooltipBox!.height).toBeLessThanOrEqual(
-      canvasBox!.y + canvasBox!.height,
-    );
+    const pins = page.locator('.hpm-detail-marker');
+    await pins.first().click();
+    await expectTooltipInsideCanvas(canvas, pins.first().getByRole('tooltip'));
+
+    if (testCase.pageName === 'single') {
+      await pins.first().click();
+      await pins.first().evaluate((element) => {
+        const wrapper = element.closest<HTMLElement>('.amap-marker')!;
+        wrapper.style.left = wrapper.style.left === '0px' ? 'calc(100% - 44px)' : '0px';
+      });
+      await pins.first().click();
+      await expectTooltipInsideCanvas(canvas, pins.first().getByRole('tooltip'));
+    } else {
+      await pins.nth(1).click();
+      await expectTooltipInsideCanvas(canvas, pins.nth(1).getByRole('tooltip'));
+    }
   });
 }
 

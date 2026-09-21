@@ -24,9 +24,12 @@ interface AMapMap {
   setZoom(zoom: number, immediately: boolean): void;
   setBounds(bounds: unknown, immediately: boolean, padding: number[]): void;
 }
+interface AMapMarker {
+  setTop(top: boolean): void;
+}
 interface AMapApi {
   Map: new (container: HTMLElement, options: Record<string, unknown>) => AMapMap;
-  Marker: new (options: Record<string, unknown>) => unknown;
+  Marker: new (options: Record<string, unknown>) => AMapMarker;
   Polyline: new (options: Record<string, unknown>) => unknown;
   Bounds: new (southwest: Coordinate, northeast: Coordinate) => unknown;
   Pixel: new (x: number, y: number) => unknown;
@@ -224,18 +227,20 @@ function mountDetail(
     });
     let complete = false;
     let destroyed = false;
-    const markers: unknown[] = [];
+    const markers: AMapMarker[] = [];
     const markerViews: Array<
       DetailMarkerElement & {
+        sdkMarker: AMapMarker;
         onClick: (event: MouseEvent) => void;
         onPointerDown: (event: Event) => void;
       }
     > = [];
-    let activeMarker: DetailMarkerElement | undefined;
+    let activeMarker: (typeof markerViews)[number] | undefined;
     const timeout = window.setTimeout(fail, LOAD_TIMEOUT_MS);
 
     function closeActive() {
       activeMarker?.setExpanded(false);
+      activeMarker?.sdkMarker.setTop(false);
       activeMarker = undefined;
     }
     function onMapClick() {
@@ -256,7 +261,11 @@ function mountDetail(
       map.off('complete', ready);
       map.off('error', fail);
       map.off('click', onMapClick);
+      map.off('dragstart', closeActive);
+      map.off('movestart', closeActive);
+      map.off('zoomstart', closeActive);
       container.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', closeActive);
       window.removeEventListener('pagehide', closeActive);
       closeActive();
       markerViews.forEach((marker) => {
@@ -302,7 +311,11 @@ function mountDetail(
     map.on('complete', ready);
     map.on('error', fail);
     map.on('click', onMapClick);
+    map.on('dragstart', closeActive);
+    map.on('movestart', closeActive);
+    map.on('zoomstart', closeActive);
     container.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', closeActive);
     window.addEventListener('pagehide', closeActive);
     model.signal?.addEventListener('abort', cancel, { once: true });
 
@@ -316,28 +329,30 @@ function mountDetail(
       ];
       for (const { point, sequence } of visits) {
         const marker = createDetailMarker(point.name, sequence);
+        const sdkMarker = new api.Marker({
+          position: point.coordinate,
+          content: marker.element,
+          anchor: 'bottom-center',
+        });
         const onClick = (event: MouseEvent) => {
           event.stopPropagation();
-          if (activeMarker === marker) closeActive();
+          if (activeMarker?.element === marker.element) closeActive();
           else {
             closeActive();
-            activeMarker = marker;
-            marker.setExpanded(true);
+            activeMarker = markerView;
+            sdkMarker.setTop(true);
+            markerView.setExpanded(true);
+            markerView.fitTooltip(container);
           }
         };
         const onPointerDown = (event: Event) => event.stopPropagation();
+        const markerView = { ...marker, sdkMarker, onClick, onPointerDown };
         marker.element.addEventListener('click', onClick);
         marker.element.addEventListener('pointerdown', onPointerDown);
-        markerViews.push({ ...marker, onClick, onPointerDown });
-        markers.push(
-          new api.Marker({
-            position: point.coordinate,
-            content: marker.element,
-            anchor: 'bottom-center',
-          }),
-        );
+        markerViews.push(markerView);
+        markers.push(sdkMarker);
       }
-      const overlays = [...markers];
+      const overlays: unknown[] = [...markers];
       if (model.map.route.length > 1)
         overlays.push(
           new api.Polyline({

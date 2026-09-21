@@ -104,9 +104,13 @@
   bottom: calc(100% + 6px);
   left: 50%;
   width: max-content;
-  max-width: min(18rem, calc(100vw - 2rem));
+  max-width: min(18rem, var(--hpm-tooltip-max-width, calc(100vw - 2rem)));
+  max-height: var(--hpm-tooltip-max-height, none);
   padding: 0.4rem 0.6rem;
-  transform: translateX(-50%);
+  transform: translate(
+    calc(-50% + var(--hpm-tooltip-shift-x, 0px)),
+    var(--hpm-tooltip-shift-y, 0px)
+  );
   border: 1px solid var(--hpm-tooltip-border);
   border-radius: 0.5rem;
   background: var(--hpm-tooltip-surface);
@@ -116,9 +120,15 @@
     600 0.875rem/1.35 system-ui,
     sans-serif;
   overflow-wrap: anywhere;
+  overflow-y: auto;
   text-align: center;
   white-space: normal;
   pointer-events: none;
+}
+
+.hpm-detail-marker--tooltip-below .hpm-detail-marker__tooltip {
+  top: calc(100% + 6px);
+  bottom: auto;
 }
 
 .hpm-detail-marker__tooltip::after {
@@ -132,6 +142,12 @@
   border-bottom: 1px solid var(--hpm-tooltip-border);
   background: var(--hpm-tooltip-surface);
   content: '';
+}
+
+.hpm-detail-marker--tooltip-below .hpm-detail-marker__tooltip::after {
+  top: auto;
+  bottom: 100%;
+  transform: translate(-50%, 50%) rotate(225deg);
 }
 
 .hpm-overview {
