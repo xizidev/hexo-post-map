@@ -1,13 +1,25 @@
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+let tooltipSequence = 0;
 
 function svgElement<K extends keyof SVGElementTagNameMap>(name: K): SVGElementTagNameMap[K] {
   return document.createElementNS(SVG_NAMESPACE, name);
 }
 
-export function createDetailMarker(sequence?: number): HTMLSpanElement {
-  const marker = document.createElement('span');
+export interface DetailMarkerElement {
+  readonly element: HTMLButtonElement;
+  readonly tooltip: HTMLSpanElement;
+  setExpanded(expanded: boolean): void;
+}
+
+export function createDetailMarker(name: string, sequence?: number): DetailMarkerElement {
+  const marker = document.createElement('button');
+  marker.type = 'button';
   marker.className = 'hpm-detail-marker';
-  marker.setAttribute('aria-hidden', 'true');
+  marker.setAttribute(
+    'aria-label',
+    sequence === undefined ? `显示地点：${name}` : `显示地点 ${sequence}：${name}`,
+  );
+  marker.setAttribute('aria-expanded', 'false');
 
   const icon = svgElement('svg');
   icon.setAttribute('viewBox', '0 0 30 38');
@@ -39,6 +51,22 @@ export function createDetailMarker(sequence?: number): HTMLSpanElement {
     icon.append(label);
   }
 
-  marker.append(icon);
-  return marker;
+  const tooltip = document.createElement('span');
+  tooltip.id = `hpm-detail-tooltip-${++tooltipSequence}`;
+  tooltip.className = 'hpm-detail-marker__tooltip';
+  tooltip.role = 'tooltip';
+  tooltip.hidden = true;
+  tooltip.textContent = sequence === undefined ? name : `${sequence} · ${name}`;
+
+  marker.append(icon, tooltip);
+  return {
+    element: marker,
+    tooltip,
+    setExpanded(expanded) {
+      marker.setAttribute('aria-expanded', String(expanded));
+      tooltip.hidden = !expanded;
+      if (expanded) marker.setAttribute('aria-describedby', tooltip.id);
+      else marker.removeAttribute('aria-describedby');
+    },
+  };
 }

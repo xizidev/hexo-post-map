@@ -7,15 +7,24 @@ export const fakeSdk = String.raw`
     constructor(container, options) {
       this.container = container; this.options = options; this.zoom = options.zoom;
       this.events = {}; this.bounds = []; this.status = options; maps.push(this);
+      this.onCanvasClick = event => { if (event.target === container) this.emit('click'); };
+      container.addEventListener('click', this.onCanvasClick);
       setTimeout(() => this.emit('complete'), 0);
     }
     on(event, callback) { (this.events[event] ??= new Set()).add(callback); }
     off(event, callback) { this.events[event]?.delete(callback); }
     emit(event) { this.events[event]?.forEach(callback => callback()); }
-    add(overlays) { overlays.forEach(overlay => { if (overlay.options.content) this.container.append(overlay.options.content); }); }
+    add(overlays) { overlays.forEach((overlay, index) => {
+      if (!overlay.options.content) return;
+      const content = overlay.options.content;
+      content.style.position = 'absolute';
+      content.style.left = 'calc(50% + ' + (index * 56 - 56) + 'px)';
+      content.style.top = '50%';
+      this.container.append(content);
+    }); }
     setFitView(overlays, immediately, padding) { this.fitted = true; this.fitPadding = padding; }
     setStatus(status) { this.status = status; }
-    destroy() { this.container.replaceChildren(); }
+    destroy() { this.container.removeEventListener('click', this.onCanvasClick); this.container.replaceChildren(); }
     getZoom() { return this.zoom; }
     setZoom(zoom) { this.zoom = zoom; this.cluster?.render(); }
     setBounds(bounds, immediately, padding) { this.bounds.push(bounds); (this.boundsPadding ??= []).push(padding); }

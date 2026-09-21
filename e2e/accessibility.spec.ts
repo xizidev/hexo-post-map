@@ -106,7 +106,14 @@ for (const mobile of [false, true]) {
     expect(
       await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].status.keyboardEnable),
     ).toBe(true);
-    await expect(canvas.locator('button, a, [tabindex="0"]')).toHaveCount(0);
+    await expect(canvas.locator('button')).toHaveCount(3);
+    await expect(canvas.locator('a')).toHaveCount(0);
+    const firstPin = canvas.locator('.hpm-detail-marker').first();
+    await tabTo(page, firstPin);
+    await page.keyboard.press('Enter');
+    await expect(firstPin).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('Escape');
+    await expect(firstPin).toBeFocused();
     await expect(page.locator('[data-hpm-fallback]')).toBeHidden();
     expect(
       await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].options.animateEnable),

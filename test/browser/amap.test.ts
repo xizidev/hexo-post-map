@@ -30,6 +30,9 @@ class FakeMap {
   }
   add(overlays: unknown[]) {
     this.overlays.push(...overlays);
+    overlays.forEach((overlay) => {
+      if (overlay instanceof FakeMarker) this.container.append(overlay.options.content);
+    });
   }
   setFitView = vi.fn();
   setStatus = vi.fn();
@@ -85,7 +88,10 @@ describe('AMap adapter', () => {
       (item): item is FakeMarker => item instanceof FakeMarker,
     );
     expect(
-      markers.map((item) => [item.options.content.textContent, item.options.position]),
+      markers.map((item) => [
+        item.options.content.querySelector('.hpm-detail-marker__label')?.textContent ?? '',
+        item.options.position,
+      ]),
     ).toEqual([
       ['1', [121, 31]],
       ['2', [122, 32]],
@@ -182,13 +188,17 @@ describe('AMap adapter', () => {
       [123, 33],
     ]);
     expect(markers.map((marker) => marker.options.content.tagName)).toEqual([
-      'SPAN',
-      'SPAN',
-      'SPAN',
+      'BUTTON',
+      'BUTTON',
+      'BUTTON',
     ]);
-    expect(markers.map((marker) => marker.options.content.textContent)).toEqual(['1', '2', '']);
+    expect(markers.map((marker) => marker.options.content.getAttribute('aria-label'))).toEqual([
+      '显示地点 1：B',
+      '显示地点 2：A',
+      '显示地点：C',
+    ]);
     expect(
-      markers.every((marker) => marker.options.content.getAttribute('aria-hidden') === 'true'),
+      markers.every((marker) => marker.options.content.getAttribute('aria-expanded') === 'false'),
     ).toBe(true);
     expect(markers.every((marker) => marker.options.content.querySelector('a') === null)).toBe(
       true,
@@ -220,45 +230,89 @@ describe('AMap adapter', () => {
     expect(line.options).toMatchObject({ strokeColor: '#0f766e', strokeWeight: 3 });
     instance.emit('complete');
     const handle = await pending;
-    expect(instance.setFitView).toHaveBeenCalledWith(markers, true, [44, 24, 24, 24]);
+    expect(instance.setFitView).toHaveBeenCalledWith(markers, true, [112, 24, 24, 24]);
     handle.destroy();
   });
 
-  it('keeps single-point pins silent and non-interactive when map interaction changes', async () => {
+  it('shows only one custom place tooltip and closes it through every supported interaction', async () => {
     const provider = await createAMapProvider(config);
-    const pending = provider.mountDetail(document.createElement('div'), model());
-    const marker = instance.overlays[0] as FakeMarker;
-    const pin = marker.options.content;
-    expect(pin.tagName).toBe('SPAN');
-    expect(pin.className).toBe('hpm-detail-marker');
-    expect(pin.textContent).toBe('');
-    expect(pin.getAttribute('aria-hidden')).toBe('true');
-    expect(pin.tabIndex).toBe(-1);
-    expect(pin.querySelector('button, a, img')).toBe(null);
-    const icon = pin.querySelector('svg');
-    expect(icon?.namespaceURI).toBe('http://www.w3.org/2000/svg');
-    expect(icon?.getAttribute('viewBox')).toBe('0 0 30 38');
-    expect(icon?.getAttribute('aria-hidden')).toBe('true');
-    expect(icon?.getAttribute('focusable')).toBe('false');
-    expect(icon?.querySelector('.hpm-detail-marker__shape')).not.toBeNull();
-    expect(icon?.querySelector('.hpm-detail-marker__dot')).not.toBeNull();
-    expect(icon?.querySelector('.hpm-detail-marker__label')).toBeNull();
-    const initial = pin.outerHTML;
+    const container = document.createElement('div');
+    document.body.append(container);
+    const pending = provider.mountDetail(
+      container,
+      model({
+        representative: 'a',
+        points: [
+          { id: 'a', name: 'First place', longitude: 121, latitude: 31 },
+          { id: 'b', name: 'Second place', longitude: 122, latitude: 32 },
+        ],
+        route: ['a', 'b'],
+      }),
+    );
+    const markers = instance.overlays.filter(
+      (overlay): overlay is FakeMarker => overlay instanceof FakeMarker,
+    );
+    const [first, second] = markers.map((marker) => marker.options.content);
+    const firstTooltip = first!.querySelector<HTMLElement>('[role="tooltip"]')!;
+    const secondTooltip = second!.querySelector<HTMLElement>('[role="tooltip"]')!;
+
+    expect(first!.tagName).toBe('BUTTON');
+    expect(first!.className).toContain('hpm-detail-marker');
+    expect(first!.getAttribute('aria-expanded')).toBe('false');
+    first!.click();
+    expect(first!.getAttribute('aria-expanded')).toBe('true');
+    expect(first!.getAttribute('aria-describedby')).toBe(firstTooltip.id);
+    expect(firstTooltip.hidden).toBe(false);
+
+    second!.click();
+    expect(first!.getAttribute('aria-expanded')).toBe('false');
+    expect(first!.hasAttribute('aria-describedby')).toBe(false);
+    expect(firstTooltip.hidden).toBe(true);
+    expect(second!.getAttribute('aria-expanded')).toBe('true');
+    expect(secondTooltip.hidden).toBe(false);
+
+    second!.click();
+    expect(second!.getAttribute('aria-expanded')).toBe('false');
+    first!.click();
+    instance.emit('click');
+    expect(first!.getAttribute('aria-expanded')).toBe('false');
+
+    first!.click();
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+    expect(first!.getAttribute('aria-expanded')).toBe('false');
+    second!.click();
+    expect(second!.getAttribute('aria-expanded')).toBe('true');
+
+    second!.focus();
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    expect(second!.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(second);
+
     instance.emit('complete');
     const handle = await pending;
     handle.setInteractive(true);
     expect(instance.setStatus).toHaveBeenLastCalledWith(
       expect.objectContaining({ keyboardEnable: true, dragEnable: true }),
     );
-    expect(pin.outerHTML).toBe(initial);
-    pin.click();
-    expect(instance.destroy).not.toHaveBeenCalled();
-    handle.setInteractive(false);
-    expect(instance.setStatus).toHaveBeenLastCalledWith(
-      expect.objectContaining({ keyboardEnable: false, dragEnable: false }),
-    );
-    expect(pin.outerHTML).toBe(initial);
     handle.destroy();
+    first!.click();
+    expect(first!.getAttribute('aria-expanded')).toBe('false');
+    expect(instance.listeners.size).toBe(0);
+    container.remove();
+  });
+
+  it('removes tooltip listeners when initialization fails', async () => {
+    const provider = await createAMapProvider(config);
+    const container = document.createElement('div');
+    const pending = provider.mountDetail(container, model());
+    const pin = (instance.overlays[0] as FakeMarker).options.content;
+    expect(pin.className).toBe('hpm-detail-marker');
+    expect(pin.getAttribute('aria-expanded')).toBe('false');
+    instance.emit('error');
+    await expect(pending).rejects.toThrow();
+    pin.click();
+    expect(pin.getAttribute('aria-expanded')).toBe('false');
+    expect(instance.listeners.size).toBe(0);
   });
 
   it('uses the container route color for route strokes', async () => {

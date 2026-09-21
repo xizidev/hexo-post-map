@@ -137,7 +137,7 @@ Use at most one tag per post. A tag also overrides automatic placement in `befor
 
 The card loads near the viewport and becomes interactive automatically. Routine loading and success messages stay hidden; when JavaScript, the provider, or map initialization fails, a concise error and the place links remain available. An SDK load timeout requires a **page reload** to retry.
 
-Detail locations use silent, inline SVG location pins and never open provider popups. A single point uses a center dot; route points carry their sequence number in the same pin shape. `route` always remains a straight, schematic sequence rather than a navigable path.
+Detail locations use inline SVG location pins. Clicking or focusing a pin and pressing Enter or Space opens a lightweight custom place-name tooltip; Escape, a second click, or clicking the map closes it. A single point uses a center dot, while route points show `sequence · place name` and carry their sequence number in the same pin shape. The plugin never opens a provider popup or adds an external map link. `route` always remains a straight, schematic sequence rather than a navigable path.
 
 The overview chooses the first safe image in this order: `thumbnail`, an image in rendered article content, then the bundled placeholder. A chosen image that later fails to load is replaced with the placeholder. Only one representative image per article is used.
 
@@ -167,6 +167,10 @@ Themes customize the map only through the variables below, scoped on `.hpm-detai
 | `--hpm-text`            | Primary text                                            |
 | `--hpm-muted`           | Dates, locations, and subdued borders                   |
 | `--hpm-route-color`     | Straight detail route segments                          |
+| `--hpm-tooltip-surface` | Detail place-name tooltip surface                       |
+| `--hpm-tooltip-border`  | Detail place-name tooltip border                        |
+| `--hpm-tooltip-shadow`  | Detail place-name tooltip shadow                        |
+| `--hpm-tooltip-text`    | Detail place-name tooltip text                          |
 | `--hpm-panel-radius`    | Desktop panel and mobile drawer radius                  |
 | `--hpm-card-radius`     | Article card radius                                     |
 

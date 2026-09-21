@@ -3,7 +3,7 @@ import type { Coordinate } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
 import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
 import { createClusterMarker, createImageMarker, overviewFitPadding } from '../overview/markers';
-import { createDetailMarker } from '../detail/marker';
+import { createDetailMarker, type DetailMarkerElement } from '../detail/marker';
 import type {
   BrowserProviderConfig,
   DetailMapModel,
@@ -225,7 +225,29 @@ function mountDetail(
     let complete = false;
     let destroyed = false;
     const markers: unknown[] = [];
+    const markerViews: Array<
+      DetailMarkerElement & {
+        onClick: (event: MouseEvent) => void;
+        onPointerDown: (event: Event) => void;
+      }
+    > = [];
+    let activeMarker: DetailMarkerElement | undefined;
     const timeout = window.setTimeout(fail, LOAD_TIMEOUT_MS);
+
+    function closeActive() {
+      activeMarker?.setExpanded(false);
+      activeMarker = undefined;
+    }
+    function onMapClick() {
+      closeActive();
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape' || !activeMarker) return;
+      const origin = activeMarker.element;
+      closeActive();
+      event.preventDefault();
+      origin.focus();
+    }
 
     function destroy() {
       if (destroyed) return;
@@ -233,6 +255,14 @@ function mountDetail(
       clearTimeout(timeout);
       map.off('complete', ready);
       map.off('error', fail);
+      map.off('click', onMapClick);
+      container.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('pagehide', closeActive);
+      closeActive();
+      markerViews.forEach((marker) => {
+        marker.element.removeEventListener('click', marker.onClick);
+        marker.element.removeEventListener('pointerdown', marker.onPointerDown);
+      });
       model.signal?.removeEventListener('abort', cancel);
       map.destroy();
     }
@@ -249,9 +279,9 @@ function mountDetail(
     function ready() {
       if (destroyed || complete) return;
       try {
-        // AMap's avoid order is top, bottom, left, right. Bottom-anchored
-        // pins paint 38px above their coordinates.
-        if (markers.length > 1) map.setFitView(markers, true, [44, 24, 24, 24]);
+        // AMap's avoid order is top, bottom, left, right. Reserve room for
+        // the 44px bottom-anchored control plus a wrapped place tooltip.
+        if (markers.length > 1) map.setFitView(markers, true, [112, 24, 24, 24]);
         clearTimeout(timeout);
         complete = true;
         resolve({
@@ -271,6 +301,9 @@ function mountDetail(
     }
     map.on('complete', ready);
     map.on('error', fail);
+    map.on('click', onMapClick);
+    container.addEventListener('keydown', onKeyDown);
+    window.addEventListener('pagehide', closeActive);
     model.signal?.addEventListener('abort', cancel, { once: true });
 
     try {
@@ -282,9 +315,26 @@ function mountDetail(
           .map((point) => ({ point, sequence: undefined })),
       ];
       for (const { point, sequence } of visits) {
-        const marker = createDetailMarker(sequence);
+        const marker = createDetailMarker(point.name, sequence);
+        const onClick = (event: MouseEvent) => {
+          event.stopPropagation();
+          if (activeMarker === marker) closeActive();
+          else {
+            closeActive();
+            activeMarker = marker;
+            marker.setExpanded(true);
+          }
+        };
+        const onPointerDown = (event: Event) => event.stopPropagation();
+        marker.element.addEventListener('click', onClick);
+        marker.element.addEventListener('pointerdown', onPointerDown);
+        markerViews.push({ ...marker, onClick, onPointerDown });
         markers.push(
-          new api.Marker({ position: point.coordinate, content: marker, anchor: 'bottom-center' }),
+          new api.Marker({
+            position: point.coordinate,
+            content: marker.element,
+            anchor: 'bottom-center',
+          }),
         );
       }
       const overlays = [...markers];

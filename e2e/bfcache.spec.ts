@@ -65,6 +65,8 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
     expect(
       await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].status.keyboardEnable),
     ).toBe(true);
+    await detailMarker.click();
+    await expect(detailMarker).toHaveAttribute('aria-expanded', 'true');
 
     await page.goto(`${origin}/blog/map/`);
     await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
@@ -83,7 +85,8 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
       expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.length)).toBe(1);
       await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
       await expect(detailMarker).toBeVisible();
-      await expect(detailMarker).toBeEmpty();
+      await expect(detailMarker).toHaveAttribute('aria-expanded', 'false');
+      await expect(detailMarker.getByRole('tooltip')).toBeHidden();
       const canvas = page.locator('[data-hpm-canvas]');
       await expect(canvas).toHaveAttribute('tabindex', '0');
       await tabTo(page, canvas);
@@ -92,8 +95,11 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
       expect(
         await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].status.keyboardEnable),
       ).toBe(true);
-      await expect(canvas.locator('button, a, .hpm-place-card')).toHaveCount(0);
+      await expect(canvas.locator('button')).toHaveCount(1);
+      await expect(canvas.locator('a, .amap-info-window')).toHaveCount(0);
       await expect(page.locator('[data-hpm-fallback]')).toBeHidden();
+      await detailMarker.click();
+      await expect(detailMarker).toHaveAttribute('aria-expanded', 'true');
 
       await page.goForward({ waitUntil: 'commit' });
       await expect(page).toHaveURL(`${origin}/blog/map/`);

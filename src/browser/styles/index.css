@@ -7,6 +7,10 @@
   --hpm-text: #172033;
   --hpm-muted: #5b667a;
   --hpm-route-color: #0f766e;
+  --hpm-tooltip-surface: rgb(255 255 255 / 96%);
+  --hpm-tooltip-border: rgb(100 116 139 / 48%);
+  --hpm-tooltip-shadow: 0 6px 18px rgb(15 23 42 / 22%);
+  --hpm-tooltip-text: #172033;
   position: relative;
   margin-block: 1rem;
   color: var(--hpm-text);
@@ -40,20 +44,36 @@
   padding-inline-start: 1.5rem;
 }
 
-.hpm-detail-marker {
+.hpm-detail .hpm-detail-marker {
   box-sizing: border-box;
   display: block;
-  width: 30px;
-  height: 38px;
+  position: relative;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  appearance: none;
+  background: transparent;
   color: var(--hpm-accent-contrast);
+  font: inherit;
   filter: drop-shadow(0 3px 4px rgb(15 23 42 / 30%));
+  cursor: pointer;
 }
 
 .hpm-detail-marker svg {
   display: block;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  bottom: 0;
+  left: 7px;
+  width: 30px;
+  height: 38px;
   overflow: visible;
+  pointer-events: none;
 }
 
 .hpm-detail-marker__shape {
@@ -75,6 +95,43 @@
   dominant-baseline: central;
   text-anchor: middle;
   user-select: none;
+}
+
+.hpm-detail-marker__tooltip {
+  box-sizing: border-box;
+  position: absolute;
+  z-index: 2;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  width: max-content;
+  max-width: min(18rem, calc(100vw - 2rem));
+  padding: 0.4rem 0.6rem;
+  transform: translateX(-50%);
+  border: 1px solid var(--hpm-tooltip-border);
+  border-radius: 0.5rem;
+  background: var(--hpm-tooltip-surface);
+  box-shadow: var(--hpm-tooltip-shadow);
+  color: var(--hpm-tooltip-text);
+  font:
+    600 0.875rem/1.35 system-ui,
+    sans-serif;
+  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: normal;
+  pointer-events: none;
+}
+
+.hpm-detail-marker__tooltip::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 0.5rem;
+  height: 0.5rem;
+  transform: translate(-50%, -50%) rotate(45deg);
+  border-right: 1px solid var(--hpm-tooltip-border);
+  border-bottom: 1px solid var(--hpm-tooltip-border);
+  background: var(--hpm-tooltip-surface);
+  content: '';
 }
 
 .hpm-overview {
@@ -422,6 +479,7 @@
 }
 
 .hpm-detail [data-hpm-canvas]:focus-visible,
+.hpm-detail .hpm-detail-marker:focus-visible,
 .hpm-overview [data-hpm-canvas]:focus-visible,
 .hpm-overview button:focus-visible,
 .hpm-overview a:focus-visible,
@@ -439,6 +497,10 @@
     --hpm-text: #e2e8f0;
     --hpm-muted: #94a3b8;
     --hpm-route-color: #5eead4;
+    --hpm-tooltip-surface: rgb(15 23 42 / 96%);
+    --hpm-tooltip-border: rgb(148 163 184 / 58%);
+    --hpm-tooltip-shadow: 0 6px 18px rgb(0 0 0 / 38%);
+    --hpm-tooltip-text: #e2e8f0;
   }
 
   .hpm-overview {
@@ -468,6 +530,10 @@
 
   .hpm-detail {
     --hpm-route-color: CanvasText;
+    --hpm-tooltip-surface: Canvas;
+    --hpm-tooltip-border: CanvasText;
+    --hpm-tooltip-shadow: none;
+    --hpm-tooltip-text: CanvasText;
   }
 
   .hpm-overview {
