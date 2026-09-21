@@ -199,6 +199,17 @@ describe('AMap adapter', () => {
           marker.options.content.querySelector('.hpm-detail-marker__label')?.textContent ?? '',
       ),
     ).toEqual(['1', '2', '']);
+    expect(
+      markers.map((marker) => ({
+        viewBox: marker.options.content.querySelector('svg')?.getAttribute('viewBox'),
+        shape: marker.options.content.querySelectorAll('.hpm-detail-marker__shape').length,
+        dot: marker.options.content.querySelectorAll('.hpm-detail-marker__dot').length,
+      })),
+    ).toEqual([
+      { viewBox: '0 0 30 38', shape: 1, dot: 0 },
+      { viewBox: '0 0 30 38', shape: 1, dot: 0 },
+      { viewBox: '0 0 30 38', shape: 1, dot: 1 },
+    ]);
     const line = instance.overlays.find(
       (overlay) => overlay instanceof FakePolyline,
     ) as FakePolyline;
@@ -224,6 +235,14 @@ describe('AMap adapter', () => {
     expect(pin.getAttribute('aria-hidden')).toBe('true');
     expect(pin.tabIndex).toBe(-1);
     expect(pin.querySelector('button, a, img')).toBe(null);
+    const icon = pin.querySelector('svg');
+    expect(icon?.namespaceURI).toBe('http://www.w3.org/2000/svg');
+    expect(icon?.getAttribute('viewBox')).toBe('0 0 30 38');
+    expect(icon?.getAttribute('aria-hidden')).toBe('true');
+    expect(icon?.getAttribute('focusable')).toBe('false');
+    expect(icon?.querySelector('.hpm-detail-marker__shape')).not.toBeNull();
+    expect(icon?.querySelector('.hpm-detail-marker__dot')).not.toBeNull();
+    expect(icon?.querySelector('.hpm-detail-marker__label')).toBeNull();
     const initial = pin.outerHTML;
     instance.emit('complete');
     const handle = await pending;

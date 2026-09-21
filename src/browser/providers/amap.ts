@@ -3,6 +3,7 @@ import type { Coordinate } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
 import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
 import { createClusterMarker, createImageMarker, overviewFitPadding } from '../overview/markers';
+import { createDetailMarker } from '../detail/marker';
 import type {
   BrowserProviderConfig,
   DetailMapModel,
@@ -248,8 +249,8 @@ function mountDetail(
     function ready() {
       if (destroyed || complete) return;
       try {
-        // AMap's avoid order is top, bottom, left, right. Bottom-anchored,
-        // rotated numbered pins paint roughly 39px above their coordinates.
+        // AMap's avoid order is top, bottom, left, right. Bottom-anchored
+        // pins paint 38px above their coordinates.
         if (markers.length > 1) map.setFitView(markers, true, [44, 24, 24, 24]);
         clearTimeout(timeout);
         complete = true;
@@ -281,16 +282,7 @@ function mountDetail(
           .map((point) => ({ point, sequence: undefined })),
       ];
       for (const { point, sequence } of visits) {
-        const marker = document.createElement('span');
-        marker.className = 'hpm-detail-marker';
-        marker.setAttribute('aria-hidden', 'true');
-        if (sequence !== undefined) {
-          marker.classList.add('hpm-detail-marker--numbered');
-          const label = document.createElement('span');
-          label.className = 'hpm-detail-marker__label';
-          label.textContent = String(sequence);
-          marker.append(label);
-        }
+        const marker = createDetailMarker(sequence);
         markers.push(
           new api.Marker({ position: point.coordinate, content: marker, anchor: 'bottom-center' }),
         );

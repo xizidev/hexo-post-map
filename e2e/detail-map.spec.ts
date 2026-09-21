@@ -22,7 +22,10 @@ test('detail stays unloaded offscreen and becomes interactive automatically near
   await root.scrollIntoViewIfNeeded();
   const pin = root.locator('.hpm-detail-marker');
   await expect(pin).toBeVisible();
-  await expect(pin).toBeEmpty();
+  await expect(pin.locator('svg')).toHaveAttribute('viewBox', '0 0 30 38');
+  await expect(pin.locator('.hpm-detail-marker__shape')).toHaveCount(1);
+  await expect(pin.locator('.hpm-detail-marker__dot')).toHaveCount(1);
+  await expect(pin.locator('.hpm-detail-marker__label')).toHaveCount(0);
   await expect(pin).toHaveAttribute('aria-hidden', 'true');
   await expect(root.locator('[data-hpm-canvas]')).toHaveAttribute(
     'aria-label',
@@ -58,7 +61,25 @@ test('route draws ordered coordinates and silent numbered pins with accessible m
   const pins = page.locator('.hpm-detail-marker');
   await expect(pins).toHaveText(['1', '2', '3']);
   await expect(pins.locator('.hpm-detail-marker__label')).toHaveText(['1', '2', '3']);
-  // Bottom-anchored rotated pins extend above their coordinates. The SDK fit
+  await expect(pins.locator('.hpm-detail-marker__shape')).toHaveCount(3);
+  await expect(pins.locator('.hpm-detail-marker__dot')).toHaveCount(0);
+  expect(
+    await pins.evaluateAll((elements) =>
+      elements.map((element) => {
+        const bounds = element.getBoundingClientRect();
+        const svg = element.querySelector('svg')!.getBoundingClientRect();
+        return {
+          marker: [bounds.width, bounds.height],
+          icon: [svg.width, svg.height],
+        };
+      }),
+    ),
+  ).toEqual([
+    { marker: [30, 38], icon: [30, 38] },
+    { marker: [30, 38], icon: [30, 38] },
+    { marker: [30, 38], icon: [30, 38] },
+  ]);
+  // Bottom-anchored pins extend above their coordinates. The SDK fit
   // must reserve their full painted height, plus a small gap, above the bounds.
   expect(
     await page.evaluate(() => {

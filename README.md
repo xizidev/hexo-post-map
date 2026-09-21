@@ -137,7 +137,7 @@ Use at most one tag per post. A tag also overrides automatic placement in `befor
 
 The card loads near the viewport and becomes interactive automatically. Routine loading and success messages stay hidden; when JavaScript, the provider, or map initialization fails, a concise error and the place links remain available. An SDK load timeout requires a **page reload** to retry.
 
-Detail locations use silent pins and never open provider popups. Route points are numbered, and `route` always remains a straight, schematic sequence rather than a navigable path.
+Detail locations use silent, inline SVG location pins and never open provider popups. A single point uses a center dot; route points carry their sequence number in the same pin shape. `route` always remains a straight, schematic sequence rather than a navigable path.
 
 The overview chooses the first safe image in this order: `thumbnail`, an image in rendered article content, then the bundled placeholder. A chosen image that later fails to load is replaced with the placeholder. Only one representative image per article is used.
 
@@ -145,7 +145,7 @@ The overview chooses the first safe image in this order: `thumbnail`, an image i
 
 Open `/map/` after building and add it to your theme's navigation using that theme's own menu settings. The plugin does not modify menus or theme files. With Hexo `root: /blog/`, the page is `/blog/map/` and its data is `/blog/map/posts.json`; keep `overview.path: map/` relative, without repeating the root.
 
-The overview fits every article's representative point. Each thumbnail sits above a stem and visible coordinate dot, so the image does not hide its anchor. Pixel-distance clustering merges nearby posts and separates them as you zoom; its circle also grows across small, medium, and large count ranges. A cluster zooms toward its contents. If zoom cannot separate them, or the configured maximum zoom is reached, it opens the same bounded article panel used by thumbnail previews and the **All posts** control (a bottom drawer on mobile). The panel caps its maximum height and scrolls the article list inside that boundary. Its image or title links to the article. A chronological article list remains usable without the map.
+The overview fits every article's representative point. Each thumbnail sits above a stem and visible coordinate dot, so the image does not hide its anchor. Pixel-distance clustering merges nearby posts and separates them as you zoom; its circle also grows across small, medium, and large count ranges. A cluster zooms toward its contents. If zoom cannot separate them, or the configured maximum zoom is reached, it opens the same bounded article panel used by thumbnail previews and the **All posts** control (a bottom drawer on mobile). The panel caps its maximum height and scrolls the article list inside that boundary. Panel cards use one fixed 4:3 thumbnail viewport with centered cropping for both portrait and landscape sources; titles are limited to two lines, while dates and locations remain one line. The complete card links to the article. A chronological article list remains usable without the map.
 
 `cluster.grid_size` is a finite positive pixel size; `cluster.max_zoom` must be between 2 and 20 inclusive. The default maximum is 18. Multiple articles may use exactly the same coordinates.
 
