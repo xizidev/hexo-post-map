@@ -2,6 +2,15 @@
 
 Changes are recorded through release pull requests.
 
+## [0.2.1](https://github.com/xizidev/hexo-post-map/compare/v0.2.0...v0.2.1) (2026-09-21)
+
+
+### Bug Fixes
+
+* normalize lockfile registry URLs ([25079d2](https://github.com/xizidev/hexo-post-map/commit/25079d2b483c3aaa3cb2c454c68807c4f1d0232a))
+* use official registry for release installs ([799c912](https://github.com/xizidev/hexo-post-map/commit/799c912601d971586a2852f8235c8d0f26efc0a0))
+* use official registry for release installs ([dbd4589](https://github.com/xizidev/hexo-post-map/commit/dbd4589ff232a31b9284829de87bd0e83354d99a))
+
 ## [0.2.0](https://github.com/xizidev/hexo-post-map/compare/v0.1.0...v0.2.0) (2026-09-21)
 
 
