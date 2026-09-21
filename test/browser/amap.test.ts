@@ -302,13 +302,15 @@ describe('AMap adapter', () => {
     second!.click();
     expect(second!.getAttribute('aria-expanded')).toBe('true');
 
-    Object.defineProperties(secondTooltip, {
+    const secondScroller = secondTooltip.querySelector<HTMLElement>('.hpm-detail-tooltip__scroll')!;
+    Object.defineProperties(secondScroller, {
       clientHeight: { configurable: true, value: 100 },
       scrollHeight: { configurable: true, value: 320 },
     });
-    secondTooltip.scrollTop = 0;
+    secondScroller.scrollTop = 0;
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-    expect(secondTooltip.scrollTop).toBe(220);
+    expect(secondScroller.scrollTop).toBe(220);
+    expect(secondTooltip.scrollTop).toBe(0);
     expect(second!.getAttribute('aria-expanded')).toBe('true');
     secondTooltip.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     secondTooltip.click();

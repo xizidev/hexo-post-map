@@ -9,6 +9,7 @@ export interface DetailMarkerElement {
   readonly element: HTMLDivElement;
   readonly button: HTMLButtonElement;
   readonly tooltip: HTMLSpanElement;
+  readonly scrollViewport: HTMLSpanElement;
   setExpanded(expanded: boolean): void;
   fitTooltip(container: HTMLElement): void;
 }
@@ -64,7 +65,13 @@ export function createDetailMarker(name: string, sequence?: number): DetailMarke
   tooltip.className = 'hpm-detail-marker__tooltip';
   tooltip.role = 'tooltip';
   tooltip.hidden = true;
-  tooltip.textContent = sequence === undefined ? name : `${sequence} · ${name}`;
+  const scrollViewport = document.createElement('span');
+  scrollViewport.className = 'hpm-detail-tooltip__scroll';
+  scrollViewport.textContent = sequence === undefined ? name : `${sequence} · ${name}`;
+  const arrow = document.createElement('span');
+  arrow.className = 'hpm-detail-tooltip__arrow';
+  arrow.setAttribute('aria-hidden', 'true');
+  tooltip.append(scrollViewport, arrow);
 
   button.append(icon);
   content.append(button, tooltip);
@@ -72,10 +79,11 @@ export function createDetailMarker(name: string, sequence?: number): DetailMarke
     element: content,
     button,
     tooltip,
+    scrollViewport,
     setExpanded(expanded) {
       button.setAttribute('aria-expanded', String(expanded));
       tooltip.hidden = !expanded;
-      tooltip.scrollTop = 0;
+      scrollViewport.scrollTop = 0;
       if (expanded) button.setAttribute('aria-describedby', tooltip.id);
       else {
         button.removeAttribute('aria-describedby');

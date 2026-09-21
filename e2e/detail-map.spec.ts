@@ -24,16 +24,31 @@ async function expectTooltipInsideCanvas(canvas: Locator, tooltip: Locator) {
 }
 
 async function expectTooltipArrowConnected(pin: Locator) {
+  const shell = tooltipFor(pin);
+  await expect(shell).toHaveCSS('overflow', 'visible');
+  await expect(shell.locator('.hpm-detail-tooltip__scroll')).toHaveCSS('overflow', 'auto');
+  await expect(shell.locator('.hpm-detail-tooltip__arrow')).toHaveCount(1);
+  await expect(shell.locator('button, a, [tabindex]')).toHaveCount(0);
   const geometry = await pin.evaluate((element) => {
     const content = element.closest<HTMLElement>('.hpm-detail-marker-content')!;
     const tooltip = content.querySelector<HTMLElement>('[role="tooltip"]')!;
     const pinBounds = element.getBoundingClientRect();
     const tooltipBounds = tooltip.getBoundingClientRect();
-    const arrow = getComputedStyle(tooltip, '::after');
-    const arrowCenter = tooltipBounds.left + Number.parseFloat(arrow.left);
+    const arrowElement = tooltip.querySelector<HTMLElement>('.hpm-detail-tooltip__arrow')!;
+    const arrowBounds = arrowElement.getBoundingClientRect();
+    const arrow = getComputedStyle(arrowElement);
+    const arrowCenter = arrowBounds.left + arrowBounds.width / 2;
     const below = content.classList.contains('hpm-detail-marker-content--tooltip-below');
+    const outsideY = below ? tooltipBounds.top - 2 : tooltipBounds.bottom + 2;
     const arrowTransform = new DOMMatrix(arrow.transform);
     return {
+      shell: tooltipBounds.toJSON(),
+      arrow: arrowBounds.toJSON(),
+      pin: pinBounds.toJSON(),
+      protrudes: below
+        ? arrowBounds.top < tooltipBounds.top
+        : arrowBounds.bottom > tooltipBounds.bottom,
+      paintedOutside: document.elementFromPoint(arrowCenter, outsideY) === arrowElement,
       horizontalDistance: Math.abs(arrowCenter - (pinBounds.left + pinBounds.width / 2)),
       verticalGap: below
         ? tooltipBounds.top - pinBounds.bottom
@@ -47,6 +62,38 @@ async function expectTooltipArrowConnected(pin: Locator) {
   expect(geometry.horizontalDistance).toBeLessThanOrEqual(2);
   expect(Math.abs(geometry.verticalGap - 6)).toBeLessThanOrEqual(1);
   expect(geometry.directionMatches).toBe(true);
+  expect(geometry.protrudes).toBe(true);
+  expect(geometry.paintedOutside).toBe(true);
+
+  // Compare actual raster output outside the shell. A clipped arrow has identical
+  // pixels with visibility on/off, even when its DOM rectangle looks correct.
+  const arrow = shell.locator('.hpm-detail-tooltip__arrow');
+  const [shellBox, arrowBox] = await Promise.all([shell.boundingBox(), arrow.boundingBox()]);
+  const clip = {
+    x: arrowBox!.x,
+    y: geometry.below ? arrowBox!.y : shellBox!.y + shellBox!.height,
+    width: arrowBox!.width,
+    height: geometry.below
+      ? shellBox!.y - arrowBox!.y
+      : arrowBox!.y + arrowBox!.height - shellBox!.y - shellBox!.height,
+  };
+  const visiblePixels = await pin.page().screenshot({ clip });
+  await arrow.evaluate((element) => {
+    (element as HTMLElement).style.visibility = 'hidden';
+  });
+  const hiddenPixels = await pin.page().screenshot({ clip });
+  await arrow.evaluate((element) => {
+    (element as HTMLElement).style.removeProperty('visibility');
+  });
+  expect(visiblePixels.equals(hiddenPixels)).toBe(false);
+  await test.info().attach('tooltip-arrow-geometry', {
+    body: JSON.stringify(geometry, null, 2),
+    contentType: 'application/json',
+  });
+  await test.info().attach('tooltip-arrow-painted-outside', {
+    body: visiblePixels,
+    contentType: 'image/png',
+  });
 }
 
 async function expectTooltipScrolledToEnd(tooltip: Locator) {
@@ -98,6 +145,7 @@ test('detail stays unloaded offscreen and becomes interactive automatically near
   const tooltip = root.getByRole('tooltip');
   await expect(tooltip).toHaveText('Shanghai GCJ-02');
   await expect(tooltip).toBeVisible();
+  await expectTooltipArrowConnected(pin);
   await expect(pin).toHaveAttribute('aria-expanded', 'true');
   const tooltipId = await tooltip.getAttribute('id');
   expect(tooltipId).not.toBeNull();
@@ -362,6 +410,14 @@ for (const testCase of [
       await expectTooltipInsideCanvas(canvas, tooltipFor(pins.nth(1)));
       await expectTooltipArrowConnected(pins.nth(1));
     }
+    await page.keyboard.press('Escape');
+    await pins.first().evaluate((element) => {
+      element.closest<HTMLElement>('.amap-marker')!.style.top = 'calc(100% - 44px)';
+    });
+    await pins.first().click();
+    await expectTooltipInsideCanvas(canvas, tooltipFor(pins.first()));
+    await expectTooltipArrowConnected(pins.first());
+    await expect(pins.first().locator('..')).not.toHaveClass(/tooltip-below/u);
   });
 }
 
@@ -390,15 +446,17 @@ test('an overflowing 200% tooltip is operable by mouse, touch and keyboard witho
   await page.goto('/blog/posts/single/');
   const pin = page.locator('.hpm-detail-marker');
   const tooltip = tooltipFor(pin);
+  const scroller = tooltip.locator('.hpm-detail-tooltip__scroll');
   await pin.click();
-  expect(await tooltip.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+  await expectTooltipArrowConnected(pin);
+  expect(await scroller.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
     true,
   );
 
-  await tooltip.hover();
+  await scroller.hover();
   await page.mouse.wheel(0, 4000);
   expect(
-    await tooltip.evaluate((element) => ({
+    await scroller.evaluate((element) => ({
       atEnd: element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
       scrollTop: element.scrollTop,
       clientHeight: element.clientHeight,
@@ -412,8 +470,8 @@ test('an overflowing 200% tooltip is operable by mouse, touch and keyboard witho
   await expect(pin).toBeFocused();
 
   await pin.click();
-  expect(await tooltip.evaluate((element) => element.scrollTop)).toBe(0);
-  const box = (await tooltip.boundingBox())!;
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
+  const box = (await scroller.boundingBox())!;
   const session = await page.context().newCDPSession(page);
   const x = box.x + box.width / 2;
   await session.send('Input.dispatchTouchEvent', {
@@ -427,14 +485,26 @@ test('an overflowing 200% tooltip is operable by mouse, touch and keyboard witho
     });
   }
   await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await expectTooltipScrolledToEnd(tooltip);
+  await expectTooltipScrolledToEnd(scroller);
+  await expectTooltipArrowConnected(pin);
   await page.keyboard.press('Escape');
   await expect(pin).toBeFocused();
 
   await pin.click();
-  expect(await tooltip.evaluate((element) => element.scrollTop)).toBe(0);
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
+  await page.keyboard.press('ArrowDown');
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(40);
+  await page.keyboard.press('ArrowUp');
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
+  await page.keyboard.press('PageDown');
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await page.keyboard.press('PageUp');
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
   await page.keyboard.press('End');
-  await expectTooltipScrolledToEnd(tooltip);
+  await expectTooltipScrolledToEnd(scroller);
+  await page.keyboard.press('Home');
+  expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
+  expect(await tooltip.evaluate((element) => element.scrollTop)).toBe(0);
   await page.keyboard.press('Escape');
   await expect(tooltip).toBeHidden();
   await expect(pin).toBeFocused();

@@ -115,9 +115,6 @@
   bottom: calc(100% + 6px);
   left: 50%;
   width: max-content;
-  max-width: min(18rem, var(--hpm-tooltip-max-width, calc(100vw - 2rem)));
-  max-height: var(--hpm-tooltip-max-height, none);
-  padding: 0.4rem 0.6rem;
   transform: translate(calc(-50% + var(--hpm-tooltip-shift-x, 0px)));
   border: 1px solid var(--hpm-tooltip-border);
   border-radius: 0.5rem;
@@ -128,13 +125,23 @@
     600 0.875rem/1.35 system-ui,
     sans-serif;
   overflow-wrap: anywhere;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
+  overflow: visible;
   text-align: center;
   white-space: normal;
   pointer-events: auto;
   touch-action: none;
+}
+
+.hpm-detail-tooltip__scroll {
+  display: block;
+  box-sizing: border-box;
+  max-width: min(calc(18rem - 2px), calc(var(--hpm-tooltip-max-width, calc(100vw - 2rem)) - 2px));
+  max-height: max(1px, calc(var(--hpm-tooltip-max-height, 100000px) - 2px));
+  padding: 0.4rem 0.6rem;
+  border-radius: inherit;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 
 .hpm-detail-marker-content--tooltip-below .hpm-detail-marker__tooltip {
@@ -142,20 +149,19 @@
   bottom: auto;
 }
 
-.hpm-detail-marker__tooltip::after {
+.hpm-detail-tooltip__arrow {
   position: absolute;
   top: 100%;
   left: clamp(12px, calc(50% - var(--hpm-tooltip-shift-x, 0px)), calc(100% - 12px));
-  width: 0.5rem;
-  height: 0.5rem;
+  width: 8px;
+  height: 8px;
   transform: translate(-50%, -50%) rotate(45deg);
   border-right: 1px solid var(--hpm-tooltip-border);
   border-bottom: 1px solid var(--hpm-tooltip-border);
   background: var(--hpm-tooltip-surface);
-  content: '';
 }
 
-.hpm-detail-marker-content--tooltip-below .hpm-detail-marker__tooltip::after {
+.hpm-detail-marker-content--tooltip-below .hpm-detail-tooltip__arrow {
   top: auto;
   bottom: 100%;
   transform: translate(-50%, 50%) rotate(225deg);

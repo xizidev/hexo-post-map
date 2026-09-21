@@ -260,7 +260,7 @@ function mountDetail(
         origin.focus();
         return;
       }
-      const tooltip = activeMarker.tooltip;
+      const tooltip = activeMarker.scrollViewport;
       const maximum = Math.max(0, tooltip.scrollHeight - tooltip.clientHeight);
       if (maximum === 0) return;
       let next: number | undefined;
@@ -295,11 +295,11 @@ function mountDetail(
         marker.button.removeEventListener('pointerdown', marker.onPointerDown);
         marker.tooltip.removeEventListener('click', marker.stopTooltipEvent);
         marker.tooltip.removeEventListener('pointerdown', marker.stopTooltipEvent);
-        marker.tooltip.removeEventListener('wheel', marker.onTooltipWheel);
-        marker.tooltip.removeEventListener('touchstart', marker.onTooltipTouchStart);
-        marker.tooltip.removeEventListener('touchmove', marker.onTooltipTouchMove);
-        marker.tooltip.removeEventListener('touchend', marker.onTooltipTouchEnd);
-        marker.tooltip.removeEventListener('touchcancel', marker.onTooltipTouchEnd);
+        marker.scrollViewport.removeEventListener('wheel', marker.onTooltipWheel);
+        marker.scrollViewport.removeEventListener('touchstart', marker.onTooltipTouchStart);
+        marker.scrollViewport.removeEventListener('touchmove', marker.onTooltipTouchMove);
+        marker.scrollViewport.removeEventListener('touchend', marker.onTooltipTouchEnd);
+        marker.scrollViewport.removeEventListener('touchcancel', marker.onTooltipTouchEnd);
       });
       model.signal?.removeEventListener('abort', cancel);
       map.destroy();
@@ -379,7 +379,7 @@ function mountDetail(
         const onTooltipWheel = (event: WheelEvent) => {
           event.stopPropagation();
           event.preventDefault();
-          marker.tooltip.scrollTop += event.deltaY;
+          marker.scrollViewport.scrollTop += event.deltaY;
         };
         let previousTouchY: number | undefined;
         const onTooltipTouchStart = (event: TouchEvent) => {
@@ -389,7 +389,7 @@ function mountDetail(
         const onTooltipTouchMove = (event: TouchEvent) => {
           const currentY = event.touches[0]?.clientY;
           if (previousTouchY !== undefined && currentY !== undefined) {
-            marker.tooltip.scrollTop += previousTouchY - currentY;
+            marker.scrollViewport.scrollTop += previousTouchY - currentY;
             previousTouchY = currentY;
           }
           event.stopPropagation();
@@ -414,11 +414,13 @@ function mountDetail(
         marker.button.addEventListener('pointerdown', onPointerDown);
         marker.tooltip.addEventListener('click', stopTooltipEvent);
         marker.tooltip.addEventListener('pointerdown', stopTooltipEvent);
-        marker.tooltip.addEventListener('wheel', onTooltipWheel, { passive: false });
-        marker.tooltip.addEventListener('touchstart', onTooltipTouchStart, { passive: true });
-        marker.tooltip.addEventListener('touchmove', onTooltipTouchMove, { passive: false });
-        marker.tooltip.addEventListener('touchend', onTooltipTouchEnd, { passive: true });
-        marker.tooltip.addEventListener('touchcancel', onTooltipTouchEnd, { passive: true });
+        marker.scrollViewport.addEventListener('wheel', onTooltipWheel, { passive: false });
+        marker.scrollViewport.addEventListener('touchstart', onTooltipTouchStart, {
+          passive: true,
+        });
+        marker.scrollViewport.addEventListener('touchmove', onTooltipTouchMove, { passive: false });
+        marker.scrollViewport.addEventListener('touchend', onTooltipTouchEnd, { passive: true });
+        marker.scrollViewport.addEventListener('touchcancel', onTooltipTouchEnd, { passive: true });
         markerViews.push(markerView);
         markers.push(sdkMarker);
       }
