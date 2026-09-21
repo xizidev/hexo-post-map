@@ -6,23 +6,28 @@ function svgElement<K extends keyof SVGElementTagNameMap>(name: K): SVGElementTa
 }
 
 export interface DetailMarkerElement {
-  readonly element: HTMLButtonElement;
+  readonly element: HTMLDivElement;
+  readonly button: HTMLButtonElement;
   readonly tooltip: HTMLSpanElement;
   setExpanded(expanded: boolean): void;
   fitTooltip(container: HTMLElement): void;
 }
 
 const TOOLTIP_EDGE_GAP = 4;
+const TOOLTIP_PIN_GAP = 6;
 
 export function createDetailMarker(name: string, sequence?: number): DetailMarkerElement {
-  const marker = document.createElement('button');
-  marker.type = 'button';
-  marker.className = 'hpm-detail-marker';
-  marker.setAttribute(
+  const content = document.createElement('div');
+  content.className = 'hpm-detail-marker-content';
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'hpm-detail-marker';
+  button.setAttribute(
     'aria-label',
     sequence === undefined ? `显示地点：${name}` : `显示地点 ${sequence}：${name}`,
   );
-  marker.setAttribute('aria-expanded', 'false');
+  button.setAttribute('aria-expanded', 'false');
 
   const icon = svgElement('svg');
   icon.setAttribute('viewBox', '0 0 30 38');
@@ -45,7 +50,7 @@ export function createDetailMarker(name: string, sequence?: number): DetailMarke
     dot.setAttribute('r', '5');
     icon.append(dot);
   } else {
-    marker.classList.add('hpm-detail-marker--numbered');
+    button.classList.add('hpm-detail-marker--numbered');
     const label = svgElement('text');
     label.classList.add('hpm-detail-marker__label');
     label.setAttribute('x', '15');
@@ -61,37 +66,46 @@ export function createDetailMarker(name: string, sequence?: number): DetailMarke
   tooltip.hidden = true;
   tooltip.textContent = sequence === undefined ? name : `${sequence} · ${name}`;
 
-  marker.append(icon, tooltip);
+  button.append(icon);
+  content.append(button, tooltip);
   return {
-    element: marker,
+    element: content,
+    button,
     tooltip,
     setExpanded(expanded) {
-      marker.setAttribute('aria-expanded', String(expanded));
+      button.setAttribute('aria-expanded', String(expanded));
       tooltip.hidden = !expanded;
-      if (expanded) marker.setAttribute('aria-describedby', tooltip.id);
-      else marker.removeAttribute('aria-describedby');
+      tooltip.scrollTop = 0;
+      if (expanded) button.setAttribute('aria-describedby', tooltip.id);
+      else {
+        button.removeAttribute('aria-describedby');
+        content.classList.remove('hpm-detail-marker-content--tooltip-below');
+      }
     },
     fitTooltip(container) {
       if (tooltip.hidden) return;
       const bounds = container.getBoundingClientRect();
       const availableWidth = Math.max(1, bounds.width - TOOLTIP_EDGE_GAP * 2);
-      const availableHeight = Math.max(1, bounds.height - TOOLTIP_EDGE_GAP * 2);
       tooltip.style.setProperty('--hpm-tooltip-max-width', `${availableWidth}px`);
-      tooltip.style.setProperty('--hpm-tooltip-max-height', `${availableHeight}px`);
+      tooltip.style.removeProperty('--hpm-tooltip-max-height');
       tooltip.style.setProperty('--hpm-tooltip-shift-x', '0px');
-      tooltip.style.setProperty('--hpm-tooltip-shift-y', '0px');
-      marker.classList.remove('hpm-detail-marker--tooltip-below');
+      content.classList.remove('hpm-detail-marker-content--tooltip-below');
 
-      const markerBounds = marker.getBoundingClientRect();
+      const markerBounds = button.getBoundingClientRect();
       let tooltipBounds = tooltip.getBoundingClientRect();
       const top = bounds.top + TOOLTIP_EDGE_GAP;
       const bottom = bounds.bottom - TOOLTIP_EDGE_GAP;
-      const availableAbove = markerBounds.top - top;
-      const availableBelow = bottom - markerBounds.bottom;
+      const availableAbove = Math.max(1, markerBounds.top - top - TOOLTIP_PIN_GAP);
+      const availableBelow = Math.max(1, bottom - markerBounds.bottom - TOOLTIP_PIN_GAP);
       if (tooltipBounds.height > availableAbove && availableBelow > availableAbove) {
-        marker.classList.add('hpm-detail-marker--tooltip-below');
+        content.classList.add('hpm-detail-marker-content--tooltip-below');
         tooltipBounds = tooltip.getBoundingClientRect();
       }
+      const maxHeight = content.classList.contains('hpm-detail-marker-content--tooltip-below')
+        ? availableBelow
+        : availableAbove;
+      tooltip.style.setProperty('--hpm-tooltip-max-height', `${maxHeight}px`);
+      tooltipBounds = tooltip.getBoundingClientRect();
 
       const left = bounds.left + TOOLTIP_EDGE_GAP;
       const right = bounds.right - TOOLTIP_EDGE_GAP;
@@ -101,14 +115,7 @@ export function createDetailMarker(name: string, sequence?: number): DetailMarke
           : tooltipBounds.right > right
             ? right - tooltipBounds.right
             : 0;
-      const shiftY =
-        tooltipBounds.top < top
-          ? top - tooltipBounds.top
-          : tooltipBounds.bottom > bottom
-            ? bottom - tooltipBounds.bottom
-            : 0;
       tooltip.style.setProperty('--hpm-tooltip-shift-x', `${shiftX}px`);
-      tooltip.style.setProperty('--hpm-tooltip-shift-y', `${shiftY}px`);
     },
   };
 }

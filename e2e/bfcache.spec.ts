@@ -86,7 +86,7 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
       await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
       await expect(detailMarker).toBeVisible();
       await expect(detailMarker).toHaveAttribute('aria-expanded', 'false');
-      await expect(detailMarker.getByRole('tooltip')).toBeHidden();
+      await expect(detailMarker.locator('..').getByRole('tooltip')).toBeHidden();
       const canvas = page.locator('[data-hpm-canvas]');
       await expect(canvas).toHaveAttribute('tabindex', '0');
       await tabTo(page, canvas);

@@ -10,6 +10,10 @@ async function tabTo(page: Page, target: Locator) {
   await expect(target).toBeFocused();
 }
 
+function tooltipFor(pin: Locator) {
+  return pin.locator('..').getByRole('tooltip');
+}
+
 async function expectTooltipInsideCanvas(canvas: Locator, tooltip: Locator) {
   await expect(tooltip).toBeVisible();
   const [canvasBox, tooltipBox] = await Promise.all([canvas.boundingBox(), tooltip.boundingBox()]);
@@ -17,6 +21,40 @@ async function expectTooltipInsideCanvas(canvas: Locator, tooltip: Locator) {
   expect(tooltipBox!.x + tooltipBox!.width).toBeLessThanOrEqual(canvasBox!.x + canvasBox!.width);
   expect(tooltipBox!.y).toBeGreaterThanOrEqual(canvasBox!.y);
   expect(tooltipBox!.y + tooltipBox!.height).toBeLessThanOrEqual(canvasBox!.y + canvasBox!.height);
+}
+
+async function expectTooltipArrowConnected(pin: Locator) {
+  const geometry = await pin.evaluate((element) => {
+    const content = element.closest<HTMLElement>('.hpm-detail-marker-content')!;
+    const tooltip = content.querySelector<HTMLElement>('[role="tooltip"]')!;
+    const pinBounds = element.getBoundingClientRect();
+    const tooltipBounds = tooltip.getBoundingClientRect();
+    const arrow = getComputedStyle(tooltip, '::after');
+    const arrowCenter = tooltipBounds.left + Number.parseFloat(arrow.left);
+    const below = content.classList.contains('hpm-detail-marker-content--tooltip-below');
+    const arrowTransform = new DOMMatrix(arrow.transform);
+    return {
+      horizontalDistance: Math.abs(arrowCenter - (pinBounds.left + pinBounds.width / 2)),
+      verticalGap: below
+        ? tooltipBounds.top - pinBounds.bottom
+        : pinBounds.top - tooltipBounds.bottom,
+      below,
+      directionMatches: below
+        ? arrowTransform.a < 0 && arrowTransform.b < 0
+        : arrowTransform.a > 0 && arrowTransform.b > 0,
+    };
+  });
+  expect(geometry.horizontalDistance).toBeLessThanOrEqual(2);
+  expect(Math.abs(geometry.verticalGap - 6)).toBeLessThanOrEqual(1);
+  expect(geometry.directionMatches).toBe(true);
+}
+
+async function expectTooltipScrolledToEnd(tooltip: Locator) {
+  expect(
+    await tooltip.evaluate(
+      (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
+    ),
+  ).toBe(true);
 }
 
 test('detail stays unloaded offscreen and becomes interactive automatically near the viewport', async ({
@@ -147,17 +185,17 @@ test('route place tooltips switch across mouse and keyboard and close without lo
   const second = pins.nth(1);
 
   await first.click();
-  await expect(first.getByRole('tooltip')).toHaveText('1 · Visitor center GCJ-02');
-  await expect(first.getByRole('tooltip')).toBeVisible();
+  await expect(tooltipFor(first)).toHaveText('1 · Visitor center GCJ-02');
+  await expect(tooltipFor(first)).toBeVisible();
   await expect(first).toHaveAttribute('aria-expanded', 'true');
 
   await tabTo(page, second);
   await page.keyboard.press('Enter');
   await expect(first).toHaveAttribute('aria-expanded', 'false');
   await expect(second).toHaveAttribute('aria-expanded', 'true');
-  await expect(second.getByRole('tooltip')).toHaveText('2 · Cableway GCJ-02');
-  await expect(second.getByRole('tooltip')).toBeVisible();
-  const secondTooltipId = await second.getByRole('tooltip').getAttribute('id');
+  await expect(tooltipFor(second)).toHaveText('2 · Cableway GCJ-02');
+  await expect(tooltipFor(second)).toBeVisible();
+  const secondTooltipId = await tooltipFor(second).getAttribute('id');
   expect(secondTooltipId).not.toBeNull();
   await expect(second).toHaveAttribute('aria-describedby', secondTooltipId!);
 
@@ -202,7 +240,7 @@ test('an identical-coordinate marker rises above its sibling for mouse and keybo
   const second = pins.nth(1);
 
   await second.click();
-  await expect(second.getByRole('tooltip')).toBeVisible();
+  await expect(tooltipFor(second)).toBeVisible();
   expect(
     await second.evaluate((element) => {
       const rect = element.getBoundingClientRect();
@@ -215,8 +253,8 @@ test('an identical-coordinate marker rises above its sibling for mouse and keybo
 
   await first.focus();
   await page.keyboard.press('Enter');
-  await expect(first.getByRole('tooltip')).toBeVisible();
-  await expect(second.getByRole('tooltip')).toBeHidden();
+  await expect(tooltipFor(first)).toBeVisible();
+  await expect(tooltipFor(second)).toBeHidden();
   expect(
     await first.evaluate((element) => {
       const rect = element.getBoundingClientRect();
@@ -307,7 +345,8 @@ for (const testCase of [
     const canvas = page.locator('[data-hpm-canvas]');
     const pins = page.locator('.hpm-detail-marker');
     await pins.first().click();
-    await expectTooltipInsideCanvas(canvas, pins.first().getByRole('tooltip'));
+    await expectTooltipInsideCanvas(canvas, tooltipFor(pins.first()));
+    await expectTooltipArrowConnected(pins.first());
 
     if (testCase.pageName === 'single') {
       await pins.first().click();
@@ -316,13 +355,90 @@ for (const testCase of [
         wrapper.style.left = wrapper.style.left === '0px' ? 'calc(100% - 44px)' : '0px';
       });
       await pins.first().click();
-      await expectTooltipInsideCanvas(canvas, pins.first().getByRole('tooltip'));
+      await expectTooltipInsideCanvas(canvas, tooltipFor(pins.first()));
+      await expectTooltipArrowConnected(pins.first());
     } else {
       await pins.nth(1).click();
-      await expectTooltipInsideCanvas(canvas, pins.nth(1).getByRole('tooltip'));
+      await expectTooltipInsideCanvas(canvas, tooltipFor(pins.nth(1)));
+      await expectTooltipArrowConnected(pins.nth(1));
     }
   });
 }
+
+test('an overflowing 200% tooltip is operable by mouse, touch and keyboard without losing Escape focus', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.addInitScript(() => {
+    document.documentElement.style.fontSize = '32px';
+    Reflect.set(window, '__hpmSdkMarkerLayout', [{ left: '0px', top: '0px' }]);
+  });
+  await page.route('**/posts/single/', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.text()).replace(
+      /(<script type="application\/json" data-hpm-data>)([\s\S]*?)(<\/script>)/u,
+      (_all, start, json, end) => {
+        const data = JSON.parse(json);
+        data.map.points[0].name =
+          'The beginning of an intentionally extreme place name. '.repeat(12) +
+          'The final words must remain reachable.';
+        return start + JSON.stringify(data).replaceAll('<', '\\u003c') + end;
+      },
+    );
+    await route.fulfill({ response, body });
+  });
+  await page.goto('/blog/posts/single/');
+  const pin = page.locator('.hpm-detail-marker');
+  const tooltip = tooltipFor(pin);
+  await pin.click();
+  expect(await tooltip.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+    true,
+  );
+
+  await tooltip.hover();
+  await page.mouse.wheel(0, 4000);
+  expect(
+    await tooltip.evaluate((element) => ({
+      atEnd: element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
+      scrollTop: element.scrollTop,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      pointerEvents: getComputedStyle(element).pointerEvents,
+      overflowY: getComputedStyle(element).overflowY,
+    })),
+  ).toEqual(expect.objectContaining({ atEnd: true }));
+  await page.keyboard.press('Escape');
+  await expect(tooltip).toBeHidden();
+  await expect(pin).toBeFocused();
+
+  await pin.click();
+  expect(await tooltip.evaluate((element) => element.scrollTop)).toBe(0);
+  const box = (await tooltip.boundingBox())!;
+  const session = await page.context().newCDPSession(page);
+  const x = box.x + box.width / 2;
+  await session.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x, y: box.y + box.height - 12 }],
+  });
+  for (let offset = 0; offset < 5; offset++) {
+    await session.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x, y: box.y + box.height - 12 - (offset + 1) * 80 }],
+    });
+  }
+  await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await expectTooltipScrolledToEnd(tooltip);
+  await page.keyboard.press('Escape');
+  await expect(pin).toBeFocused();
+
+  await pin.click();
+  expect(await tooltip.evaluate((element) => element.scrollTop)).toBe(0);
+  await page.keyboard.press('End');
+  await expectTooltipScrolledToEnd(tooltip);
+  await page.keyboard.press('Escape');
+  await expect(tooltip).toBeHidden();
+  await expect(pin).toBeFocused();
+});
 
 test('out-and-back route retains each visit label and its return segment', async ({ page }) => {
   await page.route('**/posts/route/', async (route) => {

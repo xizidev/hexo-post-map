@@ -44,10 +44,21 @@
   padding-inline-start: 1.5rem;
 }
 
+.hpm-detail-marker-content {
+  display: block;
+  position: relative;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  overflow: visible;
+}
+
 .hpm-detail .hpm-detail-marker {
   box-sizing: border-box;
   display: block;
-  position: relative;
+  position: absolute;
+  inset: 0;
   width: 44px;
   min-width: 44px;
   height: 44px;
@@ -107,10 +118,7 @@
   max-width: min(18rem, var(--hpm-tooltip-max-width, calc(100vw - 2rem)));
   max-height: var(--hpm-tooltip-max-height, none);
   padding: 0.4rem 0.6rem;
-  transform: translate(
-    calc(-50% + var(--hpm-tooltip-shift-x, 0px)),
-    var(--hpm-tooltip-shift-y, 0px)
-  );
+  transform: translate(calc(-50% + var(--hpm-tooltip-shift-x, 0px)));
   border: 1px solid var(--hpm-tooltip-border);
   border-radius: 0.5rem;
   background: var(--hpm-tooltip-surface);
@@ -121,12 +129,15 @@
     sans-serif;
   overflow-wrap: anywhere;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
   text-align: center;
   white-space: normal;
-  pointer-events: none;
+  pointer-events: auto;
+  touch-action: none;
 }
 
-.hpm-detail-marker--tooltip-below .hpm-detail-marker__tooltip {
+.hpm-detail-marker-content--tooltip-below .hpm-detail-marker__tooltip {
   top: calc(100% + 6px);
   bottom: auto;
 }
@@ -134,7 +145,7 @@
 .hpm-detail-marker__tooltip::after {
   position: absolute;
   top: 100%;
-  left: 50%;
+  left: clamp(12px, calc(50% - var(--hpm-tooltip-shift-x, 0px)), calc(100% - 12px));
   width: 0.5rem;
   height: 0.5rem;
   transform: translate(-50%, -50%) rotate(45deg);
@@ -144,7 +155,7 @@
   content: '';
 }
 
-.hpm-detail-marker--tooltip-below .hpm-detail-marker__tooltip::after {
+.hpm-detail-marker-content--tooltip-below .hpm-detail-marker__tooltip::after {
   top: auto;
   bottom: 100%;
   transform: translate(-50%, 50%) rotate(225deg);

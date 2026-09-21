@@ -45,6 +45,9 @@ class FakeMarker {
   });
   constructor(readonly options: { position: number[]; content: HTMLElement }) {}
 }
+function markerButton(marker: FakeMarker): HTMLButtonElement {
+  return marker.options.content.querySelector<HTMLButtonElement>('.hpm-detail-marker')!;
+}
 class FakePolyline {
   constructor(readonly options: { path: number[][] }) {}
 }
@@ -93,7 +96,7 @@ describe('AMap adapter', () => {
     );
     expect(
       markers.map((item) => [
-        item.options.content.querySelector('.hpm-detail-marker__label')?.textContent ?? '',
+        markerButton(item).querySelector('.hpm-detail-marker__label')?.textContent ?? '',
         item.options.position,
       ]),
     ).toEqual([
@@ -191,33 +194,32 @@ describe('AMap adapter', () => {
       [121, 31],
       [123, 33],
     ]);
-    expect(markers.map((marker) => marker.options.content.tagName)).toEqual([
+    expect(markers.map((marker) => marker.options.content.tagName)).toEqual(['DIV', 'DIV', 'DIV']);
+    expect(markers.map((marker) => markerButton(marker).tagName)).toEqual([
       'BUTTON',
       'BUTTON',
       'BUTTON',
     ]);
-    expect(markers.map((marker) => marker.options.content.getAttribute('aria-label'))).toEqual([
+    expect(markers.map((marker) => markerButton(marker).getAttribute('aria-label'))).toEqual([
       '显示地点 1：B',
       '显示地点 2：A',
       '显示地点：C',
     ]);
     expect(
-      markers.every((marker) => marker.options.content.getAttribute('aria-expanded') === 'false'),
+      markers.every((marker) => markerButton(marker).getAttribute('aria-expanded') === 'false'),
     ).toBe(true);
-    expect(markers.every((marker) => marker.options.content.querySelector('a') === null)).toBe(
-      true,
-    );
+    expect(markers.every((marker) => markerButton(marker).querySelector('a') === null)).toBe(true);
     expect(
       markers.map(
         (marker) =>
-          marker.options.content.querySelector('.hpm-detail-marker__label')?.textContent ?? '',
+          markerButton(marker).querySelector('.hpm-detail-marker__label')?.textContent ?? '',
       ),
     ).toEqual(['1', '2', '']);
     expect(
       markers.map((marker) => ({
-        viewBox: marker.options.content.querySelector('svg')?.getAttribute('viewBox'),
-        shape: marker.options.content.querySelectorAll('.hpm-detail-marker__shape').length,
-        dot: marker.options.content.querySelectorAll('.hpm-detail-marker__dot').length,
+        viewBox: markerButton(marker).querySelector('svg')?.getAttribute('viewBox'),
+        shape: markerButton(marker).querySelectorAll('.hpm-detail-marker__shape').length,
+        dot: markerButton(marker).querySelectorAll('.hpm-detail-marker__dot').length,
       })),
     ).toEqual([
       { viewBox: '0 0 30 38', shape: 1, dot: 0 },
@@ -256,9 +258,11 @@ describe('AMap adapter', () => {
     const markers = instance.overlays.filter(
       (overlay): overlay is FakeMarker => overlay instanceof FakeMarker,
     );
-    const [first, second] = markers.map((marker) => marker.options.content);
-    const firstTooltip = first!.querySelector<HTMLElement>('[role="tooltip"]')!;
-    const secondTooltip = second!.querySelector<HTMLElement>('[role="tooltip"]')!;
+    const [first, second] = markers.map(markerButton);
+    const firstTooltip =
+      markers[0]!.options.content.querySelector<HTMLElement>('[role="tooltip"]')!;
+    const secondTooltip =
+      markers[1]!.options.content.querySelector<HTMLElement>('[role="tooltip"]')!;
 
     expect(first!.tagName).toBe('BUTTON');
     expect(first!.className).toContain('hpm-detail-marker');
@@ -298,6 +302,18 @@ describe('AMap adapter', () => {
     second!.click();
     expect(second!.getAttribute('aria-expanded')).toBe('true');
 
+    Object.defineProperties(secondTooltip, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 320 },
+    });
+    secondTooltip.scrollTop = 0;
+    container.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    expect(secondTooltip.scrollTop).toBe(220);
+    expect(second!.getAttribute('aria-expanded')).toBe('true');
+    secondTooltip.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    secondTooltip.click();
+    expect(second!.getAttribute('aria-expanded')).toBe('true');
+
     second!.focus();
     container.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     expect(second!.getAttribute('aria-expanded')).toBe('false');
@@ -335,8 +351,8 @@ describe('AMap adapter', () => {
     const markers = instance.overlays.filter(
       (overlay): overlay is FakeMarker => overlay instanceof FakeMarker,
     );
-    const first = markers[0]!.options.content;
-    const second = markers[1]!.options.content;
+    const first = markerButton(markers[0]!);
+    const second = markerButton(markers[1]!);
 
     first.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
     expect(markers.map((marker) => marker.isTop)).toEqual([true, false]);
@@ -355,8 +371,8 @@ describe('AMap adapter', () => {
     const provider = await createAMapProvider(config);
     const container = document.createElement('div');
     const pending = provider.mountDetail(container, model());
-    const pin = (instance.overlays[0] as FakeMarker).options.content;
     const marker = instance.overlays[0] as FakeMarker;
+    const pin = markerButton(marker);
     expect(pin.className).toBe('hpm-detail-marker');
     expect(pin.getAttribute('aria-expanded')).toBe('false');
     pin.click();
@@ -402,7 +418,7 @@ describe('AMap adapter', () => {
       signal: abort.signal,
     });
     const marker = instance.overlays[0] as FakeMarker;
-    marker.options.content.click();
+    markerButton(marker).click();
     expect(marker.isTop).toBe(true);
     abort.abort();
     await expect(pending).rejects.toThrow();

@@ -233,6 +233,11 @@ function mountDetail(
         sdkMarker: AMapMarker;
         onClick: (event: MouseEvent) => void;
         onPointerDown: (event: Event) => void;
+        stopTooltipEvent: (event: Event) => void;
+        onTooltipWheel: (event: WheelEvent) => void;
+        onTooltipTouchStart: (event: TouchEvent) => void;
+        onTooltipTouchMove: (event: TouchEvent) => void;
+        onTooltipTouchEnd: (event: TouchEvent) => void;
       }
     > = [];
     let activeMarker: (typeof markerViews)[number] | undefined;
@@ -247,11 +252,28 @@ function mountDetail(
       closeActive();
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key !== 'Escape' || !activeMarker) return;
-      const origin = activeMarker.element;
-      closeActive();
+      if (!activeMarker) return;
+      if (event.key === 'Escape') {
+        const origin = activeMarker.button;
+        closeActive();
+        event.preventDefault();
+        origin.focus();
+        return;
+      }
+      const tooltip = activeMarker.tooltip;
+      const maximum = Math.max(0, tooltip.scrollHeight - tooltip.clientHeight);
+      if (maximum === 0) return;
+      let next: number | undefined;
+      if (event.key === 'ArrowDown') next = tooltip.scrollTop + 40;
+      else if (event.key === 'ArrowUp') next = tooltip.scrollTop - 40;
+      else if (event.key === 'PageDown') next = tooltip.scrollTop + tooltip.clientHeight;
+      else if (event.key === 'PageUp') next = tooltip.scrollTop - tooltip.clientHeight;
+      else if (event.key === 'End') next = maximum;
+      else if (event.key === 'Home') next = 0;
+      if (next === undefined) return;
+      tooltip.scrollTop = Math.max(0, Math.min(maximum, next));
       event.preventDefault();
-      origin.focus();
+      event.stopPropagation();
     }
 
     function destroy() {
@@ -269,8 +291,15 @@ function mountDetail(
       window.removeEventListener('pagehide', closeActive);
       closeActive();
       markerViews.forEach((marker) => {
-        marker.element.removeEventListener('click', marker.onClick);
-        marker.element.removeEventListener('pointerdown', marker.onPointerDown);
+        marker.button.removeEventListener('click', marker.onClick);
+        marker.button.removeEventListener('pointerdown', marker.onPointerDown);
+        marker.tooltip.removeEventListener('click', marker.stopTooltipEvent);
+        marker.tooltip.removeEventListener('pointerdown', marker.stopTooltipEvent);
+        marker.tooltip.removeEventListener('wheel', marker.onTooltipWheel);
+        marker.tooltip.removeEventListener('touchstart', marker.onTooltipTouchStart);
+        marker.tooltip.removeEventListener('touchmove', marker.onTooltipTouchMove);
+        marker.tooltip.removeEventListener('touchend', marker.onTooltipTouchEnd);
+        marker.tooltip.removeEventListener('touchcancel', marker.onTooltipTouchEnd);
       });
       model.signal?.removeEventListener('abort', cancel);
       map.destroy();
@@ -336,7 +365,7 @@ function mountDetail(
         });
         const onClick = (event: MouseEvent) => {
           event.stopPropagation();
-          if (activeMarker?.element === marker.element) closeActive();
+          if (activeMarker?.button === marker.button) closeActive();
           else {
             closeActive();
             activeMarker = markerView;
@@ -346,9 +375,50 @@ function mountDetail(
           }
         };
         const onPointerDown = (event: Event) => event.stopPropagation();
-        const markerView = { ...marker, sdkMarker, onClick, onPointerDown };
-        marker.element.addEventListener('click', onClick);
-        marker.element.addEventListener('pointerdown', onPointerDown);
+        const stopTooltipEvent = (event: Event) => event.stopPropagation();
+        const onTooltipWheel = (event: WheelEvent) => {
+          event.stopPropagation();
+          event.preventDefault();
+          marker.tooltip.scrollTop += event.deltaY;
+        };
+        let previousTouchY: number | undefined;
+        const onTooltipTouchStart = (event: TouchEvent) => {
+          previousTouchY = event.touches[0]?.clientY;
+          event.stopPropagation();
+        };
+        const onTooltipTouchMove = (event: TouchEvent) => {
+          const currentY = event.touches[0]?.clientY;
+          if (previousTouchY !== undefined && currentY !== undefined) {
+            marker.tooltip.scrollTop += previousTouchY - currentY;
+            previousTouchY = currentY;
+          }
+          event.stopPropagation();
+          event.preventDefault();
+        };
+        const onTooltipTouchEnd = (event: TouchEvent) => {
+          previousTouchY = undefined;
+          event.stopPropagation();
+        };
+        const markerView = {
+          ...marker,
+          sdkMarker,
+          onClick,
+          onPointerDown,
+          stopTooltipEvent,
+          onTooltipWheel,
+          onTooltipTouchStart,
+          onTooltipTouchMove,
+          onTooltipTouchEnd,
+        };
+        marker.button.addEventListener('click', onClick);
+        marker.button.addEventListener('pointerdown', onPointerDown);
+        marker.tooltip.addEventListener('click', stopTooltipEvent);
+        marker.tooltip.addEventListener('pointerdown', stopTooltipEvent);
+        marker.tooltip.addEventListener('wheel', onTooltipWheel, { passive: false });
+        marker.tooltip.addEventListener('touchstart', onTooltipTouchStart, { passive: true });
+        marker.tooltip.addEventListener('touchmove', onTooltipTouchMove, { passive: false });
+        marker.tooltip.addEventListener('touchend', onTooltipTouchEnd, { passive: true });
+        marker.tooltip.addEventListener('touchcancel', onTooltipTouchEnd, { passive: true });
         markerViews.push(markerView);
         markers.push(sdkMarker);
       }
