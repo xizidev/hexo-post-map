@@ -49,26 +49,29 @@ describe('detail hydration', () => {
     const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
     const mountDetail = vi.fn<MapProvider['mountDetail']>(async () => handle);
     const load = vi.fn(async () => ({ mountDetail, mountOverview: vi.fn() }));
-    hydrateDetail(root, load);
+    const controller = hydrateDetail(root, load);
+    const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]')!;
+    expect(canvas.tabIndex).toBe(-1);
     await flush();
+    expect(canvas.tabIndex).toBe(0);
     for (let visit = 0; visit < 2; visit++) {
       pageTransition('pagehide', true);
+      expect(canvas.tabIndex).toBe(0);
       pageTransition('pageshow', true);
       pageTransition('pageshow', true);
       await flush();
-      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
       expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
-      root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
       expect(root.dataset.hpmActive).toBe('true');
       expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
-      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      expect(root.dataset.hpmActive).toBe('false');
-      expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
+      expect(canvas.tabIndex).toBe(0);
+      expect(hydrateDetail(root, load)).toBe(controller);
     }
     expect(load).toHaveBeenCalledTimes(1);
     expect(mountDetail).toHaveBeenCalledTimes(1);
     expect(handle.destroy).not.toHaveBeenCalled();
     pageTransition('pagehide', false);
+    expect(canvas.tabIndex).toBe(-1);
     pageTransition('pageshow', false);
     expect(handle.destroy).toHaveBeenCalledTimes(1);
     expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
@@ -91,12 +94,15 @@ describe('detail hydration', () => {
     pageTransition('pagehide', true);
     pageTransition('pageshow', true);
     expect(signal?.aborted).toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-hpm-canvas]')!.tabIndex).toBe(-1);
     const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
     pending.resolve(handle);
     await flush();
-    expect(root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.disabled).toBe(false);
+    expect(root.querySelector('[data-hpm-activate]')).toBe(null);
+    expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
     expect(handle.destroy).not.toHaveBeenCalled();
+    expect(root.querySelector<HTMLElement>('[data-hpm-canvas]')!.tabIndex).toBe(0);
   });
   it('releases failed configuration registration on pagehide before explicit rebuild', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
@@ -130,7 +136,7 @@ describe('detail hydration', () => {
     otherBundle.initializeDetailMaps(document, load);
     expect(otherBundle.hydrateDetail(root, load)).toBe(first);
     await flush();
-    expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+    expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
     expect(mountDetail).toHaveBeenCalledTimes(1);
     expect(load).toHaveBeenCalledTimes(1);
     first.destroy();
@@ -152,16 +158,22 @@ describe('detail hydration', () => {
       const load = async () => ({ mountDetail, mountOverview: vi.fn() });
       const first = hydrateDetail(root, load);
       await flush();
+      const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]')!;
+      expect(canvas.tabIndex).toBe(0);
       if (reason === 'destroy') first.destroy();
       else window.dispatchEvent(new Event('pagehide'));
+      expect(canvas.tabIndex).toBe(-1);
       expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
       const second = hydrateDetail(root, load);
       expect(second).not.toBe(first);
       await flush();
       expect(mountDetail).toHaveBeenCalledTimes(2);
-      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
+      expect(handles[1]!.setInteractive).toHaveBeenLastCalledWith(true);
       expect(handles[0]!.destroy).toHaveBeenCalledTimes(1);
+      expect(canvas.tabIndex).toBe(0);
       second.destroy();
+      expect(canvas.tabIndex).toBe(-1);
     },
   );
   it('waits until intersection within 300px and keeps SSR links until complete', async () => {
@@ -185,6 +197,8 @@ describe('detail hydration', () => {
     const mountDetail = vi.fn<MapProvider['mountDetail']>(() => pending.promise);
     const load = vi.fn(async () => ({ mountDetail, mountOverview: vi.fn() }));
     const controller = hydrateDetail(root, load);
+    const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]')!;
+    expect(canvas.tabIndex).toBe(-1);
     expect(load).not.toHaveBeenCalled();
     expect(options?.rootMargin).toBe('300px');
     intersect([{ isIntersecting: false } as IntersectionObserverEntry], {} as IntersectionObserver);
@@ -193,19 +207,23 @@ describe('detail hydration', () => {
     intersect([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
     await flush();
     expect(load).toHaveBeenCalledTimes(1);
+    expect(canvas.tabIndex).toBe(-1);
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
-    expect(root.querySelector('[data-hpm-status]')!.textContent).toContain('加载');
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
     expect(mountDetail.mock.calls[0]?.[1]).toMatchObject({ map, defaultZoom: 11 });
     pending.resolve(handle);
     await flush();
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
-    expect(root.querySelector('[data-hpm-status]')!.textContent).toContain('加载完成');
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
+    expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     expect(disconnect).toHaveBeenCalled();
+    expect(canvas.tabIndex).toBe(0);
     controller.destroy();
+    expect(canvas.tabIndex).toBe(-1);
     expect(handle.destroy).toHaveBeenCalledTimes(1);
   });
 
-  it('requires intentional activation and releases interaction with Escape', async () => {
+  it('enables interaction automatically without an activation overlay or success prompt', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const root = fixture();
     const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
@@ -214,27 +232,24 @@ describe('detail hydration', () => {
       mountOverview: vi.fn(),
     }));
     await flush();
-    const activate = root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!;
-    expect(activate.type).toBe('button');
-    expect(root.dataset.hpmActive).not.toBe('true');
-    expect(handle.setInteractive).not.toHaveBeenCalledWith(true);
-    root.dispatchEvent(new WheelEvent('wheel', { cancelable: true }));
-    expect(handle.setInteractive).not.toHaveBeenCalledWith(true);
-    activate.click();
+    expect(root.querySelector('[data-hpm-activate]')).toBe(null);
     expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     expect(root.dataset.hpmActive).toBe('true');
-    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
-    expect(document.activeElement).toBe(activate);
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
     controller.destroy();
   });
 
-  it.each(['load', 'mount', 'runtime'])(
+  it.each(['load', 'mount', 'interaction', 'runtime'])(
     'retains or restores fallback on %s failure',
     async (stage) => {
       vi.stubGlobal('IntersectionObserver', undefined);
       const root = fixture();
-      const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
+      const handle = {
+        destroy: vi.fn(),
+        setInteractive: vi.fn(() => {
+          if (stage === 'interaction') throw new Error('private interaction error');
+        }),
+      };
       let model!: DetailMapModel;
       const provider: MapProvider = {
         mountDetail: async (_container, data) => {
@@ -249,7 +264,12 @@ describe('detail hydration', () => {
         return provider;
       });
       await flush();
-      if (stage === 'runtime') model.onError?.();
+      const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]')!;
+      if (stage === 'runtime') {
+        expect(canvas.tabIndex).toBe(0);
+        model.onError?.();
+      }
+      expect(canvas.tabIndex).toBe(-1);
       expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
       expect(root.querySelector('a')!.href).toContain('uri.amap.com');
       expect(root.querySelector('[data-hpm-status]')!.textContent).toContain('暂时无法加载');
@@ -278,6 +298,7 @@ describe('detail hydration', () => {
     await flush();
     expect(handle.destroy).toHaveBeenCalledTimes(1);
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-hpm-canvas]')!.tabIndex).toBe(-1);
     controller.destroy();
   });
 
@@ -289,6 +310,7 @@ describe('detail hydration', () => {
     await flush();
     expect(load).not.toHaveBeenCalled();
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(root.querySelector<HTMLElement>('[data-hpm-canvas]')!.tabIndex).toBe(-1);
     expect(root.querySelector('[data-hpm-status]')!.textContent).toContain('暂时无法加载');
   });
 });

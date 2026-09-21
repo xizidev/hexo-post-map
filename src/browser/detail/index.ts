@@ -30,41 +30,17 @@ export function hydrateDetail(
   let started = false;
   let disposed = false;
   let failed = false;
-  const activate = document.createElement('button');
-  activate.type = 'button';
-  activate.className = 'hpm-detail__activate';
-  activate.dataset.hpmActivate = '';
-  activate.textContent = '点击或按 Enter 激活地图';
-  activate.disabled = true;
   const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]');
 
   function fail() {
     if (disposed) return;
     failed = true;
+    if (canvas) canvas.tabIndex = -1;
     root.dataset.hpmActive = 'false';
-    activate.hidden = true;
     showFallback(root, true);
     setStatus(root, '地图暂时无法加载，请使用下方地点链接。');
     handle?.destroy();
   }
-  function interact(active: boolean) {
-    if (!handle || failed || disposed) return;
-    handle.setInteractive(active);
-    if (failed) return;
-    root.dataset.hpmActive = String(active);
-    activate.hidden = active;
-    if (active) {
-      canvas?.focus();
-      setStatus(root, '地图已激活，按 Esc 退出地图交互。');
-    } else {
-      activate.focus();
-      setStatus(root, '地图加载完成，可激活地图交互。');
-    }
-  }
-  const onActivate = () => interact(true);
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') interact(false);
-  };
   const onPageHide = (event: PageTransitionEvent) => {
     // BFCache freezes this controller and its SDK ownership for the next pageshow.
     if (!event.persisted) destroy();
@@ -72,14 +48,12 @@ export function hydrateDetail(
   function destroy() {
     if (disposed) return;
     disposed = true;
+    if (canvas) canvas.tabIndex = -1;
     if (registry.get(root) === controller) registry.delete(root);
     observer?.disconnect();
     abort.abort();
     handle?.destroy();
-    activate.removeEventListener('click', onActivate);
-    root.removeEventListener('keydown', onKey);
     window.removeEventListener('pagehide', onPageHide);
-    activate.remove();
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
   }
@@ -90,8 +64,8 @@ export function hydrateDetail(
     if (!canvas) throw new Error('Missing map canvas');
     root.style.setProperty('--hpm-detail-height', config.height);
     canvas.tabIndex = -1;
-    canvas.setAttribute('aria-label', '文章地点地图，按 Esc 退出交互');
-    canvas.insertAdjacentElement('afterend', activate);
+    const names = config.map.points.map((point) => point.name).join('、');
+    canvas.setAttribute('aria-label', `文章地点地图：${names}`);
   } catch {
     fail();
     return controller;
@@ -101,7 +75,7 @@ export function hydrateDetail(
     if (started || disposed) return;
     started = true;
     observer?.disconnect();
-    setStatus(root, '地图加载中…');
+    setStatus(root, '');
     try {
       const provider = await load(config);
       if (disposed) return;
@@ -116,15 +90,16 @@ export function hydrateDetail(
         return;
       }
       handle = mounted;
+      handle.setInteractive(true);
+      if (disposed || failed) return;
+      canvas!.tabIndex = 0;
+      root.dataset.hpmActive = 'true';
       showFallback(root, false);
-      activate.disabled = false;
-      setStatus(root, '地图加载完成，可激活地图交互。');
+      setStatus(root, '');
     } catch {
       fail();
     }
   }
-  activate.addEventListener('click', onActivate);
-  root.addEventListener('keydown', onKey);
   if (typeof IntersectionObserver === 'function') {
     observer = new IntersectionObserver(
       (entries) => {

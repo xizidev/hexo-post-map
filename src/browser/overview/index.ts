@@ -8,7 +8,8 @@ import type {
 } from '../providers/types';
 import { setStatus, showFallback } from '../shared/dom';
 import { loadProvider } from '../shared/provider-loader';
-import { installImageFallback, renderPostPanel, type PanelHandle } from './panel';
+import { installImageFallback } from './markers';
+import { renderPostPanel, type PanelHandle } from './panel';
 
 interface OverviewController {
   destroy(): void;
@@ -64,21 +65,16 @@ export function hydrateOverview(
   const abort = new AbortController();
   let handle: MapHandle | undefined;
   let panel: PanelHandle | undefined;
+  let posts: readonly OverviewPost[] = [];
   let disposed = false;
   let failed = false;
   const cleanups: (() => void)[] = [];
   const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]');
-  const activate = document.createElement('button');
-  activate.type = 'button';
-  activate.className = 'hpm-overview__activate';
-  activate.dataset.hpmActivate = '';
-  activate.textContent = '点击或按 Enter 激活地图';
-  activate.disabled = true;
   const showList = document.createElement('button');
   showList.type = 'button';
   showList.className = 'hpm-overview__list-toggle';
   showList.dataset.hpmShowList = '';
-  showList.textContent = '显示全部文章列表';
+  showList.textContent = '全部文章 0';
   showList.hidden = true;
   showList.setAttribute('aria-expanded', 'false');
   function fail() {
@@ -88,37 +84,17 @@ export function hydrateOverview(
     panel?.destroy();
     handle?.destroy();
     root.dataset.hpmActive = 'false';
-    activate.hidden = true;
     showList.hidden = true;
     showFallback(root, true);
     setStatus(root, '地图暂时无法加载，请使用下方文章列表。');
   }
-  function interact(active: boolean) {
-    if (!handle || failed || disposed) return;
-    try {
-      handle.setInteractive(active);
-    } catch {
-      fail();
-    }
-    if (failed) return;
-    root.dataset.hpmActive = String(active);
-    activate.hidden = active;
-    if (active) canvas?.focus();
-    else activate.focus();
-  }
-  const onActivate = () => interact(true);
-  const onKey = (event: KeyboardEvent) => {
-    if (event.key === 'Escape') interact(false);
-  };
   const onPageHide = (event: PageTransitionEvent) => {
     // BFCache freezes this controller and its SDK ownership for the next pageshow.
     if (!event.persisted) destroy();
   };
   const onList = () => {
-    const visible = showList.getAttribute('aria-expanded') !== 'true';
-    showFallback(root, visible);
-    showList.setAttribute('aria-expanded', String(visible));
-    showList.textContent = visible ? '收起全部文章列表' : '显示全部文章列表';
+    if (showList.getAttribute('aria-expanded') === 'true') panel?.destroy();
+    else select(posts, showList, () => showList);
   };
   function destroy() {
     if (disposed) return;
@@ -128,11 +104,8 @@ export function hydrateOverview(
     panel?.destroy();
     handle?.destroy();
     cleanups.forEach((cleanup) => cleanup());
-    activate.removeEventListener('click', onActivate);
     showList.removeEventListener('click', onList);
-    root.removeEventListener('keydown', onKey);
     window.removeEventListener('pagehide', onPageHide);
-    activate.remove();
     showList.remove();
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
@@ -157,8 +130,7 @@ export function hydrateOverview(
     )
       throw new Error('Invalid map configuration');
     canvas.tabIndex = -1;
-    canvas.setAttribute('aria-label', '文章地图，按 Esc 退出交互');
-    canvas.insertAdjacentElement('afterend', activate);
+    canvas.setAttribute('aria-label', '文章地图');
     root.append(showList);
     root
       .querySelectorAll<HTMLImageElement>('[data-hpm-image]')
@@ -167,9 +139,7 @@ export function hydrateOverview(
     fail();
     return controller;
   }
-  activate.addEventListener('click', onActivate);
   showList.addEventListener('click', onList);
-  root.addEventListener('keydown', onKey);
   function select(
     posts: readonly OverviewPost[],
     origin: HTMLElement,
@@ -185,21 +155,31 @@ export function hydrateOverview(
         placeholderUrl: config.placeholderUrl,
         origin,
         resolveOrigin,
-        fallback: canvas ?? activate,
+        fallback: canvas ?? undefined,
+        onClose: () => {
+          if (origin === showList) {
+            showList.setAttribute('aria-expanded', 'false');
+            showList.removeAttribute('aria-controls');
+          }
+          panel = undefined;
+        },
       },
     );
+    if (origin === showList) {
+      showList.setAttribute('aria-expanded', 'true');
+      showList.setAttribute('aria-controls', panel.element.id);
+    }
   }
   async function start() {
-    setStatus(root, '地图加载中…');
+    setStatus(root, '');
     try {
       const response = await fetcher(config.dataUrl, { signal: abort.signal });
       if (disposed || failed) return;
       if (!response.ok) throw new Error('Overview fetch failed');
       const data: unknown = await response.json();
       if (disposed || failed) return;
-      const posts = readPosts(data);
+      posts = readPosts(data);
       if (posts.length === 0) {
-        activate.hidden = true;
         setStatus(
           root,
           root.querySelector('[data-hpm-empty]')?.textContent ?? '暂无标注地点的文章。',
@@ -222,10 +202,13 @@ export function hydrateOverview(
         return;
       }
       handle = mounted;
+      handle.setInteractive(true);
+      if (disposed || failed) return;
+      root.dataset.hpmActive = 'true';
       showFallback(root, false);
-      activate.disabled = false;
+      showList.textContent = `全部文章 ${posts.length}`;
       showList.hidden = false;
-      setStatus(root, '地图加载完成，可激活地图交互，按 Esc 退出。');
+      setStatus(root, '');
     } catch {
       fail();
     }

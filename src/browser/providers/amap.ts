@@ -2,7 +2,8 @@ import AMapLoader from '@amap/amap-jsapi-loader';
 import type { Coordinate } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
 import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
-import { createPostImage } from '../overview/panel';
+import { createClusterMarker, createImageMarker, overviewFitPadding } from '../overview/markers';
+import { createDetailMarker, type DetailMarkerElement } from '../detail/marker';
 import type {
   BrowserProviderConfig,
   DetailMapModel,
@@ -23,15 +24,13 @@ interface AMapMap {
   setZoom(zoom: number, immediately: boolean): void;
   setBounds(bounds: unknown, immediately: boolean, padding: number[]): void;
 }
-interface AMapInfoWindow {
-  open(map: AMapMap, coordinate: Coordinate): void;
-  close(): void;
+interface AMapMarker {
+  setTop(top: boolean): void;
 }
 interface AMapApi {
   Map: new (container: HTMLElement, options: Record<string, unknown>) => AMapMap;
-  Marker: new (options: Record<string, unknown>) => unknown;
+  Marker: new (options: Record<string, unknown>) => AMapMarker;
   Polyline: new (options: Record<string, unknown>) => unknown;
-  InfoWindow: new (options: Record<string, unknown>) => AMapInfoWindow;
   Bounds: new (southwest: Coordinate, northeast: Coordinate) => unknown;
   Pixel: new (x: number, y: number) => unknown;
   plugin(names: string[], ready: () => void): void;
@@ -78,7 +77,7 @@ function existingApi(value: unknown): value is AMapApi {
   return (
     typeof api.version === 'string' &&
     /^2(?:\.|$)/u.test(api.version) &&
-    ['Map', 'Marker', 'Polyline', 'InfoWindow'].every((name) => typeof api[name] === 'function')
+    ['Map', 'Marker', 'Polyline'].every((name) => typeof api[name] === 'function')
   );
 }
 
@@ -228,11 +227,54 @@ function mountDetail(
     });
     let complete = false;
     let destroyed = false;
-    let info: AMapInfoWindow | undefined;
-    const buttons: HTMLButtonElement[] = [];
-    const cleanups: (() => void)[] = [];
-    const markers: unknown[] = [];
+    const markers: AMapMarker[] = [];
+    const markerViews: Array<
+      DetailMarkerElement & {
+        sdkMarker: AMapMarker;
+        onClick: (event: MouseEvent) => void;
+        onPointerDown: (event: Event) => void;
+        stopTooltipEvent: (event: Event) => void;
+        onTooltipWheel: (event: WheelEvent) => void;
+        onTooltipTouchStart: (event: TouchEvent) => void;
+        onTooltipTouchMove: (event: TouchEvent) => void;
+        onTooltipTouchEnd: (event: TouchEvent) => void;
+      }
+    > = [];
+    let activeMarker: (typeof markerViews)[number] | undefined;
     const timeout = window.setTimeout(fail, LOAD_TIMEOUT_MS);
+
+    function closeActive() {
+      activeMarker?.setExpanded(false);
+      activeMarker?.sdkMarker.setTop(false);
+      activeMarker = undefined;
+    }
+    function onMapClick() {
+      closeActive();
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (!activeMarker) return;
+      if (event.key === 'Escape') {
+        const origin = activeMarker.button;
+        closeActive();
+        event.preventDefault();
+        origin.focus();
+        return;
+      }
+      const tooltip = activeMarker.scrollViewport;
+      const maximum = Math.max(0, tooltip.scrollHeight - tooltip.clientHeight);
+      if (maximum === 0) return;
+      let next: number | undefined;
+      if (event.key === 'ArrowDown') next = tooltip.scrollTop + 40;
+      else if (event.key === 'ArrowUp') next = tooltip.scrollTop - 40;
+      else if (event.key === 'PageDown') next = tooltip.scrollTop + tooltip.clientHeight;
+      else if (event.key === 'PageUp') next = tooltip.scrollTop - tooltip.clientHeight;
+      else if (event.key === 'End') next = maximum;
+      else if (event.key === 'Home') next = 0;
+      if (next === undefined) return;
+      tooltip.scrollTop = Math.max(0, Math.min(maximum, next));
+      event.preventDefault();
+      event.stopPropagation();
+    }
 
     function destroy() {
       if (destroyed) return;
@@ -240,9 +282,26 @@ function mountDetail(
       clearTimeout(timeout);
       map.off('complete', ready);
       map.off('error', fail);
+      map.off('click', onMapClick);
+      map.off('dragstart', closeActive);
+      map.off('movestart', closeActive);
+      map.off('zoomstart', closeActive);
+      container.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('resize', closeActive);
+      window.removeEventListener('pagehide', closeActive);
+      closeActive();
+      markerViews.forEach((marker) => {
+        marker.button.removeEventListener('click', marker.onClick);
+        marker.button.removeEventListener('pointerdown', marker.onPointerDown);
+        marker.tooltip.removeEventListener('click', marker.stopTooltipEvent);
+        marker.tooltip.removeEventListener('pointerdown', marker.stopTooltipEvent);
+        marker.scrollViewport.removeEventListener('wheel', marker.onTooltipWheel);
+        marker.scrollViewport.removeEventListener('touchstart', marker.onTooltipTouchStart);
+        marker.scrollViewport.removeEventListener('touchmove', marker.onTooltipTouchMove);
+        marker.scrollViewport.removeEventListener('touchend', marker.onTooltipTouchEnd);
+        marker.scrollViewport.removeEventListener('touchcancel', marker.onTooltipTouchEnd);
+      });
       model.signal?.removeEventListener('abort', cancel);
-      cleanups.forEach((cleanup) => cleanup());
-      info?.close();
       map.destroy();
     }
     function fail() {
@@ -258,7 +317,9 @@ function mountDetail(
     function ready() {
       if (destroyed || complete) return;
       try {
-        if (markers.length > 1) map.setFitView(markers, true, [24, 24, 24, 24]);
+        // AMap's avoid order is top, bottom, left, right. Reserve room for
+        // the 44px bottom-anchored control plus a wrapped place tooltip.
+        if (markers.length > 1) map.setFitView(markers, true, [112, 24, 24, 24]);
         clearTimeout(timeout);
         complete = true;
         resolve({
@@ -267,10 +328,6 @@ function mountDetail(
             if (destroyed) return;
             try {
               map.setStatus(interaction(active));
-              buttons.forEach((button) => {
-                button.tabIndex = active ? 0 : -1;
-                button.disabled = !active;
-              });
             } catch {
               fail();
             }
@@ -282,56 +339,99 @@ function mountDetail(
     }
     map.on('complete', ready);
     map.on('error', fail);
+    map.on('click', onMapClick);
+    map.on('dragstart', closeActive);
+    map.on('movestart', closeActive);
+    map.on('zoomstart', closeActive);
+    container.addEventListener('keydown', onKeyDown);
+    window.addEventListener('resize', closeActive);
+    window.addEventListener('pagehide', closeActive);
     model.signal?.addEventListener('abort', cancel, { once: true });
 
     try {
-      for (const point of model.map.points) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'hpm-marker';
-        button.setAttribute('aria-label', point.name);
-        button.tabIndex = -1;
-        button.disabled = true;
-        const sequence = model.map.route.flatMap((item, index) =>
-          item.id === point.id ? [index + 1] : [],
-        );
-        button.textContent = sequence.length ? sequence.join(', ') : point.name;
-        const select = () => {
-          if (destroyed) return;
-          try {
-            info?.close();
-            const content = document.createElement('div');
-            content.className = 'hpm-place-card';
-            const name = document.createElement('p');
-            name.textContent = point.name;
-            const link = document.createElement('a');
-            const url = new URL('https://uri.amap.com/marker');
-            url.searchParams.set('position', point.coordinate.join(','));
-            url.searchParams.set('name', point.name);
-            url.searchParams.set('coordinate', 'gaode');
-            link.href = url.href;
-            link.textContent = '在高德地图中查看';
-            content.append(name, link);
-            info = new api.InfoWindow({ content });
-            info.open(map, point.coordinate);
-          } catch {
-            fail();
+      const routeIds = new Set(model.map.route.map((point) => point.id));
+      const visits = [
+        ...model.map.route.map((point, index) => ({ point, sequence: index + 1 })),
+        ...model.map.points
+          .filter((point) => !routeIds.has(point.id))
+          .map((point) => ({ point, sequence: undefined })),
+      ];
+      for (const { point, sequence } of visits) {
+        const marker = createDetailMarker(point.name, sequence);
+        const sdkMarker = new api.Marker({
+          position: point.coordinate,
+          content: marker.element,
+          anchor: 'bottom-center',
+        });
+        const onClick = (event: MouseEvent) => {
+          event.stopPropagation();
+          if (activeMarker?.button === marker.button) closeActive();
+          else {
+            closeActive();
+            activeMarker = markerView;
+            sdkMarker.setTop(true);
+            markerView.setExpanded(true);
+            markerView.fitTooltip(container);
           }
         };
-        button.addEventListener('click', select);
-        cleanups.push(() => button.removeEventListener('click', select));
-        buttons.push(button);
-        markers.push(
-          new api.Marker({ position: point.coordinate, content: button, anchor: 'bottom-center' }),
-        );
+        const onPointerDown = (event: Event) => event.stopPropagation();
+        const stopTooltipEvent = (event: Event) => event.stopPropagation();
+        const onTooltipWheel = (event: WheelEvent) => {
+          event.stopPropagation();
+          event.preventDefault();
+          marker.scrollViewport.scrollTop += event.deltaY;
+        };
+        let previousTouchY: number | undefined;
+        const onTooltipTouchStart = (event: TouchEvent) => {
+          previousTouchY = event.touches[0]?.clientY;
+          event.stopPropagation();
+        };
+        const onTooltipTouchMove = (event: TouchEvent) => {
+          const currentY = event.touches[0]?.clientY;
+          if (previousTouchY !== undefined && currentY !== undefined) {
+            marker.scrollViewport.scrollTop += previousTouchY - currentY;
+            previousTouchY = currentY;
+          }
+          event.stopPropagation();
+          event.preventDefault();
+        };
+        const onTooltipTouchEnd = (event: TouchEvent) => {
+          previousTouchY = undefined;
+          event.stopPropagation();
+        };
+        const markerView = {
+          ...marker,
+          sdkMarker,
+          onClick,
+          onPointerDown,
+          stopTooltipEvent,
+          onTooltipWheel,
+          onTooltipTouchStart,
+          onTooltipTouchMove,
+          onTooltipTouchEnd,
+        };
+        marker.button.addEventListener('click', onClick);
+        marker.button.addEventListener('pointerdown', onPointerDown);
+        marker.tooltip.addEventListener('click', stopTooltipEvent);
+        marker.tooltip.addEventListener('pointerdown', stopTooltipEvent);
+        marker.scrollViewport.addEventListener('wheel', onTooltipWheel, { passive: false });
+        marker.scrollViewport.addEventListener('touchstart', onTooltipTouchStart, {
+          passive: true,
+        });
+        marker.scrollViewport.addEventListener('touchmove', onTooltipTouchMove, { passive: false });
+        marker.scrollViewport.addEventListener('touchend', onTooltipTouchEnd, { passive: true });
+        marker.scrollViewport.addEventListener('touchcancel', onTooltipTouchEnd, { passive: true });
+        markerViews.push(markerView);
+        markers.push(sdkMarker);
       }
-      const overlays = [...markers];
+      const overlays: unknown[] = [...markers];
       if (model.map.route.length > 1)
         overlays.push(
           new api.Polyline({
             path: model.map.route.map((point) => point.coordinate),
-            strokeColor: '#2563eb',
-            strokeWeight: 4,
+            strokeColor:
+              getComputedStyle(container).getPropertyValue('--hpm-route-color').trim() || '#0f766e',
+            strokeWeight: 3,
           }),
         );
       map.add(overlays);
@@ -399,7 +499,18 @@ async function mountOverview(
   await loadCluster(api, options.signal);
   if (options.signal?.aborted) throw new Error('Map initialization cancelled');
   if (!options.posts.length) throw new Error('Missing overview posts');
+  // AMap can collapse exact-coordinate duplicates in renderer data. Preserve the
+  // full article membership ourselves instead of trusting the representative list.
+  const coordinateGroups = new Map<string, number[]>();
+  const groupsByPostId = options.posts.map((post, postId) => {
+    const key = `${post.location.longitude},${post.location.latitude}`;
+    let members = coordinateGroups.get(key);
+    if (!members) coordinateGroups.set(key, (members = []));
+    members.push(postId);
+    return members;
+  });
   return new Promise((resolve, reject) => {
+    const compactMedia = window.matchMedia?.('(max-width: 600px)');
     const map = new api.Map(container, {
       zoom: Math.min(4, options.maxZoom),
       // Keep overlapping points clustered at the terminal level, including manual zooming.
@@ -417,10 +528,12 @@ async function mountOverview(
       button: HTMLButtonElement;
       onClick: (event: MouseEvent) => void;
       awaitingMount: boolean;
+      post?: OverviewPost;
     }
     const buttons = new Map<HTMLButtonElement, RenderedButton>();
     const previousButtons = new WeakMap<ClusterMarker, RenderedButton>();
     const currentButtons = new Map<string, RenderedButton>();
+    const leafOffsets = new Map<boolean, readonly [x: number, y: number]>();
     let sweepFrame: number | undefined;
     function release(entry: RenderedButton) {
       buttons.delete(entry.button);
@@ -456,6 +569,7 @@ async function mountOverview(
       clearTimeout(timer);
       map.off('complete', ready);
       map.off('error', fail);
+      compactMedia?.removeEventListener('change', reanchorLeaves);
       options.signal?.removeEventListener('abort', cancel);
       observer.disconnect();
       if (sweepFrame !== undefined) window.cancelAnimationFrame(sweepFrame);
@@ -474,11 +588,19 @@ async function mountOverview(
       if (!complete) reject(new Error('Map initialization cancelled'));
     }
     function fit(bounds: Bounds) {
-      map.setBounds(
-        new api.Bounds([bounds.west, bounds.south], [bounds.east, bounds.north]),
-        true,
-        [48, 48, 48, 48],
-      );
+      // AMap also gates programmatic fit zooms on zoomEnable. Initial fitting
+      // happens before activation, so temporarily permit it without enabling
+      // wheel, touch or keyboard interaction, then restore the current state.
+      map.setStatus({ zoomEnable: true });
+      try {
+        map.setBounds(
+          new api.Bounds([bounds.west, bounds.south], [bounds.east, bounds.north]),
+          true,
+          overviewFitPadding,
+        );
+      } finally {
+        map.setStatus({ zoomEnable: active });
+      }
     }
     function ready() {
       if (destroyed || complete) return;
@@ -506,42 +628,55 @@ async function mountOverview(
         fail();
       }
     }
+    function reanchorLeaves(event: MediaQueryListEvent) {
+      if (destroyed) return;
+      try {
+        const leaves = Array.from(buttons.values()).filter(
+          (entry): entry is RenderedButton & { post: OverviewPost } => entry.post !== undefined,
+        );
+        if (!leaves.length) return;
+        const offset =
+          leafOffsets.get(event.matches) ??
+          createImageMarker(leaves[0]!.post, options.placeholderUrl, event.matches).offset;
+        leafOffsets.set(event.matches, offset);
+        leaves.forEach(({ marker }) => marker.setOffset(new api.Pixel(...offset)));
+      } catch {
+        fail();
+      }
+    }
     function render(context: ClusterContext, grouped: boolean) {
       if (destroyed) return;
       try {
         const points = grouped ? context.clusterData : context.data;
-        const posts = points?.map((point) => point.post);
-        if (!posts?.length) throw new Error('Missing cluster data');
+        const postIds = [
+          ...new Set(points?.map((point) => groupsByPostId[point.postId] ?? [])),
+        ].flat();
+        const posts = postIds.map((postId) => options.posts[postId]!);
+        if (!posts.length) throw new Error('Missing cluster data');
+        const isGroup = posts.length > 1;
         // Stable membership survives vendor marker replacement and renderer ordering changes.
-        const key = points!
-          .map((point) => point.postId)
-          .sort((a, b) => a - b)
-          .join(',');
+        const key = postIds.sort((a, b) => a - b).join(',');
         const old = previousButtons.get(context.marker);
         if (old) release(old);
         const replacement = currentButtons.get(key);
         if (replacement) release(replacement);
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = grouped ? 'hpm-marker hpm-cluster' : 'hpm-image-marker';
+        const compact = compactMedia?.matches ?? false;
+        const view = isGroup
+          ? createClusterMarker(posts.length)
+          : createImageMarker(posts[0]!, options.placeholderUrl, compact);
+        if (!isGroup) leafOffsets.set(compact, view.offset);
+        const button = view.element;
         button.disabled = !active;
         button.tabIndex = active ? 0 : -1;
         const resolveOrigin = () => {
           const current = currentButtons.get(key)?.button;
           return !destroyed && current?.isConnected && !current.disabled ? current : undefined;
         };
-        if (grouped) {
-          button.textContent = String(posts.length);
-          button.setAttribute('aria-label', `查看此处的 ${posts.length} 篇文章`);
-        } else {
-          button.setAttribute('aria-label', `预览文章：${posts[0]!.title}`);
-          button.append(createPostImage(posts[0]!, options.placeholderUrl));
-        }
         const onClick = (event: MouseEvent) => {
           event.stopPropagation();
           if (destroyed || !active || button.disabled) return;
           try {
-            if (!grouped) {
+            if (!isGroup) {
               options.onPostSelect(posts[0]!, button, resolveOrigin);
               return;
             }
@@ -563,12 +698,19 @@ async function mountOverview(
           }
         };
         button.addEventListener('click', onClick);
-        const entry = { marker: context.marker, key, button, onClick, awaitingMount: true };
+        const entry = {
+          marker: context.marker,
+          key,
+          button,
+          onClick,
+          awaitingMount: true,
+          post: isGroup ? undefined : posts[0],
+        };
         previousButtons.set(context.marker, entry);
         currentButtons.set(key, entry);
         buttons.set(button, entry);
         context.marker.setContent(button);
-        context.marker.setOffset(new api.Pixel(grouped ? -24 : -48, grouped ? -24 : -36));
+        context.marker.setOffset(new api.Pixel(...view.offset));
         scheduleSweep();
       } catch {
         fail();
@@ -576,6 +718,7 @@ async function mountOverview(
     }
     map.on('complete', ready);
     map.on('error', fail);
+    compactMedia?.addEventListener('change', reanchorLeaves);
     options.signal?.addEventListener('abort', cancel, { once: true });
     try {
       cluster = new api.MarkerCluster!(

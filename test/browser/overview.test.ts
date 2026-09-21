@@ -38,6 +38,36 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+function responsiveMedia(initial: boolean) {
+  let matches = initial;
+  const listeners = new Set<(event: MediaQueryListEvent) => void>();
+  const query = {
+    media: '(max-width: 600px)',
+    get matches() {
+      return matches;
+    },
+    addEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.add(listener);
+    }),
+    removeEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+      listeners.delete(listener);
+    }),
+  } as unknown as MediaQueryList;
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn((media: string) =>
+      media === query.media ? query : ({ matches: false } as MediaQueryList),
+    ),
+  );
+  return {
+    query,
+    change(next: boolean) {
+      matches = next;
+      const event = { matches: next, media: query.media } as MediaQueryListEvent;
+      listeners.forEach((listener) => listener(event));
+    },
+  };
+}
 function fixture() {
   document.body.innerHTML = renderOverview({
     posts: [b, a],
@@ -110,10 +140,13 @@ class OverviewFakeMap {
 }
 class ClusterMarker {
   content: HTMLElement | undefined;
+  offset: { x: number; y: number } | undefined;
   setContent(content: HTMLElement) {
     this.content = content;
   }
-  setOffset() {}
+  setOffset(pixel: { x: number; y: number }) {
+    this.offset = pixel;
+  }
 }
 class FakeBounds {
   constructor(
@@ -137,7 +170,12 @@ async function adapter(plugin?: (names: string[], ready: () => void) => void) {
     Map: OverviewFakeMap,
     MarkerCluster: FakeCluster,
     Bounds: FakeBounds,
-    Pixel: class {},
+    Pixel: class {
+      constructor(
+        readonly x: number,
+        readonly y: number,
+      ) {}
+    },
     plugin,
   };
   if (plugin) Reflect.deleteProperty(api, 'MarkerCluster');
@@ -156,6 +194,71 @@ function overviewOptions(overrides: Partial<OverviewMapOptions> = {}): OverviewM
   };
 }
 describe('AMap overview clustering boundary', () => {
+  it('allows programmatic initial fitting while restoring inactive zoom controls', async () => {
+    const provider = await adapter();
+    const pending = provider.mountOverview(document.createElement('div'), overviewOptions());
+    await flush();
+    let zoomEnabled = mapInstance.options.zoomEnable;
+    let fittedWithZoom = false;
+    mapInstance.setStatus.mockImplementation((status: Record<string, boolean>) => {
+      if (status.zoomEnable !== undefined) zoomEnabled = status.zoomEnable;
+    });
+    // Real AMap ignores a requested fit zoom while zoomEnable is false.
+    mapInstance.setBounds.mockImplementation(() => {
+      fittedWithZoom = zoomEnabled === true;
+    });
+    mapInstance.emit('complete');
+    const handle = await pending;
+    expect(fittedWithZoom).toBe(true);
+    expect(zoomEnabled).toBe(false);
+    handle.destroy();
+  });
+  it.each(['cluster', 'leaf'])(
+    'retains coincident articles when the SDK collapses %s callback data',
+    async (kind) => {
+      const provider = await adapter();
+      const third = {
+        ...b,
+        title: 'Elsewhere',
+        url: '/elsewhere/',
+        location: { name: 'B', longitude: 122, latitude: 32 },
+      };
+      const options = overviewOptions({ posts: [a, b, third] });
+      const pending = provider.mountOverview(document.createElement('div'), options);
+      await flush();
+      mapInstance.emit('complete');
+      const handle = await pending;
+      handle.setInteractive(true);
+      const marker = new ClusterMarker();
+      if (kind === 'cluster') {
+        clusterInstance.options.renderClusterMarker({
+          marker,
+          clusterData: [clusterInstance.data[0]!, clusterInstance.data[2]!],
+        });
+        expect(marker.content?.textContent).toBe('3');
+      }
+      // Real AMap returns one representative for the two exact-coordinate posts.
+      const terminal = new ClusterMarker();
+      if (kind === 'cluster')
+        clusterInstance.options.renderClusterMarker({
+          marker: terminal,
+          clusterData: [clusterInstance.data[0]!],
+        });
+      else
+        clusterInstance.options.renderMarker({
+          marker: terminal,
+          data: [clusterInstance.data[0]!],
+        });
+      expect(terminal.content?.textContent).toBe('2');
+      (terminal.content as HTMLButtonElement).click();
+      expect(vi.mocked(options.onGroupSelect).mock.calls[0]?.[0].map((post) => post.url)).toEqual([
+        b.url,
+        a.url,
+      ]);
+      expect(options.onPostSelect).not.toHaveBeenCalled();
+      handle.destroy();
+    },
+  );
   it.each([
     { start: 6, maxZoom: 8, steps: [7, 8] },
     { start: 6.25, maxZoom: 8.5, steps: [7.25, 8.25, 8.5] },
@@ -228,7 +331,7 @@ describe('AMap overview clustering boundary', () => {
       await flush();
       mapInstance.emit('complete');
       await flush();
-      root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
+      expect(root.querySelector('[data-hpm-activate]')).toBe(null);
       const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]')!;
       const marker = new ClusterMarker();
       clusterInstance.options.renderClusterMarker({ marker, clusterData: clusterInstance.data });
@@ -238,10 +341,7 @@ describe('AMap overview clustering boundary', () => {
       expect(root.querySelector('.hpm-panel')!.contains(document.activeElement)).toBe(true);
       const replacementMarker = redraw === 'new-marker' ? new ClusterMarker() : marker;
       if (redraw === 'removed-group') {
-        clusterInstance.options.renderMarker({
-          marker: replacementMarker,
-          data: [clusterInstance.data[0]!],
-        });
+        original.remove();
       } else {
         clusterInstance.options.renderClusterMarker({
           marker: replacementMarker,
@@ -249,7 +349,7 @@ describe('AMap overview clustering boundary', () => {
         });
       }
       const replacement = replacementMarker.content!;
-      original.replaceWith(replacement);
+      if (redraw !== 'removed-group') original.replaceWith(replacement);
       root
         .querySelector('.hpm-panel')!
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -314,13 +414,17 @@ describe('AMap overview clustering boundary', () => {
     expect(button.tagName).toBe('BUTTON');
     expect(button.disabled).toBe(true);
     expect(button.getAttribute('aria-label')).toContain(a.title);
+    expect(button.querySelector('.hpm-image-marker__card')).not.toBeNull();
+    expect(button.querySelector('.hpm-image-marker__stem')).not.toBeNull();
+    expect(button.querySelector('.hpm-image-marker__dot')).not.toBeNull();
     expect(button.querySelector('img')!.width).toBe(96);
+    expect(marker.offset).toEqual({ x: -36, y: -68 });
     mapInstance.emit('complete');
     const handle = await pending;
     expect(mapInstance.setBounds).toHaveBeenCalledWith(
       expect.objectContaining({ southwest: [121, 31], northeast: [122, 32] }),
       true,
-      [48, 48, 48, 48],
+      [100, 48, 48, 48],
     );
     handle.setInteractive(true);
     button.click();
@@ -332,6 +436,54 @@ describe('AMap overview clustering boundary', () => {
     expect(clusterInstance.setMap).toHaveBeenCalledWith(null);
     button.click();
     expect(options.onPostSelect).toHaveBeenCalledTimes(1);
+  });
+  it('reanchors mounted leaves across responsive breakpoints and removes the listener on destroy', async () => {
+    const media = responsiveMedia(false);
+    const provider = await adapter();
+    const pending = provider.mountOverview(
+      document.createElement('div'),
+      overviewOptions({
+        posts: [
+          a,
+          b,
+          {
+            ...a,
+            title: 'Elsewhere',
+            url: '/elsewhere/',
+            location: { name: 'B', longitude: 122, latitude: 32 },
+          },
+        ],
+      }),
+    );
+    await flush();
+    mapInstance.emit('complete');
+    const handle = await pending;
+    const leaf = new ClusterMarker();
+    clusterInstance.options.renderMarker({ marker: leaf, data: [clusterInstance.data[2]!] });
+    const group = new ClusterMarker();
+    clusterInstance.options.renderClusterMarker({
+      marker: group,
+      clusterData: clusterInstance.data.slice(0, 2),
+    });
+    expect(leaf.offset).toEqual({ x: -36, y: -68 });
+    expect(group.offset).toEqual({ x: -22, y: -22 });
+    const leafOffsets = vi.spyOn(leaf, 'setOffset');
+    const groupOffsets = vi.spyOn(group, 'setOffset');
+
+    media.change(true);
+    expect(leaf.offset).toEqual({ x: -32, y: -62 });
+    expect(leafOffsets).toHaveBeenCalledOnce();
+    expect(groupOffsets).not.toHaveBeenCalled();
+
+    media.change(false);
+    expect(leaf.offset).toEqual({ x: -36, y: -68 });
+    expect(leafOffsets).toHaveBeenCalledTimes(2);
+
+    handle.destroy();
+    expect(media.query.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function));
+    media.change(true);
+    expect(leaf.offset).toEqual({ x: -36, y: -68 });
+    expect(leafOffsets).toHaveBeenCalledTimes(2);
   });
   it.each(['separable', 'maximum', 'identical'])(
     'handles a %s cluster through the pure decision',
@@ -355,6 +507,8 @@ describe('AMap overview clustering boundary', () => {
       const button = marker.content as HTMLButtonElement;
       expect(button.textContent).toBe('2');
       expect(button.getAttribute('aria-label')).toContain('2');
+      expect(button.querySelector('.hpm-cluster__surface--small')).not.toBeNull();
+      expect(marker.offset).toEqual({ x: -22, y: -22 });
       mapInstance.setBounds.mockClear();
       mapInstance.zoom = kind === 'maximum' ? 18 : 6;
       button.click();
@@ -415,25 +569,31 @@ describe('article panels', () => {
       const origin = document.createElement('button');
       document.body.append(origin);
       origin.focus();
+      const onClose = vi.fn();
       const panel = renderPostPanel([a, b], viewport, {
         container: document.body,
         placeholderUrl: '/placeholder.svg',
         origin,
+        onClose,
       });
       expect(panel.element.getAttribute('role')).toBe('dialog');
       expect(panel.element.dataset.hpmViewport).toBe(viewport);
-      expect(panel.element.getAttribute('aria-label')).toContain('文章');
+      expect(panel.element.getAttribute('aria-label')).toBe('2 篇文章');
+      expect(panel.element.id).toMatch(/^hpm-panel-\d+$/);
+      expect(panel.element.querySelector('.hpm-panel__header')).not.toBeNull();
+      expect(panel.element.querySelector('.hpm-panel__scroller > .hpm-post-list')).not.toBeNull();
+      expect(panel.element.querySelector('.hpm-panel__close')?.textContent).toBe('×');
+      expect(panel.element.querySelector('.hpm-panel__close')?.getAttribute('aria-label')).toBe(
+        '关闭文章面板',
+      );
+      expect(panel.element.querySelectorAll('a.hpm-post__link')).toHaveLength(2);
+      expect(panel.element.querySelectorAll('.hpm-post__link img')).toHaveLength(2);
       expect(Array.from(panel.element.querySelectorAll('time')).map((el) => el.dateTime)).toEqual([
         b.date,
         a.date,
       ]);
       const links = Array.from(panel.element.querySelectorAll('a'));
-      expect(links.map((link) => link.getAttribute('href'))).toEqual([
-        '/blog/b/',
-        '/blog/b/',
-        '/blog/a/',
-        '/blog/a/',
-      ]);
+      expect(links.map((link) => link.getAttribute('href'))).toEqual(['/blog/b/', '/blog/a/']);
       expect(panel.element.querySelector('[onerror]')).toBe(null);
       expect(panel.element.textContent).toContain(a.title);
       const image = panel.element.querySelector('img')!;
@@ -449,6 +609,7 @@ describe('article panels', () => {
       expect(panel.element.isConnected).toBe(false);
       expect(document.activeElement).toBe(origin);
       panel.destroy();
+      expect(onClose).toHaveBeenCalledTimes(1);
     },
   );
   it('rejects executable post and image URLs even when used without the controller', () => {
@@ -458,6 +619,8 @@ describe('article panels', () => {
       { container: document.body, placeholderUrl: '/placeholder.svg' },
     );
     expect(panel.element.querySelector('a')).toBe(null);
+    expect(panel.element.getAttribute('aria-label')).toBe('1 篇文章');
+    expect(panel.element.querySelector('div.hpm-post__link > .hpm-post__body')).not.toBeNull();
     expect(panel.element.querySelector('img')!.getAttribute('src')).toBe('/placeholder.svg');
     panel.destroy();
   });
@@ -470,14 +633,13 @@ describe('overview hydration', () => {
     const origin = document.createElement('button');
     root.querySelector('[data-hpm-canvas]')!.append(origin);
     for (let visit = 0; visit < 2; visit++) {
-      root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
       mountOverview.mock.calls[0]![1].onPostSelect(a, origin);
       expect(root.querySelectorAll('.hpm-panel')).toHaveLength(1);
       pageTransition('pagehide', true);
       pageTransition('pageshow', true);
       pageTransition('pageshow', true);
       await flush();
-      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(1);
+      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
       expect(root.querySelectorAll('[data-hpm-show-list]')).toHaveLength(1);
       expect(root.dataset.hpmActive).toBe('true');
       expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
@@ -486,9 +648,8 @@ describe('overview hydration', () => {
         .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
       expect(root.querySelectorAll('.hpm-panel')).toHaveLength(0);
       expect(document.activeElement).toBe(origin);
-      root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      expect(root.dataset.hpmActive).toBe('false');
-      expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
+      expect(root.dataset.hpmActive).toBe('true');
+      expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     }
     expect(load).toHaveBeenCalledTimes(1);
     expect(fetcher).toHaveBeenCalledTimes(1);
@@ -511,17 +672,16 @@ describe('overview hydration', () => {
       signal = init?.signal;
       return response.promise;
     });
-    const mountOverview = vi.fn<MapProvider['mountOverview']>(async () => ({
-      destroy: vi.fn(),
-      setInteractive: vi.fn(),
-    }));
+    const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
+    const mountOverview = vi.fn<MapProvider['mountOverview']>(async () => handle);
     hydrateOverview(root, async () => ({ mountOverview, mountDetail: vi.fn() }), fetcher);
     pageTransition('pagehide', true);
     pageTransition('pageshow', true);
     expect(signal?.aborted).toBe(false);
     response.resolve(new Response(JSON.stringify({ version: 1, posts: [a] })));
     await flush();
-    expect(root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.disabled).toBe(false);
+    expect(root.querySelector('[data-hpm-activate]')).toBe(null);
+    expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(mountOverview).toHaveBeenCalledTimes(1);
@@ -585,21 +745,57 @@ describe('overview hydration', () => {
     await flush();
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
     expect(root.querySelector('[data-hpm-show-list]')).not.toBe(null);
-    (root.querySelector('[data-hpm-show-list]') as HTMLButtonElement).click();
-    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
-    const activate = root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!;
-    expect(handle.setInteractive).not.toHaveBeenCalledWith(true);
-    activate.click();
+    expect(root.querySelector('[data-hpm-activate]')).toBe(null);
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
     expect(handle.setInteractive).toHaveBeenLastCalledWith(true);
-    root.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    expect(handle.setInteractive).toHaveBeenLastCalledWith(false);
-    expect(document.activeElement).toBe(activate);
+    (root.querySelector('[data-hpm-show-list]') as HTMLButtonElement).click();
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+    expect(root.querySelectorAll('.hpm-panel .hpm-post')).toHaveLength(2);
     controller.destroy();
   });
-  it('opens a selected leaf or terminal group and closes panels before map Escape', async () => {
+  it('shares one panel across all posts and marker selections with valid controls and close state', async () => {
+    const { root, mountOverview, controller } = setup({ version: 1, posts: [a, b] });
+    await flush();
+    const toggle = root.querySelector<HTMLButtonElement>('[data-hpm-show-list]')!;
+    expect(toggle.textContent).toBe('全部文章 2');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.hasAttribute('aria-controls')).toBe(false);
+    toggle.click();
+    const first = root.querySelector<HTMLElement>('.hpm-panel')!;
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(toggle.getAttribute('aria-controls')).toBe(first.id);
+    expect(Array.from(first.querySelectorAll('time')).map((time) => time.dateTime)).toEqual([
+      b.date,
+      a.date,
+    ]);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+    toggle.click();
+    expect(root.querySelector('.hpm-panel')).toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.hasAttribute('aria-controls')).toBe(false);
+    toggle.click();
+    const next = root.querySelector<HTMLElement>('.hpm-panel')!;
+    expect(next.id).not.toBe(first.id);
+    expect(toggle.getAttribute('aria-controls')).toBe(next.id);
+    const origin = document.createElement('button');
+    root.append(origin);
+    mountOverview.mock.calls[0]![1].onPostSelect(a, origin);
+    expect(root.querySelectorAll('.hpm-panel')).toHaveLength(1);
+    expect(root.querySelectorAll('.hpm-panel .hpm-post')).toHaveLength(1);
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.hasAttribute('aria-controls')).toBe(false);
+    toggle.click();
+    expect(root.querySelectorAll('.hpm-panel')).toHaveLength(1);
+    root.querySelector<HTMLButtonElement>('.hpm-panel__close')!.click();
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.hasAttribute('aria-controls')).toBe(false);
+    expect(document.activeElement).toBe(toggle);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+    controller.destroy();
+  });
+  it('opens a selected leaf or terminal group and closes panels with Escape', async () => {
     const { root, mountOverview, controller, handle } = setup();
     await flush();
-    root.querySelector<HTMLButtonElement>('[data-hpm-activate]')!.click();
     const model = mountOverview.mock.calls[0]![1];
     const origin = document.createElement('button');
     root.append(origin);

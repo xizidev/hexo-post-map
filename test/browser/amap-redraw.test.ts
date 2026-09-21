@@ -23,10 +23,13 @@ interface ClusterOptions {
 }
 class ClusterMarker {
   content!: HTMLButtonElement;
+  offset: { x: number; y: number } | undefined;
   setContent(content: HTMLButtonElement) {
     this.content = content;
   }
-  setOffset() {}
+  setOffset(pixel: { x: number; y: number }) {
+    this.offset = pixel;
+  }
 }
 let map: FakeMap;
 let cluster: FakeCluster;
@@ -66,7 +69,12 @@ async function setup() {
     Map: FakeMap,
     MarkerCluster: FakeCluster,
     Bounds: class {},
-    Pixel: class {},
+    Pixel: class {
+      constructor(
+        readonly x: number,
+        readonly y: number,
+      ) {}
+    },
   });
   const provider = await createAMapProvider({
     provider: 'amap',
@@ -80,7 +88,7 @@ async function setup() {
       url: `/post-${index}/`,
       image: '/image.jpg',
       date: '2026-01-01T00:00:00Z',
-      location: { name: 'Shanghai', longitude: 121, latitude: 31 },
+      location: { name: 'Shanghai', longitude: 121 + index / 1000, latitude: 31 },
     })),
     gridSize: 60,
     maxZoom: 18,
@@ -142,6 +150,7 @@ describe('AMap overview redraw resource lifetime', () => {
             ? [0, 1]
             : [
                 0,
+                9,
                 ...Array.from({ length: 8 }, (_, bit) => bit + 1).filter(
                   (bit) => index & (1 << (bit - 1)),
                 ),
@@ -182,11 +191,15 @@ describe('AMap overview redraw resource lifetime', () => {
     const { container, options } = await setup();
     const oldMarker = render();
     container.append(oldMarker.content);
+    expect(oldMarker.content.querySelector('.hpm-cluster__surface--small')).not.toBeNull();
+    expect(oldMarker.offset).toEqual({ x: -22, y: -22 });
     oldMarker.content.click();
     const original = oldMarker.content;
     const resolveOrigin = vi.mocked(options.onGroupSelect).mock.calls[0]![2]!;
     const replacement = render([1, 0]);
     original.replaceWith(replacement.content);
+    expect(replacement.content.querySelector('.hpm-cluster__surface--small')).not.toBeNull();
+    expect(replacement.offset).toEqual({ x: -22, y: -22 });
     render([2, 3], oldMarker);
     container.append(oldMarker.content);
     await settleDom();

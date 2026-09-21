@@ -4,6 +4,21 @@ import { parse } from 'yaml';
 import { resolveConfig } from '../../src/config/resolve';
 import { normalizePostMap } from '../../src/domain/normalize';
 
+const visualThemeVariables = [
+  '--hpm-accent',
+  '--hpm-accent-contrast',
+  '--hpm-cluster-surface',
+  '--hpm-cluster-border',
+  '--hpm-panel-surface',
+  '--hpm-panel-border',
+  '--hpm-card-surface',
+  '--hpm-text',
+  '--hpm-muted',
+  '--hpm-route-color',
+  '--hpm-panel-radius',
+  '--hpm-card-radius',
+] as const;
+
 function examples(file: string, marker: string): Record<string, unknown>[] {
   const markdown = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
   return Array.from(
@@ -12,6 +27,11 @@ function examples(file: string, marker: string): Record<string, unknown>[] {
 }
 
 describe.each(['README.md', 'README.zh-CN.md'])('%s authoring examples', (file) => {
+  it('documents every supported visual theme variable', () => {
+    const markdown = readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+    for (const variable of visualThemeVariables) expect(markdown).toContain(`\`${variable}\``);
+  });
+
   it('builds the four documented post shapes with the expected representative and route', () => {
     const posts = examples(file, 'post-map');
     expect(posts).toHaveLength(4);

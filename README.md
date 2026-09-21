@@ -135,7 +135,9 @@ The default card is 220px high (180px on small screens), before the article. Use
 
 Use at most one tag per post. A tag also overrides automatic placement in `before` or `after` mode. Manual mode without a tag renders no detail card; the article still participates in the overview. Set `post.enabled: false` to hide detail cards across the site.
 
-The card loads near the viewport. Click its activation button or focus it and press Enter to interact; Esc releases interaction. Wheel zoom and touch dragging stay disabled before activation. Place links remain available when JavaScript, the provider, or map initialization fails. An SDK load timeout requires a **page reload** to retry.
+The card loads near the viewport and becomes interactive automatically. Routine loading and success messages stay hidden; when JavaScript, the provider, or map initialization fails, a concise error and the place links remain available. An SDK load timeout requires a **page reload** to retry.
+
+Detail locations use inline SVG location pins. Clicking or focusing a pin and pressing Enter or Space opens a lightweight custom place-name tooltip; Escape, a second click, or clicking the map closes it. A single point uses a center dot, while route points show `sequence · place name` and carry their sequence number in the same pin shape. The plugin never opens a provider popup or adds an external map link. `route` always remains a straight, schematic sequence rather than a navigable path.
 
 The overview chooses the first safe image in this order: `thumbnail`, an image in rendered article content, then the bundled placeholder. A chosen image that later fails to load is replaced with the placeholder. Only one representative image per article is used.
 
@@ -143,11 +145,34 @@ The overview chooses the first safe image in this order: `thumbnail`, an image i
 
 Open `/map/` after building and add it to your theme's navigation using that theme's own menu settings. The plugin does not modify menus or theme files. With Hexo `root: /blog/`, the page is `/blog/map/` and its data is `/blog/map/posts.json`; keep `overview.path: map/` relative, without repeating the root.
 
-The overview fits every article's representative point. Pixel-distance clustering merges nearby posts and separates them as you zoom. A cluster zooms toward its contents; if zoom cannot separate them, or the configured maximum zoom is reached, it opens a list (desktop panel or mobile drawer). Individual image markers open a preview; its image or title links to the article. A chronological article list remains usable without the map.
+The overview fits every article's representative point. Each thumbnail sits above a stem and visible coordinate dot, so the image does not hide its anchor. Pixel-distance clustering merges nearby posts and separates them as you zoom; its circle also grows across small, medium, and large count ranges. A cluster zooms toward its contents. If zoom cannot separate them, or the configured maximum zoom is reached, it opens the same bounded article panel used by thumbnail previews and the **All posts** control (a bottom drawer on mobile). The panel caps its maximum height and scrolls the article list inside that boundary. Panel cards use one fixed 4:3 thumbnail viewport with centered cropping for both portrait and landscape sources; titles are limited to two lines, while dates and locations remain one line. The complete card links to the article. A chronological article list remains usable without the map.
 
 `cluster.grid_size` is a finite positive pixel size; `cluster.max_zoom` must be between 2 and 20 inclusive. The default maximum is 18. Multiple articles may use exactly the same coordinates.
 
 The default overview requests the theme's `page` layout, with a standalone fallback when unavailable. Set `overview.layout: standalone` to use the independent page explicitly. Conventional themes rendering `post.content` are the target; SPA/PJAX themes may need their own navigation integration and are not automatically rehydrated. The compatibility fixtures cover Landscape, NexT, and a minimal Cactus-style layout; they do not guarantee every theme customization.
+
+### Theme customization
+
+Themes customize the map only through the variables below, scoped on `.hpm-detail`, `.hpm-overview`, or both. Do not depend on the plugin's internal component selectors. Safe light, dark, forced-colors, and reduced-motion defaults are built in.
+
+| Variable                | Purpose                                                 |
+| ----------------------- | ------------------------------------------------------- |
+| `--hpm-accent`          | Pins, anchors, links, and focus rings                   |
+| `--hpm-accent-contrast` | Text and borders placed on the accent                   |
+| `--hpm-cluster-surface` | Cluster circle surface                                  |
+| `--hpm-cluster-border`  | Cluster and thumbnail border                            |
+| `--hpm-panel-surface`   | Glass panel surface when backdrop filters are supported |
+| `--hpm-panel-border`    | Article panel border                                    |
+| `--hpm-card-surface`    | Article cards, controls, and the opaque panel fallback  |
+| `--hpm-text`            | Primary text                                            |
+| `--hpm-muted`           | Dates, locations, and subdued borders                   |
+| `--hpm-route-color`     | Straight detail route segments                          |
+| `--hpm-tooltip-surface` | Detail place-name tooltip surface                       |
+| `--hpm-tooltip-border`  | Detail place-name tooltip border                        |
+| `--hpm-tooltip-shadow`  | Detail place-name tooltip shadow                        |
+| `--hpm-tooltip-text`    | Detail place-name tooltip text                          |
+| `--hpm-panel-radius`    | Desktop panel and mobile drawer radius                  |
+| `--hpm-card-radius`     | Article card radius                                     |
 
 ## Troubleshooting and privacy
 
@@ -155,7 +180,7 @@ The default overview requests the theme's `page` layout, with a standalone fallb
 - Build fails: read the source path and field in the plugin error. Enabled invalid configuration is a build error; missing configuration is a no-op.
 - Blank or failed map: check Web key type, allowed deployment domain, exactly one security mode, proxy availability, browser console/CSP reports, and network access. Reload after correcting configuration or an SDK timeout.
 - Broken image: use a safe HTTP(S) or site-relative image URL and verify it is publicly accessible.
-- Sensitive location: publish a city or an intentionally approximate point. All generated detail coordinates and overview locations are public. The plugin does not request the visitor's geolocation; loading AMap still contacts a third-party service before map interaction is activated.
+- Sensitive location: publish a city or an intentionally approximate point. All generated detail coordinates and overview locations are public. The plugin does not request the visitor's geolocation; loading AMap still contacts a third-party service as the map approaches the viewport.
 
 Read [security, CSP, and privacy](https://github.com/xizidev/hexo-post-map/blob/main/docs/security.md) before deployment. There is no universal copy-paste CSP for the externally loaded SDK; documented origins and a Report-Only rollout are provided there.
 

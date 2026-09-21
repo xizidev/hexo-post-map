@@ -10,7 +10,6 @@ const api = () => ({
   Map: class {},
   Marker: class {},
   Polyline: class {},
-  InfoWindow: class {},
 });
 let createAMapProvider: typeof import('../../src/browser/providers/amap').createAMapProvider;
 let vendor: { reset(): void };

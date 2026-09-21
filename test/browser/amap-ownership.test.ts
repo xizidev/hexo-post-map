@@ -17,7 +17,6 @@ const api = {
   Map: class {},
   Marker: class {},
   Polyline: class {},
-  InfoWindow: class {},
 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
