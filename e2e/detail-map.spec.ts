@@ -97,11 +97,50 @@ async function expectTooltipArrowConnected(pin: Locator) {
 }
 
 async function expectTooltipScrolledToEnd(tooltip: Locator) {
-  expect(
-    await tooltip.evaluate(
-      (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
-    ),
-  ).toBe(true);
+  await expect
+    .poll(() =>
+      tooltip.evaluate(
+        (element) => element.scrollTop + element.clientHeight >= element.scrollHeight - 1,
+      ),
+    )
+    .toBe(true);
+}
+
+async function scrollTooltipToEndByTouch(page: Page, tooltip: Locator) {
+  const box = (await tooltip.boundingBox())!;
+  const session = await page.context().newCDPSession(page);
+  const startY = box.y + box.height - 12;
+  const maximumGestureDistance = Math.max(1, box.height - 24);
+  const totalDistance = await tooltip.evaluate(
+    (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+  );
+  const maximumGestures = Math.ceil((totalDistance + 1) / maximumGestureDistance) + 1;
+  const x = box.x + box.width / 2;
+
+  try {
+    for (let gesture = 0; gesture < maximumGestures; gesture++) {
+      const remainingDistance = await tooltip.evaluate(
+        (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+      );
+      if (remainingDistance <= 1) return;
+
+      const gestureDistance = Math.min(remainingDistance + 2, maximumGestureDistance);
+      const moveCount = Math.ceil(gestureDistance / 80);
+      await session.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x, y: startY }],
+      });
+      for (let move = 1; move <= moveCount; move++) {
+        await session.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [{ x, y: startY - Math.min(move * 80, gestureDistance) }],
+        });
+      }
+      await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    }
+  } finally {
+    await session.detach();
+  }
 }
 
 test('detail stays unloaded offscreen and becomes interactive automatically near the viewport', async ({
@@ -436,7 +475,7 @@ test('an overflowing 200% tooltip is operable by mouse, touch and keyboard witho
       (_all, start, json, end) => {
         const data = JSON.parse(json);
         data.map.points[0].name =
-          'The beginning of an intentionally extreme place name. '.repeat(12) +
+          'The beginning of an intentionally extreme place name. '.repeat(24) +
           'The final words must remain reachable.';
         return start + JSON.stringify(data).replaceAll('<', '\\u003c') + end;
       },
@@ -471,20 +510,7 @@ test('an overflowing 200% tooltip is operable by mouse, touch and keyboard witho
 
   await pin.click();
   expect(await scroller.evaluate((element) => element.scrollTop)).toBe(0);
-  const box = (await scroller.boundingBox())!;
-  const session = await page.context().newCDPSession(page);
-  const x = box.x + box.width / 2;
-  await session.send('Input.dispatchTouchEvent', {
-    type: 'touchStart',
-    touchPoints: [{ x, y: box.y + box.height - 12 }],
-  });
-  for (let offset = 0; offset < 5; offset++) {
-    await session.send('Input.dispatchTouchEvent', {
-      type: 'touchMove',
-      touchPoints: [{ x, y: box.y + box.height - 12 - (offset + 1) * 80 }],
-    });
-  }
-  await session.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await scrollTooltipToEndByTouch(page, scroller);
   await expectTooltipScrolledToEnd(scroller);
   await expectTooltipArrowConnected(pin);
   await page.keyboard.press('Escape');
