@@ -1,68 +1,74 @@
 import { test, expect } from './fixtures';
 
 for (const mobile of [false, true]) {
-  test(`article panel resists Cactus heading and image rules on ${mobile ? 'mobile' : 'desktop'}`, async ({
-    page,
-  }) => {
-    await page.setViewportSize(mobile ? { width: 390, height: 900 } : { width: 1440, height: 900 });
-    await page.addInitScript(() => {
-      document.addEventListener(
-        'DOMContentLoaded',
-        () => {
-          const root = document.querySelector('[data-hpm-overview]');
-          if (!root) return;
-          const article = document.createElement('article');
-          const content = document.createElement('div');
-          content.className = 'content';
-          root.replaceWith(article);
-          article.append(content);
-          content.append(root);
-        },
-        { once: true },
+  for (const rootFontSize of [16, 32])
+    test(`article panel resists Cactus rules at ${rootFontSize}px root size on ${mobile ? 'mobile' : 'desktop'}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(
+        mobile ? { width: 390, height: 900 } : { width: 1440, height: 900 },
       );
-    });
-    await page.route('**/map/posts.json', (route) =>
-      route.fulfill({
-        json: {
-          version: 1,
-          posts: [
-            {
-              title: 'A very long portrait article title that must remain inside two lines',
-              url: '/blog/posts/route/',
-              image: '/blog/test-images/portrait.svg',
-              date: '2025-06-02T00:00:00Z',
-              location: {
-                name: 'A very long location that must be truncated instead of growing the card',
-                longitude: 121,
-                latitude: 31,
+      await page.addInitScript(() => {
+        document.addEventListener(
+          'DOMContentLoaded',
+          () => {
+            const root = document.querySelector('[data-hpm-overview]');
+            if (!root) return;
+            const article = document.createElement('article');
+            const content = document.createElement('div');
+            content.className = 'content';
+            root.replaceWith(article);
+            article.append(content);
+            content.append(root);
+          },
+          { once: true },
+        );
+      });
+      await page.route('**/map/posts.json', (route) =>
+        route.fulfill({
+          json: {
+            version: 1,
+            posts: [
+              {
+                title: 'A very long portrait article title that must remain inside two lines',
+                url: '/blog/posts/route/',
+                image: '/blog/test-images/portrait.svg',
+                date: '2025-06-02T00:00:00Z',
+                location: {
+                  name: 'A very long location that must be truncated instead of growing the card',
+                  longitude: 121,
+                  latitude: 31,
+                },
               },
-            },
-            {
-              title: 'Landscape article',
-              url: '/blog/posts/route/',
-              image: '/blog/test-images/landscape.svg',
-              date: '2025-06-01T00:00:00Z',
-              location: { name: 'Shanghai', longitude: 122, latitude: 32 },
-            },
-          ],
-        },
-      }),
-    );
-    await page.route('**/test-images/portrait.svg', (route) =>
-      route.fulfill({
-        contentType: 'image/svg+xml',
-        body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="600"/>',
-      }),
-    );
-    await page.route('**/test-images/landscape.svg', (route) =>
-      route.fulfill({
-        contentType: 'image/svg+xml',
-        body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300"/>',
-      }),
-    );
-    await page.goto('/blog/map/');
-    await page.addStyleTag({
-      content: `
+              {
+                title: 'Landscape article',
+                url: '/blog/posts/route/',
+                image: '/blog/test-images/landscape.svg',
+                date: '2025-06-01T00:00:00Z',
+                location: { name: 'Shanghai', longitude: 122, latitude: 32 },
+              },
+            ],
+          },
+        }),
+      );
+      await page.route('**/test-images/portrait.svg', (route) =>
+        route.fulfill({
+          contentType: 'image/svg+xml',
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="600"/>',
+        }),
+      );
+      await page.route('**/test-images/landscape.svg', (route) =>
+        route.fulfill({
+          contentType: 'image/svg+xml',
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="300"/>',
+        }),
+      );
+      await page.goto('/blog/map/');
+      await page.addStyleTag({
+        content: `
+        html {
+          font-size: ${rootFontSize}px;
+        }
         article .content h2::before {
           content: '#';
           position: relative;
@@ -76,49 +82,74 @@ for (const mobile of [false, true]) {
           margin: 2rem auto;
         }
       `,
+      });
+      await page.getByRole('button', { name: '全部文章 2', exact: true }).click();
+      const panel = page.getByRole('dialog', { name: '2 篇文章', exact: true });
+      const heading = panel.locator('.hpm-panel__title');
+      const cards = panel.locator('.hpm-post__link');
+      const images = panel.locator('.hpm-post__image');
+      expect(await cards.count()).toBe(2);
+      expect(await images.count()).toBe(2);
+      const geometry = await page.evaluate(() => ({
+        rootFontSize: getComputedStyle(document.documentElement).fontSize,
+        cards: Array.from(document.querySelectorAll('.hpm-panel .hpm-post__link')).map(
+          (element) => {
+            const bounds = element.getBoundingClientRect();
+            const title = element.querySelector<HTMLElement>('.hpm-post__title')!;
+            const date = element.querySelector<HTMLElement>('.hpm-post__date')!;
+            const location = element.querySelector<HTMLElement>('.hpm-post__location')!;
+            const titleBounds = title.getBoundingClientRect();
+            const dateBounds = date.getBoundingClientRect();
+            const locationBounds = location.getBoundingClientRect();
+            return {
+              bounds: [bounds.width, bounds.height],
+              containsText:
+                titleBounds.top >= bounds.top - 0.5 && locationBounds.bottom <= bounds.bottom + 0.5,
+              titleLines:
+                titleBounds.height / Number.parseFloat(getComputedStyle(title).lineHeight),
+              textOrder:
+                titleBounds.bottom <= dateBounds.top + 0.5 &&
+                dateBounds.bottom <= locationBounds.top + 0.5,
+            };
+          },
+        ),
+        images: Array.from(document.querySelectorAll('.hpm-panel .hpm-post__image')).map(
+          (element) => {
+            const bounds = element.getBoundingClientRect();
+            const style = getComputedStyle(element);
+            return {
+              bounds: [bounds.width, bounds.height],
+              objectFit: style.objectFit,
+              objectPosition: style.objectPosition,
+              margin: style.margin,
+            };
+          },
+        ),
+      }));
+      expect(geometry.rootFontSize).toBe(`${rootFontSize}px`);
+      expect(new Set(geometry.cards.map(({ bounds: [, height] }) => height)).size).toBe(1);
+      if (rootFontSize === 16) expect(geometry.cards[0]!.bounds[1]).toBe(100);
+      expect(geometry.cards.every(({ containsText }) => containsText)).toBe(true);
+      expect(geometry.cards.every(({ titleLines }) => titleLines <= 2.01)).toBe(true);
+      expect(geometry.cards.every(({ textOrder }) => textOrder)).toBe(true);
+      expect(new Set(geometry.images.map(({ bounds }) => bounds.join('x'))).size).toBe(1);
+      expect(geometry.images[0]!.bounds[0] / geometry.images[0]!.bounds[1]).toBeCloseTo(4 / 3, 2);
+      expect(geometry.images.every(({ objectFit }) => objectFit === 'cover')).toBe(true);
+      expect(geometry.images.every(({ objectPosition }) => objectPosition === '50% 50%')).toBe(
+        true,
+      );
+      expect(geometry.images.every(({ margin }) => margin === '0px')).toBe(true);
+      await expect(panel.locator('.hpm-post__title').first()).toHaveCSS('overflow', 'hidden');
+      await expect(panel.locator('.hpm-post__date').first()).toHaveCSS('white-space', 'nowrap');
+      await expect(panel.locator('.hpm-post__location').first()).toHaveCSS(
+        'text-overflow',
+        'ellipsis',
+      );
+      expect(
+        await heading.evaluate((element) => getComputedStyle(element, '::before').content),
+      ).toBe('none');
+      await expect(heading).toHaveText('2 篇文章');
     });
-    await page.getByRole('button', { name: '全部文章 2', exact: true }).click();
-    const panel = page.getByRole('dialog', { name: '2 篇文章', exact: true });
-    const heading = panel.locator('.hpm-panel__title');
-    const cards = panel.locator('.hpm-post__link');
-    const images = panel.locator('.hpm-post__image');
-    expect(await cards.count()).toBe(2);
-    expect(await images.count()).toBe(2);
-    const geometry = await page.evaluate(() => ({
-      cards: Array.from(document.querySelectorAll('.hpm-panel .hpm-post__link')).map((element) => {
-        const bounds = element.getBoundingClientRect();
-        return [bounds.width, bounds.height];
-      }),
-      images: Array.from(document.querySelectorAll('.hpm-panel .hpm-post__image')).map(
-        (element) => {
-          const bounds = element.getBoundingClientRect();
-          const style = getComputedStyle(element);
-          return {
-            bounds: [bounds.width, bounds.height],
-            objectFit: style.objectFit,
-            objectPosition: style.objectPosition,
-            margin: style.margin,
-          };
-        },
-      ),
-    }));
-    expect(new Set(geometry.cards.map(([, height]) => height)).size).toBe(1);
-    expect(new Set(geometry.images.map(({ bounds }) => bounds.join('x'))).size).toBe(1);
-    expect(geometry.images[0]!.bounds[0] / geometry.images[0]!.bounds[1]).toBeCloseTo(4 / 3, 2);
-    expect(geometry.images.every(({ objectFit }) => objectFit === 'cover')).toBe(true);
-    expect(geometry.images.every(({ objectPosition }) => objectPosition === '50% 50%')).toBe(true);
-    expect(geometry.images.every(({ margin }) => margin === '0px')).toBe(true);
-    await expect(panel.locator('.hpm-post__title').first()).toHaveCSS('overflow', 'hidden');
-    await expect(panel.locator('.hpm-post__date').first()).toHaveCSS('white-space', 'nowrap');
-    await expect(panel.locator('.hpm-post__location').first()).toHaveCSS(
-      'text-overflow',
-      'ellipsis',
-    );
-    expect(await heading.evaluate((element) => getComputedStyle(element, '::before').content)).toBe(
-      'none',
-    );
-    await expect(heading).toHaveText('2 篇文章');
-  });
 
   test(`cluster zoom, identical terminal list, close/focus and image navigation on ${mobile ? 'mobile' : 'desktop'}`, async ({
     page,

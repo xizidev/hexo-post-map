@@ -331,7 +331,8 @@
 .hpm-post__link {
   box-sizing: border-box;
   display: grid;
-  height: 100px;
+  /* Two 1.25-line title rows plus two .875rem/1.3 metadata rows and padding. */
+  height: max(100px, calc(4.775rem + 20px));
   grid-template-columns: 96px minmax(0, 1fr);
   align-items: center;
   gap: 12px;
