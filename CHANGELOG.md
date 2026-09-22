@@ -2,6 +2,19 @@
 
 Changes are recorded through release pull requests.
 
+## [0.2.3](https://github.com/xizidev/hexo-post-map/compare/v0.2.2...v0.2.3) (2026-09-22)
+
+
+### Bug Fixes
+
+* support Live Photo images and improve overview performance ([420864a](https://github.com/xizidev/hexo-post-map/commit/420864a1795d483c619ee202a03177ba399b5b1e))
+* support Live Photo representative images ([f3e8c22](https://github.com/xizidev/hexo-post-map/commit/f3e8c22f802af8a36e03e8611772e8fba51e8203))
+
+
+### Performance Improvements
+
+* lazy load overview article images ([47bcb64](https://github.com/xizidev/hexo-post-map/commit/47bcb64b01eb24329d50b333eb2e2107b7b1e3f0))
+
 ## [0.2.2](https://github.com/xizidev/hexo-post-map/compare/v0.2.1...v0.2.2) (2026-09-22)
 
 
