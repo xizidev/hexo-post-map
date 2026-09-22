@@ -50,10 +50,15 @@ describe.each(['README.md', 'README.zh-CN.md'])('%s authoring examples', (file) 
     ]);
   });
 
-  it('enables the full configuration with either documented environment security mode', () => {
+  it('enables the full configuration with file credentials or either environment mode', () => {
     const configs = examples(file, 'config');
     expect(configs).toHaveLength(1);
     const raw = configs[0]!.post_map;
+    const fileConfigured = resolveConfig(raw, {});
+    expect(fileConfigured?.amap).toEqual({
+      key: 'replace-with-your-web-key',
+      securityJsCode: 'replace-with-your-security-js-code',
+    });
     const proxy = resolveConfig(raw, {
       HEXO_POST_MAP_AMAP_KEY: 'example-test-key',
       HEXO_POST_MAP_AMAP_SERVICE_HOST: 'https://maps.example.com/_AMapService',
