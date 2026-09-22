@@ -2,6 +2,14 @@
 
 Changes are recorded through release pull requests.
 
+## [0.2.2](https://github.com/xizidev/hexo-post-map/compare/v0.2.1...v0.2.2) (2026-09-22)
+
+
+### Bug Fixes
+
+* support npm 12 pack JSON output ([2db4989](https://github.com/xizidev/hexo-post-map/commit/2db4989bcd03fe020473b1de962cd7474f85672f))
+* support npm 12 pack JSON output ([3cc3915](https://github.com/xizidev/hexo-post-map/commit/3cc3915682b27f189203657e70d7ea7af8157117))
+
 ## [0.2.1](https://github.com/xizidev/hexo-post-map/compare/v0.2.0...v0.2.1) (2026-09-21)
 
 
