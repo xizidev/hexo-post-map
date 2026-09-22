@@ -4,7 +4,7 @@
 
 为 Hexo 文章添加矮地图卡片，并生成汇集全站文章的地图页面。通过 Front Matter 描述单个地点、多个地点或行程示意线；全国地图根据缩放自动聚合文章，同一地点的多次访问可展开为文章列表。
 
-需要 **Node.js 20 及以上**、**Hexo 7 或 8**。首版使用高德 JS API 2.0，坐标统一为 **GCJ-02**。当前控件及降级提示使用中文。本仓库正在准备首次发布；以下 npm 安装命令适用于包发布后。
+需要 **Node.js 20 及以上**、**Hexo 7 或 8**。插件使用高德 JS API 2.0，坐标统一为 **GCJ-02**。当前控件及降级提示使用中文。
 
 ## 安装与启用
 
@@ -33,10 +33,59 @@ post_map:
   cluster:
     grid_size: 60
     max_zoom: 18
-  amap: {}
+  amap:
+    key: replace-with-your-web-key
+    security:
+      security_js_code: replace-with-your-security-js-code
 ```
 
-申请高德 **Web 端（JS API）** Key。生产环境建议按[高德官方代理说明](https://lbs.amap.com/api/javascript-api-v2/guide/abc/jscode)部署自己的 HTTPS 安全代理，再给运行 Hexo 的进程设置环境变量。以下字符串均为占位符：
+以上凭据均为占位符。`amap.key` 和 `amap.security.security_js_code` 分别填写高德控制台生成的 Key 和安全密钥；不要同时再配置 `service_host`。
+
+### 申请高德 Key
+
+1. 注册并登录[高德开放平台](https://console.amap.com/)，进入“应用管理”，创建应用。
+2. 在应用中添加 Key，服务平台选择 **Web 端（JS API）**，不要选择“Web 服务”。
+3. 复制生成的 **Key** 和 **安全密钥（securityJsCode）**，填入上面的 `_config.yml`。
+4. 按高德控制台的安全设置配置实际使用域名；本地预览时也要确认当前开发地址符合控制台限制。
+
+2021 年 12 月 2 日后申请的 JS API Key 必须配合安全密钥使用，具体要求见[高德 JS API 准备说明](https://lbs.amap.com/api/javascript-api-v2/prerequisites)。
+
+### 本地预览与 Bucket 部署
+
+配置完成后，可以先在本地预览：
+
+```sh
+npx hexo clean
+npx hexo server
+```
+
+发布到对象存储 Bucket 时，在本地重新生成静态站点：
+
+```sh
+npx hexo clean
+npx hexo generate
+```
+
+将生成的 `public/` 目录上传到 Bucket 即可。Key 和客户端安全密钥在 Hexo 构建时写入静态页面，Bucket 不需要安装 Node.js，也不需要额外设置环境变量。修改 Key、安全模式或地图配置后，必须重新执行构建并上传；如果前面还有 CDN，请同步刷新相关页面和静态资源缓存。
+
+这种文件配置最适合“本地构建、上传静态文件”的博客，但 **Web Key、客户端安全密钥和文章坐标都会发送给浏览器，不能视为私密数据**。请在高德控制台限制可用域名和额度，不要把同一个 Key 用于无关项目。如果博客源码仓库公开，不要提交真实凭据，可改用下方的环境变量。
+
+### 生产代理与环境变量（可选）
+
+高德建议生产环境把安全密钥保存在服务端，并按[官方安全代理说明](https://lbs.amap.com/api/javascript-api-v2/guide/abc/jscode)部署 HTTPS 代理。此时将客户端安全密钥替换为代理地址：
+
+```yaml
+post_map:
+  # 其余配置保持不变
+  amap:
+    key: replace-with-your-web-key
+    security:
+      service_host: https://maps.example.com/_AMapService
+```
+
+`/_AMapService` 是高德规定的固定代理前缀。插件只使用这个代理地址，不会替你创建或托管代理服务。`security_js_code` 和 `service_host` 两种安全模式必须且只能选择一种。
+
+如果不希望把凭据写入 `_config.yml`，可以保留 `amap: {}`，在执行 Hexo 的同一终端中设置环境变量。下面示例选择代理模式：
 
 ```sh
 export HEXO_POST_MAP_AMAP_KEY='replace-with-your-web-key'
@@ -45,9 +94,9 @@ npx hexo clean
 npx hexo generate
 ```
 
-本地开发若没有代理，可先取消 `HEXO_POST_MAP_AMAP_SERVICE_HOST`，改为设置 `HEXO_POST_MAP_AMAP_SECURITY_JS_CODE`。两种安全模式必须且只能配置一种。**静态站点里的坐标、Web Key 和客户端安全码都会公开，即使它们来自环境变量。** 代理可使服务器持有的安全码不进入生成页面，但不能隐藏 Web Key 或坐标。
+使用客户端安全密钥时，取消 `HEXO_POST_MAP_AMAP_SERVICE_HOST`，改为设置 `HEXO_POST_MAP_AMAP_SECURITY_JS_CODE`。环境变量只避免凭据进入源码仓库，不会让发送给浏览器的 Web Key 或客户端安全密钥变成秘密。
 
-文件配置及环境变量的准确优先级见[配置参考](https://github.com/xizidev/hexo-post-map/blob/main/docs/configuration.md)。不要把真实凭据提交到仓库。
+文件配置及环境变量的准确优先级见[配置参考](https://github.com/xizidev/hexo-post-map/blob/main/docs/configuration.md)。
 
 ## 文章写法
 
