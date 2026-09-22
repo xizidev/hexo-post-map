@@ -1,11 +1,12 @@
 import { safeUrl } from '../../presentation/safe-html';
 import type { OverviewPost } from '../../templates/overview';
 import { sortPosts } from './cluster-decision';
-import { createPostImage } from './markers';
+import { createPostImage, revealPostImage } from './markers';
 
 export { createPostImage } from './markers';
 
 let panelSequence = 0;
+const immediateImageCount = 2;
 
 export interface PanelHandle {
   readonly element: HTMLElement;
@@ -51,10 +52,14 @@ export function renderPostPanel(
   scroller.className = 'hpm-panel__scroller';
   const list = document.createElement('ol');
   list.className = 'hpm-post-list';
-  for (const post of sortPosts(posts)) {
+  const deferredImages: HTMLImageElement[] = [];
+  const imageCleanups: (() => void)[] = [];
+  for (const [index, post] of sortPosts(posts).entries()) {
     const row = document.createElement('li');
     row.className = 'hpm-post';
-    const image = createPostImage(post, options.placeholderUrl ?? '');
+    const deferred = index >= immediateImageCount;
+    const image = createPostImage(post, options.placeholderUrl ?? '', { deferred });
+    if (deferred) deferredImages.push(image);
     image.className = 'hpm-post__image';
     const details = document.createElement('div');
     details.className = 'hpm-post__body';
@@ -80,12 +85,33 @@ export function renderPostPanel(
   scroller.append(list);
   element.append(header, scroller);
   let destroyed = false;
+  let imageObserver: IntersectionObserver | undefined;
+  const loadImage = (image: HTMLImageElement) => {
+    imageCleanups.push(revealPostImage(image, options.placeholderUrl ?? ''));
+  };
+  if (deferredImages.length > 0 && typeof globalThis.IntersectionObserver === 'function') {
+    imageObserver = new IntersectionObserver(
+      (entries) => {
+        if (destroyed) return;
+        for (const entry of entries) {
+          if (!entry.isIntersecting && entry.intersectionRatio <= 0) continue;
+          const image = entry.target as HTMLImageElement;
+          imageObserver?.unobserve(image);
+          loadImage(image);
+        }
+      },
+      { root: scroller, rootMargin: '120px 0px', threshold: 0.01 },
+    );
+    deferredImages.forEach((image) => imageObserver?.observe(image));
+  } else deferredImages.forEach(loadImage);
   function destroy() {
     if (destroyed) return;
     destroyed = true;
     const restore = element.contains(document.activeElement);
     close.removeEventListener('click', destroy);
     element.removeEventListener('keydown', onKey);
+    imageObserver?.disconnect();
+    imageCleanups.forEach((cleanup) => cleanup());
     element.remove();
     if (restore) {
       const current = options.resolveOrigin ? options.resolveOrigin() : origin;

@@ -188,7 +188,7 @@ The card loads near the viewport and becomes interactive automatically. Routine 
 
 Detail locations use inline SVG location pins. Clicking or focusing a pin and pressing Enter or Space opens a lightweight custom place-name tooltip; Escape, a second click, or clicking the map closes it. A single point uses a center dot, while route points show `sequence · place name` and carry their sequence number in the same pin shape. The plugin never opens a provider popup or adds an external map link. `route` always remains a straight, schematic sequence rather than a navigable path.
 
-The overview chooses the first safe image in this order: `thumbnail`, an image in rendered article content, then the bundled placeholder. A chosen image that later fails to load is replaced with the placeholder. Only one representative image per article is used.
+The overview chooses the first safe image in this order: `thumbnail`, the first rendered `<img src>` or `.live-photo[data-photo-src]` in article order, then the bundled placeholder. This supports LivePhotosKit-style markup while using its still image on the map. A chosen image that later fails to load is replaced with the placeholder. Only one representative image per article is used.
 
 ## Overview and repeated visits
 

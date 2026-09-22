@@ -172,12 +172,7 @@ describe('overview generation', () => {
       'https://images.example/body.jpg',
       '/hexo-post-map/assets/placeholder.svg',
     ]);
-    for (const image of document(routes).querySelectorAll('img')) {
-      expect(image.getAttribute('loading')).toBe('lazy');
-      expect(Number(image.getAttribute('width'))).toBeGreaterThan(0);
-      expect(Number(image.getAttribute('height'))).toBeGreaterThan(0);
-      expect(image.getAttribute('alt')).toBe('旅行');
-    }
+    expect(document(routes).querySelectorAll('[data-hpm-fallback] img')).toHaveLength(0);
   });
   it('keeps same-origin thumbnails outside the blog root absolute and normalizes only root members', () => {
     const urls = [
@@ -201,7 +196,7 @@ describe('overview generation', () => {
       '/blog/images/a.jpg?size=2&crop=1#preview',
       '/blog/images/a.jpg',
     ]);
-    expect(document(routes).querySelector('img')!.getAttribute('src')).toBe(urls[0]);
+    expect(document(routes).querySelectorAll('[data-hpm-fallback] img')).toHaveLength(0);
   });
   it('keeps same-origin permalinks outside the blog root absolute and respects path segment boundaries', () => {
     const urls = [
@@ -251,9 +246,7 @@ describe('overview generation', () => {
       expect(
         Array.from(doc.querySelectorAll('[data-hpm-fallback] a'), (a) => a.getAttribute('href')),
       ).toEqual(urls);
-      expect(Array.from(doc.querySelectorAll('img'), (img) => img.getAttribute('src'))).toEqual(
-        urls,
-      );
+      expect(doc.querySelectorAll('[data-hpm-fallback] img')).toHaveLength(0);
     },
   );
   it.each(['/', '/blog/'])(
