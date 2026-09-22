@@ -33,7 +33,7 @@ export function renderOverview({
     .map((post) => {
       const title = escapeHtml(post.title);
       const link = post.url ? `<a href="${escapeHtml(post.url)}">${title}</a>` : title;
-      return `<li class="hpm-post"><img src="${escapeHtml(post.image)}" alt="${title}" loading="lazy" width="96" height="72" data-hpm-image><div>${link}<time datetime="${escapeHtml(post.date)}">${escapeHtml(post.date.slice(0, 10))}</time><span>${escapeHtml(post.location.name)}</span></div></li>`;
+      return `<li class="hpm-post"><div>${link}<time datetime="${escapeHtml(post.date)}">${escapeHtml(post.date.slice(0, 10))}</time><span>${escapeHtml(post.location.name)}</span></div></li>`;
     })
     .join('');
   const settings = serializeForHtmlScript({

@@ -254,6 +254,12 @@ for (const mobile of [false, true]) {
     page,
   }) => {
     await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
+    await page.route('**/test-images/panel-*.svg', (route) =>
+      route.fulfill({
+        contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900"/>',
+      }),
+    );
     await page.route('**/map/posts.json', (route) =>
       route.fulfill({
         json: {
@@ -261,7 +267,7 @@ for (const mobile of [false, true]) {
           posts: Array.from({ length: 30 }, (_, index) => ({
             title: `Article ${index + 1}`,
             url: '/blog/posts/route/',
-            image: '/blog/hexo-post-map/assets/placeholder.svg',
+            image: `/blog/test-images/panel-${index + 1}.svg`,
             date: `2025-06-${String(index + 1).padStart(2, '0')}T00:00:00Z`,
             location: { name: 'Shanghai', longitude: 121, latitude: 31 },
           })),
@@ -286,6 +292,17 @@ for (const mobile of [false, true]) {
     const panel = page.getByRole('dialog', { name: '30 篇文章', exact: true });
     await expect(panel.locator('.hpm-post__link')).toHaveCount(30);
     await expect(panel.locator('.hpm-post__title').first()).toHaveText('Article 30');
+    const images = panel.locator('.hpm-post__image');
+    await expect(images.first()).toHaveAttribute('src', /panel-30\.svg$/u);
+    expect(
+      await images.evaluateAll(
+        (elements) => elements.filter((element) => element.hasAttribute('src')).length,
+      ),
+    ).toBeLessThanOrEqual(8);
+    expect(await panel.evaluate((element) => getComputedStyle(element).backdropFilter)).toBe(
+      'none',
+    );
+    await expect(panel.locator('.hpm-post').first()).toHaveCSS('content-visibility', 'auto');
     await expect(toggle).toHaveAttribute('aria-controls', (await panel.getAttribute('id'))!);
     await expect(page.locator('[data-hpm-fallback]')).toBeHidden();
     const bounds = await panel.boundingBox();
@@ -318,6 +335,7 @@ for (const mobile of [false, true]) {
       el.scrollTop = el.scrollHeight;
     });
     expect(await scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await expect(images.last()).toHaveAttribute('src', /panel-1\.svg$/u);
     expect((await panel.locator('.hpm-panel__header').boundingBox())!.y).toBe(headerY);
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBe(pageHeight);
     await page.keyboard.press('Escape');

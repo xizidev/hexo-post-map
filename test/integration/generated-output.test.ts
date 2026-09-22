@@ -38,6 +38,7 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
         link.getAttribute('href'),
       ),
     ).toEqual(envelope.posts.map((post: { url: string }) => post.url));
+    expect(document.querySelectorAll('[data-hpm-fallback] img')).toHaveLength(0);
     expect(document.querySelector('[data-hpm-overview] script')?.textContent).toContain(
       `${root}map/posts.json`,
     );

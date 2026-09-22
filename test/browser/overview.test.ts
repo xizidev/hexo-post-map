@@ -562,6 +562,22 @@ describe('AMap overview clustering boundary', () => {
   });
 });
 
+describe('overview template fallback', () => {
+  it('keeps the no-JavaScript article list text-only to avoid duplicate image downloads', () => {
+    const root = fixture();
+    const fallback = root.querySelector<HTMLElement>('[data-hpm-fallback]')!;
+    expect(fallback.querySelectorAll('img')).toHaveLength(0);
+    expect(Array.from(fallback.querySelectorAll('a'), (link) => link.textContent)).toEqual([
+      b.title,
+      a.title,
+    ]);
+    expect(Array.from(fallback.querySelectorAll('time'), (time) => time.dateTime)).toEqual([
+      b.date,
+      a.date,
+    ]);
+  });
+});
+
 describe('article panels', () => {
   it.each(['desktop', 'mobile'] as const)(
     'renders safe newest-first %s results with links, close and focus restoration',
@@ -600,6 +616,7 @@ describe('article panels', () => {
       expect(image.width).toBe(96);
       expect(image.height).toBe(72);
       expect(image.loading).toBe('lazy');
+      expect(image.decoding).toBe('async');
       image.dispatchEvent(new Event('error'));
       expect(image.getAttribute('src')).toBe('/placeholder.svg');
       image.dispatchEvent(new Event('error'));
@@ -612,6 +629,64 @@ describe('article panels', () => {
       expect(onClose).toHaveBeenCalledTimes(1);
     },
   );
+  it('bounds initial image requests and reveals deferred images near the panel viewport', () => {
+    let reveal: (targets: readonly Element[]) => void = () => {
+      throw new Error('IntersectionObserver was not created');
+    };
+    let disconnected = false;
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          reveal = (targets) =>
+            callback(
+              targets.map(
+                (target) =>
+                  ({
+                    target,
+                    isIntersecting: true,
+                    intersectionRatio: 1,
+                  }) as IntersectionObserverEntry,
+              ),
+              this as unknown as IntersectionObserver,
+            );
+        }
+        observe() {}
+        unobserve() {}
+        disconnect() {
+          disconnected = true;
+        }
+        takeRecords() {
+          return [];
+        }
+      },
+    );
+    const posts = Array.from({ length: 100 }, (_, index) => ({
+      ...a,
+      title: `Article ${index + 1}`,
+      image: `/images/article-${index + 1}.jpg`,
+      date: new Date(Date.UTC(2025, 0, index + 1)).toISOString(),
+    }));
+    const panel = renderPostPanel(posts, 'desktop', {
+      container: document.body,
+      placeholderUrl: '/placeholder.svg',
+    });
+    const images = Array.from(panel.element.querySelectorAll<HTMLImageElement>('img'));
+    expect(images).toHaveLength(100);
+    expect(images.filter((image) => image.hasAttribute('src'))).toHaveLength(2);
+    expect(images.every((image) => image.decoding === 'async')).toBe(true);
+    const deferred = images.find((image) => image.alt === 'Article 50')!;
+    expect(deferred.hasAttribute('src')).toBe(false);
+    reveal([deferred]);
+    expect(deferred.getAttribute('src')).toBe('/images/article-50.jpg');
+    expect(disconnected).toBe(false);
+    const late = images.find((image) => image.alt === 'Article 49')!;
+    expect(late.hasAttribute('src')).toBe(false);
+    panel.destroy();
+    expect(disconnected).toBe(true);
+    reveal([late]);
+    expect(late.hasAttribute('src')).toBe(false);
+  });
   it('rejects executable post and image URLs even when used without the controller', () => {
     const panel = renderPostPanel(
       [{ ...a, url: 'javascript:alert(1)', image: 'data:text/html,hi' }],

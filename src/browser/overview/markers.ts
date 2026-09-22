@@ -20,30 +20,60 @@ function dotCenterY(geometry: (typeof leafGeometry)['desktop']): number {
 // avoid order is top, bottom, left, right; both initial and cluster fits use it.
 export const overviewFitPadding = [dotCenterY(leafGeometry.desktop) + 32, 48, 48, 48];
 
-/** One replacement only: a missing placeholder cannot produce an error loop. */
-export function installImageFallback(image: HTMLImageElement, placeholderUrl: string): () => void {
+function attachImageFallback(
+  image: HTMLImageElement,
+  placeholderUrl: string,
+  checkCurrentSource: boolean,
+): () => void {
   const fallback = () => {
     const safe = safeUrl(placeholderUrl, 'image');
     if (safe) image.src = safe;
   };
   image.addEventListener('error', fallback, { once: true });
-  if (image.complete && image.naturalWidth === 0) {
+  if (checkCurrentSource && image.complete && image.naturalWidth === 0) {
     image.removeEventListener('error', fallback);
     fallback();
   }
   return () => image.removeEventListener('error', fallback);
 }
 
-export function createPostImage(post: OverviewPost, placeholderUrl: string): HTMLImageElement {
+/** One replacement only: a missing placeholder cannot produce an error loop. */
+export function installImageFallback(image: HTMLImageElement, placeholderUrl: string): () => void {
+  return attachImageFallback(image, placeholderUrl, true);
+}
+
+interface PostImageOptions {
+  readonly deferred?: boolean;
+}
+
+export function createPostImage(
+  post: OverviewPost,
+  placeholderUrl: string,
+  options: PostImageOptions = {},
+): HTMLImageElement {
   const image = document.createElement('img');
   image.alt = post.title;
   image.width = 96;
   image.height = 72;
   image.loading = 'lazy';
+  image.decoding = 'async';
   const source = safeUrl(post.image, 'image') ?? safeUrl(placeholderUrl, 'image');
-  if (source) image.src = source;
-  installImageFallback(image, placeholderUrl);
+  if (options.deferred) {
+    if (source) image.dataset.hpmSource = source;
+  } else {
+    if (source) image.src = source;
+    installImageFallback(image, placeholderUrl);
+  }
   return image;
+}
+
+export function revealPostImage(image: HTMLImageElement, placeholderUrl: string): () => void {
+  const source = safeUrl(image.dataset.hpmSource ?? '', 'image');
+  if (!source) return () => {};
+  delete image.dataset.hpmSource;
+  const cleanup = attachImageFallback(image, placeholderUrl, false);
+  image.src = source;
+  return cleanup;
 }
 
 export function createClusterMarker(count: number): MarkerElement {
