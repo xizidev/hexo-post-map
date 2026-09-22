@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument, stringify } from 'yaml';
+import { normalizeNpmPackJson } from '../../scripts/npm-pack-json.mjs';
 import { withTemporaryWorkspace } from './runner-lifecycle.mjs';
 
 const filename = fileURLToPath(import.meta.url);
@@ -375,16 +376,20 @@ export async function runRealBlogSmoke(blog = defaultBlog) {
     await copyBlog(blog, site);
     await configureCopy(site, '/');
     success(await run('npm', ['run', 'build'], repository), 'plugin build');
-    const packed = JSON.parse(
-      success(
-        await run(
-          'npm',
-          ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
-          repository,
+    const packs = normalizeNpmPackJson(
+      JSON.parse(
+        success(
+          await run(
+            'npm',
+            ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
+            repository,
+          ),
+          'npm pack',
         ),
-        'npm pack',
       ),
-    )[0];
+    );
+    assert.equal(packs.length, 1);
+    const packed = packs[0];
     const tarball = resolve(temporary, packed.filename);
     assert.equal(dirname(tarball), temporary);
     const integrity = `sha512-${createHash('sha512')

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   appendFileSync,
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -192,6 +193,8 @@ describe('GitHub workflow publication and compatibility boundaries', () => {
         JSON.stringify({ name: 'hexo-post-map', version: '0.1.0', files: ['dist'] }),
       );
       writeFileSync(join(project, 'dist/index.cjs'), 'module.exports = {};');
+      mkdirSync(join(project, 'scripts'));
+      copyFileSync('scripts/npm-pack-json.mjs', join(project, 'scripts/npm-pack-json.mjs'));
       const output = join(directory, 'output');
       execFileSync('bash', ['-e', '-o', 'pipefail', '-c', pack.run!], {
         cwd: project,

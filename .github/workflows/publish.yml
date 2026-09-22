@@ -51,7 +51,10 @@ jobs:
           import { appendFileSync, readFileSync } from 'node:fs';
           import { createHash } from 'node:crypto';
           import { basename, join } from 'node:path';
-          const packs = JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'hpm-pack.json'), 'utf8'));
+          import { normalizeNpmPackJson } from './scripts/npm-pack-json.mjs';
+          const packs = normalizeNpmPackJson(
+            JSON.parse(readFileSync(join(process.env.RUNNER_TEMP, 'hpm-pack.json'), 'utf8')),
+          );
           assert.equal(packs.length, 1);
           const pack = packs[0];
           assert.equal(basename(pack.filename), pack.filename);

@@ -5,6 +5,7 @@ import { createServer } from 'node:http';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse, stringify } from 'yaml';
+import { normalizeNpmPackJson } from '../../scripts/npm-pack-json.mjs';
 import { withTemporaryWorkspace } from './runner-lifecycle.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -49,16 +50,20 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
       tarball = resolve(process.env.HPM_PACKED_TARBALL);
       assert.ok((await stat(tarball)).isFile(), 'Explicit tarball must be a file');
     } else {
-      const pack = JSON.parse(
-        success(
-          await run(
-            'npm',
-            ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
-            repository,
+      const packs = normalizeNpmPackJson(
+        JSON.parse(
+          success(
+            await run(
+              'npm',
+              ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
+              repository,
+            ),
+            'npm pack',
           ),
-          'npm pack',
         ),
-      )[0];
+      );
+      assert.equal(packs.length, 1);
+      const pack = packs[0];
       assert.ok(pack.files.some((file) => file.path === 'dist/index.cjs'));
       assert.ok(
         pack.files.every((file) =>
