@@ -26,7 +26,7 @@ Coordinates are interpreted as **GCJ-02** and preserved as given. No conversion,
 
 ## Images
 
-`thumbnail` is a top-level Front Matter field, not part of `map`. Selection order is a safe `thumbnail`, the first safe image `src` found in rendered HTML, then the bundled placeholder. Executable URL schemes are rejected. A broken selected image becomes the placeholder in the browser; it does not trigger another scan of the article. External HTTP(S) images and safe site-relative images are supported. Full article galleries are never embedded into the overview data.
+`thumbnail` is a top-level Front Matter field, not part of `map`. Selection order is a safe `thumbnail`, the first safe rendered `<img src>` or `.live-photo[data-photo-src]` in document order, then the bundled placeholder. The Live Photo source is the still image shown on the map; video data is never embedded into overview data. Executable URL schemes are rejected. A broken selected image becomes the placeholder in the browser; it does not trigger another scan of the article. External HTTP(S) images and safe site-relative images are supported. Full article galleries are never embedded into the overview data.
 
 ## Build errors
 

@@ -13,14 +13,33 @@ export interface PostPresentationInput {
 
 type ParsedNode = DefaultTreeAdapterMap['node'];
 
+function attributeValue(node: ParsedNode, name: string): string | undefined {
+  if (!('tagName' in node)) {
+    return undefined;
+  }
+
+  return node.attrs.find((attribute) => attribute.name === name)?.value;
+}
+
+function representativeImageSource(node: ParsedNode): string | undefined {
+  if (!('tagName' in node)) {
+    return undefined;
+  }
+
+  if (node.tagName === 'img') {
+    return attributeValue(node, 'src');
+  }
+
+  const classNames = attributeValue(node, 'class')?.split(/\s+/) ?? [];
+  return classNames.includes('live-photo') ? attributeValue(node, 'data-photo-src') : undefined;
+}
+
 function findFirstSafeImage(node: ParsedNode): string | null {
-  if ('tagName' in node && node.tagName === 'img') {
-    const source = node.attrs.find((attribute) => attribute.name === 'src')?.value;
-    if (source !== undefined) {
-      const safeSource = safeUrl(source, 'image');
-      if (safeSource !== null) {
-        return safeSource;
-      }
+  const source = representativeImageSource(node);
+  if (source !== undefined) {
+    const safeSource = safeUrl(source, 'image');
+    if (safeSource !== null) {
+      return safeSource;
     }
   }
 

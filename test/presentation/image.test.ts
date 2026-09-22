@@ -22,6 +22,24 @@ describe('resolveRepresentativeImage', () => {
     ).toBe('/images/first.webp');
   });
 
+  it('uses a Live Photo still image in rendered document order', () => {
+    expect(
+      resolveRepresentativeImage({
+        content:
+          '<p>Before</p><div class="gallery live-photo" data-photo-src="https://cdn.example.test/live-photo.jpeg" data-video-src="https://cdn.example.test/live-photo.mov"></div><img src="/images/later.webp">',
+      }),
+    ).toBe('https://cdn.example.test/live-photo.jpeg');
+  });
+
+  it('skips an unsafe Live Photo still image and continues to a later safe image', () => {
+    expect(
+      resolveRepresentativeImage({
+        content:
+          '<div class="live-photo" data-photo-src="java&#x73;cript:alert(1)" data-video-src="/videos/unsafe.mov"></div><div class="live-photo" data-photo-src="/images/safe.webp" data-video-src="/videos/safe.mov"></div>',
+      }),
+    ).toBe('/images/safe.webp');
+  });
+
   it('rejects entity-decoded executable sources and ignores empty src and srcset-only images', () => {
     expect(
       resolveRepresentativeImage({
