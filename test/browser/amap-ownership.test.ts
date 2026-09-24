@@ -7,7 +7,11 @@ const sdk = vi.hoisted(() => ({ load: vi.fn(), reset: vi.fn() }));
 vi.mock('@amap/amap-jsapi-loader', () => ({ default: sdk }));
 const config = {
   provider: 'amap' as const,
-  amap: { key: 'key', serviceHost: 'https://example.com/proxy' },
+  amap: {
+    key: 'key',
+    mapStyle: 'amap://styles/normal',
+    serviceHost: 'https://example.com/proxy',
+  },
 };
 const globals = ['AMap', 'AMapUI', 'Loca', '_AMapSecurityConfig', '___onAPILoaded'] as const;
 const get = (name: string) => Reflect.get(window, name);

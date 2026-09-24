@@ -16,4 +16,7 @@ export const DEFAULT_CONFIG = Object.freeze({
     gridSize: 60,
     maxZoom: 18,
   }),
+  amap: Object.freeze({
+    mapStyle: 'amap://styles/normal',
+  }),
 });

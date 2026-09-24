@@ -8,6 +8,7 @@ export function createProviderLoader(factory: ProviderLoader): ProviderLoader {
     const current = JSON.stringify([
       config.provider,
       config.amap.key,
+      config.amap.mapStyle,
       config.amap.serviceHost,
       config.amap.securityJsCode,
     ]);

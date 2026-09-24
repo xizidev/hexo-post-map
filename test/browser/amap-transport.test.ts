@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 
 const config = {
   provider: 'amap' as const,
-  amap: { key: 'test-key', serviceHost: 'https://example.test/proxy' },
+  amap: {
+    key: 'test-key',
+    mapStyle: 'amap://styles/normal',
+    serviceHost: 'https://example.test/proxy',
+  },
 };
 const api = () => ({
   version: '2.0.5',

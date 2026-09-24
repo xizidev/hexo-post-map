@@ -206,6 +206,7 @@ function interaction(active: boolean): Record<string, boolean> {
 
 function mountDetail(
   api: AMapApi,
+  mapStyle: string,
   container: HTMLElement,
   model: DetailMapModel,
 ): Promise<MapHandle> {
@@ -222,6 +223,7 @@ function mountDetail(
     const map = new api.Map(container, {
       center: point.coordinate,
       zoom: model.map.zoom ?? model.defaultZoom,
+      mapStyle,
       ...interaction(false),
       animateEnable: !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     });
@@ -491,6 +493,7 @@ function postBounds(posts: readonly OverviewPost[]): Bounds {
 
 async function mountOverview(
   api: AMapApi,
+  mapStyle: string,
   container: HTMLElement,
   options: OverviewMapOptions,
 ): Promise<MapHandle> {
@@ -513,6 +516,7 @@ async function mountOverview(
     const compactMedia = window.matchMedia?.('(max-width: 600px)');
     const map = new api.Map(container, {
       zoom: Math.min(4, options.maxZoom),
+      mapStyle,
       // Keep overlapping points clustered at the terminal level, including manual zooming.
       zooms: [2, options.maxZoom],
       ...interaction(false),
@@ -746,7 +750,8 @@ async function mountOverview(
 export async function createAMapProvider(config: BrowserProviderConfig): Promise<MapProvider> {
   const api = await loadApi(config);
   return {
-    mountDetail: (container, model) => mountDetail(api, container, model),
-    mountOverview: (container, options) => mountOverview(api, container, options),
+    mountDetail: (container, model) => mountDetail(api, config.amap.mapStyle, container, model),
+    mountOverview: (container, options) =>
+      mountOverview(api, config.amap.mapStyle, container, options),
   };
 }

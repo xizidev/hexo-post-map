@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProviderLoader, loadProvider } from '../../src/browser/shared/provider-loader';
 import type { MapProvider } from '../../src/browser/providers/types';
 
-const config = { provider: 'amap' as const, amap: { key: 'public-key', serviceHost: '/proxy' } };
+const config = {
+  provider: 'amap' as const,
+  amap: { key: 'public-key', mapStyle: 'amap://styles/normal', serviceHost: '/proxy' },
+};
 const provider = { mountDetail: vi.fn(), mountOverview: vi.fn() } satisfies MapProvider;
 const factory = vi.hoisted(() => vi.fn());
 vi.mock('../../src/browser/providers/amap', () => ({ createAMapProvider: factory }));
@@ -56,8 +59,19 @@ describe('provider loader', () => {
     const factory = vi.fn(async () => provider);
     const load = createProviderLoader(factory);
     await load(config);
+    await expect(load({ ...config, amap: { ...config.amap, key: 'other-key' } })).rejects.toThrow(
+      'configuration',
+    );
+    expect(factory).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects conflicting map styles without silently sharing a cached provider', async () => {
+    const factory = vi.fn(async () => provider);
+    const load = createProviderLoader(factory);
+    await load(config);
+
     await expect(
-      load({ ...config, amap: { key: 'other-key', serviceHost: '/proxy' } }),
+      load({ ...config, amap: { ...config.amap, mapStyle: 'amap://styles/dark' } }),
     ).rejects.toThrow('configuration');
     expect(factory).toHaveBeenCalledTimes(1);
   });

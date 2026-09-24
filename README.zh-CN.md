@@ -35,6 +35,7 @@ post_map:
     max_zoom: 18
   amap:
     key: replace-with-your-web-key
+    map_style: dark
     security:
       security_js_code: replace-with-your-security-js-code
 ```
@@ -49,6 +50,26 @@ post_map:
 4. 按高德控制台的安全设置配置实际使用域名；本地预览时也要确认当前开发地址符合控制台限制。
 
 2021 年 12 月 2 日后申请的 JS API Key 必须配合安全密钥使用，具体要求见[高德 JS API 准备说明](https://lbs.amap.com/api/javascript-api-v2/prerequisites)。
+
+### 选择底图样式
+
+`amap.map_style` 同时控制文章详情卡片和全站足迹地图的底图，默认值为 `normal`。可以直接填写高德官方样式短名称：
+
+```yaml
+post_map:
+  amap:
+    map_style: dark
+```
+
+支持的官方名称包括 `normal`、`dark`、`light`、`whitesmoke`、`fresh`、`grey`、`graffiti`、`macaron`、`blue`、`darkblue` 和 `wine`。如需使用已经发布的 GeoHUB 自定义样式，请填写完整的高德样式 URI：
+
+```yaml
+post_map:
+  amap:
+    map_style: amap://styles/d6bf8c1d69cea9f5c696185ad4ac4c86
+```
+
+样式预览和 GeoHUB 发布方法见[高德自定义地图文档](https://lbs.amap.com/api/javascript-api-v2/guide/map/map-style)。修改样式后需要重新生成 Hexo 站点。使用 `service_host` 时，还要确认代理支持高德文档所述的 `webapi.amap.com` 自定义样式上游请求。
 
 ### 本地预览与 Bucket 部署
 
