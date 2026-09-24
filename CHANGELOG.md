@@ -2,6 +2,14 @@
 
 Changes are recorded through release pull requests.
 
+## [0.3.0](https://github.com/xizidev/hexo-post-map/compare/v0.2.3...v0.3.0) (2026-09-24)
+
+
+### Features
+
+* support configurable AMap styles ([cd42331](https://github.com/xizidev/hexo-post-map/commit/cd42331b5f121367aa33e16112dca9b7592d2ed8))
+* support configurable AMap styles ([d94d3b3](https://github.com/xizidev/hexo-post-map/commit/d94d3b3eb7257389d077071dc9ac9ba311693d54))
+
 ## [0.2.3](https://github.com/xizidev/hexo-post-map/compare/v0.2.2...v0.2.3) (2026-09-22)
 
 
