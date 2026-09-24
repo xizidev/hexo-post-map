@@ -180,7 +180,10 @@ async function adapter(plugin?: (names: string[], ready: () => void) => void) {
   };
   if (plugin) Reflect.deleteProperty(api, 'MarkerCluster');
   sdk.load.mockResolvedValue(api);
-  return createAMapProvider({ provider: 'amap', amap: { key: 'key', serviceHost: '/proxy' } });
+  return createAMapProvider({
+    provider: 'amap',
+    amap: { key: 'key', mapStyle: 'amap://styles/dark', serviceHost: '/proxy' },
+  });
 }
 function overviewOptions(overrides: Partial<OverviewMapOptions> = {}): OverviewMapOptions {
   return {
@@ -194,6 +197,16 @@ function overviewOptions(overrides: Partial<OverviewMapOptions> = {}): OverviewM
   };
 }
 describe('AMap overview clustering boundary', () => {
+  it('applies the configured style to the overview map', async () => {
+    const provider = await adapter();
+    const pending = provider.mountOverview(document.createElement('div'), overviewOptions());
+    await flush();
+
+    expect(mapInstance.options.mapStyle).toBe('amap://styles/dark');
+    mapInstance.emit('complete');
+    (await pending).destroy();
+  });
+
   it('allows programmatic initial fitting while restoring inactive zoom controls', async () => {
     const provider = await adapter();
     const pending = provider.mountOverview(document.createElement('div'), overviewOptions());
@@ -563,6 +576,15 @@ describe('AMap overview clustering boundary', () => {
 });
 
 describe('overview template fallback', () => {
+  it('embeds the normalized map style in overview configuration', () => {
+    const root = fixture();
+    const embedded = JSON.parse(root.querySelector('[data-hpm-data]')!.textContent ?? '{}') as {
+      amap?: { mapStyle?: string };
+    };
+
+    expect(embedded.amap?.mapStyle).toBe('amap://styles/normal');
+  });
+
   it('keeps the no-JavaScript article list text-only to avoid duplicate image downloads', () => {
     const root = fixture();
     const fallback = root.querySelector<HTMLElement>('[data-hpm-fallback]')!;

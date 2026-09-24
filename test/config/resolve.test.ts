@@ -42,6 +42,7 @@ describe('resolveConfig', () => {
     expect(config?.cluster).toMatchObject({ gridSize: 60, maxZoom: 18 });
     expect(config?.amap).toMatchObject({
       key: 'env-key',
+      mapStyle: 'amap://styles/normal',
       serviceHost: 'https://maps.example.test/',
     });
     expect(config?.amap.securityJsCode).toBeUndefined();
@@ -61,8 +62,63 @@ describe('resolveConfig', () => {
 
     expect(config?.amap).toEqual({
       key: 'file-key',
+      mapStyle: 'amap://styles/normal',
       serviceHost: 'https://proxy.example.test/amap',
     });
+  });
+
+  it.each([
+    'normal',
+    'dark',
+    'light',
+    'whitesmoke',
+    'fresh',
+    'grey',
+    'graffiti',
+    'macaron',
+    'blue',
+    'darkblue',
+    'wine',
+  ])('normalizes the official AMap style %s', (mapStyle) => {
+    const config = resolveConfig(
+      { ...validConfig, amap: { ...validConfig.amap, map_style: mapStyle } },
+      {},
+    );
+
+    expect(config?.amap.mapStyle).toBe(`amap://styles/${mapStyle}`);
+  });
+
+  it('preserves a complete custom AMap style URI', () => {
+    const custom = resolveConfig(
+      {
+        ...validConfig,
+        amap: {
+          ...validConfig.amap,
+          map_style: 'amap://styles/d6bf8c1d69cea9f5c696185ad4ac4c86',
+        },
+      },
+      {},
+    );
+
+    expect(custom?.amap.mapStyle).toBe('amap://styles/d6bf8c1d69cea9f5c696185ad4ac4c86');
+  });
+
+  it.each([
+    'night',
+    'https://example.com/style',
+    'amap://styles/',
+    'amap://styles/dark?variant=1',
+    'amap://styles/dark#variant',
+    'amap://styles/dark/extra',
+    ' dark',
+    'dark ',
+    null,
+    1,
+  ])('rejects an unsupported AMap style: %s', (mapStyle) => {
+    expectConfigError(
+      { ...validConfig, amap: { ...validConfig.amap, map_style: mapStyle } },
+      'amap.map_style',
+    );
   });
 
   it('returns a deeply immutable resolved configuration', () => {

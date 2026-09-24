@@ -6,7 +6,10 @@ import type { DetailMapModel } from '../../src/browser/providers/types';
 
 const sdk = vi.hoisted(() => ({ load: vi.fn(), reset: vi.fn() }));
 vi.mock('@amap/amap-jsapi-loader', () => ({ default: sdk }));
-const config = { provider: 'amap' as const, amap: { key: 'key', serviceHost: '/proxy' } };
+const config = {
+  provider: 'amap' as const,
+  amap: { key: 'key', mapStyle: 'amap://styles/dark', serviceHost: '/proxy' },
+};
 let instance: FakeMap;
 class FakeMap {
   listeners = new Map<string, () => void>();
@@ -77,6 +80,15 @@ afterEach(() => {
 });
 
 describe('AMap adapter', () => {
+  it('applies the configured style to a detail map', async () => {
+    const provider = await createAMapProvider(config);
+    const pending = provider.mountDetail(document.createElement('div'), model());
+
+    expect(instance.options.mapStyle).toBe('amap://styles/dark');
+    instance.emit('complete');
+    (await pending).destroy();
+  });
+
   it('preserves every visit and numbered marker in an out-and-back route', async () => {
     const provider = await createAMapProvider(config);
     const pending = provider.mountDetail(
@@ -133,7 +145,10 @@ describe('AMap adapter', () => {
         expect(options).toEqual({ key: 'key', version: '2.0' });
         return {};
       });
-      await createAMapProvider({ provider: 'amap', amap: { key: 'key', ...security } });
+      await createAMapProvider({
+        provider: 'amap',
+        amap: { key: 'key', mapStyle: 'amap://styles/normal', ...security },
+      });
     },
   );
 

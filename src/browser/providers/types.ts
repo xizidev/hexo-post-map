@@ -5,6 +5,7 @@ export interface BrowserProviderConfig {
   readonly provider: 'amap';
   readonly amap: {
     readonly key: string;
+    readonly mapStyle: string;
     readonly serviceHost?: string;
     readonly securityJsCode?: string;
   };

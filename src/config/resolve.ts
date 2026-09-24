@@ -3,6 +3,20 @@ import type { ResolvedPluginConfig } from './types';
 
 const MIN_ZOOM = 2;
 const MAX_ZOOM = 20;
+const AMAP_OFFICIAL_STYLES = Object.freeze([
+  'normal',
+  'dark',
+  'light',
+  'whitesmoke',
+  'fresh',
+  'grey',
+  'graffiti',
+  'macaron',
+  'blue',
+  'darkblue',
+  'wine',
+] as const);
+const AMAP_STYLE_URI_PATTERN = /^amap:\/\/styles\/[A-Za-z0-9_-]+$/u;
 const CSS_LENGTH_PATTERN =
   /^(?:0(?:\.0+)?|(?:\d+(?:\.\d+)?|\.\d+)(?:%|cap|ch|cm|em|ex|ic|in|lh|mm|pc|pt|px|Q|rcap|rch|rem|rex|ric|rlh|rrem|vh|vmax|vmin|vw))$/u;
 
@@ -118,6 +132,29 @@ function optionalHeight(value: unknown): string {
     throw new ConfigValidationError(
       'post.height',
       'must be a non-negative CSS length or percentage',
+    );
+  }
+
+  return value;
+}
+
+function optionalMapStyle(value: unknown): string {
+  if (value === undefined) {
+    return DEFAULT_CONFIG.amap.mapStyle;
+  }
+  if (typeof value !== 'string' || value.trim() !== value) {
+    throw new ConfigValidationError(
+      'amap.map_style',
+      'must be an official style name or an amap://styles/... URI',
+    );
+  }
+  if (AMAP_OFFICIAL_STYLES.includes(value as (typeof AMAP_OFFICIAL_STYLES)[number])) {
+    return `amap://styles/${value}`;
+  }
+  if (!AMAP_STYLE_URI_PATTERN.test(value)) {
+    throw new ConfigValidationError(
+      'amap.map_style',
+      'must be an official style name or an amap://styles/... URI',
     );
   }
 
@@ -287,7 +324,7 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv): ResolvedPlu
   if (cluster !== undefined) {
     rejectUnknownFields(cluster, 'cluster', ['grid_size', 'max_zoom']);
   }
-  rejectUnknownFields(amap, 'amap', ['key', 'security']);
+  rejectUnknownFields(amap, 'amap', ['key', 'map_style', 'security']);
   if (security !== undefined) {
     rejectUnknownFields(security, 'amap.security', ['service_host', 'security_js_code']);
   }
@@ -344,7 +381,7 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv): ResolvedPlu
         MAX_ZOOM,
       ),
     },
-    amap: { key, ...resolvedSecurity },
+    amap: { key, mapStyle: optionalMapStyle(amap.map_style), ...resolvedSecurity },
   };
 
   return deepFreeze(resolved);

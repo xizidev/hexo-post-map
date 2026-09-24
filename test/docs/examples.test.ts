@@ -57,6 +57,7 @@ describe.each(['README.md', 'README.zh-CN.md'])('%s authoring examples', (file) 
     const fileConfigured = resolveConfig(raw, {});
     expect(fileConfigured?.amap).toEqual({
       key: 'replace-with-your-web-key',
+      mapStyle: 'amap://styles/dark',
       securityJsCode: 'replace-with-your-security-js-code',
     });
     const proxy = resolveConfig(raw, {
@@ -65,6 +66,7 @@ describe.each(['README.md', 'README.zh-CN.md'])('%s authoring examples', (file) 
     });
     expect(proxy?.amap).toEqual({
       key: 'example-test-key',
+      mapStyle: 'amap://styles/dark',
       serviceHost: 'https://maps.example.com/_AMapService',
     });
     expect(proxy?.overview.path).toBe('map/');
@@ -73,6 +75,10 @@ describe.each(['README.md', 'README.zh-CN.md'])('%s authoring examples', (file) 
       HEXO_POST_MAP_AMAP_KEY: 'example-test-key',
       HEXO_POST_MAP_AMAP_SECURITY_JS_CODE: 'example-test-code',
     });
-    expect(client?.amap).toEqual({ key: 'example-test-key', securityJsCode: 'example-test-code' });
+    expect(client?.amap).toEqual({
+      key: 'example-test-key',
+      mapStyle: 'amap://styles/dark',
+      securityJsCode: 'example-test-code',
+    });
   });
 });

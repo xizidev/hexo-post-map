@@ -43,6 +43,15 @@ afterEach(() => {
 });
 
 describe('detail hydration', () => {
+  it('embeds the normalized map style in detail configuration', () => {
+    const root = fixture();
+    const embedded = JSON.parse(root.querySelector('[data-hpm-data]')!.textContent ?? '{}') as {
+      amap?: { mapStyle?: string };
+    };
+
+    expect(embedded.amap?.mapStyle).toBe('amap://styles/normal');
+  });
+
   it('keeps one usable map across repeated BFCache restores and destroys it on ordinary pagehide', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const root = fixture();

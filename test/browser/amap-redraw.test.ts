@@ -78,7 +78,7 @@ async function setup() {
   });
   const provider = await createAMapProvider({
     provider: 'amap',
-    amap: { key: 'key', serviceHost: '/proxy' },
+    amap: { key: 'key', mapStyle: 'amap://styles/normal', serviceHost: '/proxy' },
   });
   const container = document.createElement('div');
   document.body.append(container);

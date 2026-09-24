@@ -25,6 +25,7 @@ post_map:
     max_zoom: 18
   amap:
     key: replace-with-your-web-key
+    map_style: dark
     security:
       service_host: https://maps.example.com/_AMapService
 ```
@@ -49,6 +50,7 @@ For client mode, replace `service_host` with `security_js_code: replace-with-you
 | `cluster.max_zoom`               | `18`       | Finite number in `[2, 20]`; overview zoom cap and overlap-list threshold                                        |
 | `amap`                           | required   | Object; use `{}` when credentials come entirely from the environment                                            |
 | `amap.key`                       | none       | Non-empty Web/JS API key unless supplied by the environment                                                     |
+| `amap.map_style`                 | `normal`   | Official short name or a complete `amap://styles/...` URI; shared by detail and overview maps                   |
 | `amap.security.service_host`     | none       | Absolute HTTPS proxy URL without embedded username/password                                                     |
 | `amap.security.security_js_code` | none       | Non-empty client security code; mutually exclusive with `service_host`                                          |
 
@@ -88,6 +90,7 @@ The plugin message portion is shown below; Hexo may wrap it with its own log pre
 [hexo-post-map] cluster.max_zoom: must be a finite number from 2 to 20
 [hexo-post-map] cluster.grid_size: must be a positive finite number
 [hexo-post-map] post.position: must be one of: before, after, manual
+[hexo-post-map] amap.map_style: must be an official style name or an amap://styles/... URI
 ```
 
 These errors identify a field, never its credential value. For post diagnostics see [Front Matter](front-matter.md). For provider failure, SDK conflicts, CSP, and privacy see [security](security.md).

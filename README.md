@@ -35,6 +35,7 @@ post_map:
     max_zoom: 18
   amap:
     key: replace-with-your-web-key
+    map_style: dark
     security:
       security_js_code: replace-with-your-security-js-code
 ```
@@ -49,6 +50,26 @@ All credential values above are placeholders. Set `amap.key` to the Key generate
 4. Configure the actual deployment domains in the console's security settings. For local previews, make sure the development address also satisfies the console restrictions.
 
 JS API keys created after December 2, 2021 must be used with their security code. See [AMap's JS API prerequisites](https://lbs.amap.com/api/javascript-api-v2/prerequisites) for the current requirement.
+
+### Choose a base-map style
+
+`amap.map_style` changes the base map used by both post cards and the site-wide overview. It defaults to `normal`. You can use any official short name:
+
+```yaml
+post_map:
+  amap:
+    map_style: dark
+```
+
+Supported official names are `normal`, `dark`, `light`, `whitesmoke`, `fresh`, `grey`, `graffiti`, `macaron`, `blue`, `darkblue`, and `wine`. To use a published GeoHUB custom style, provide its complete AMap style URI instead:
+
+```yaml
+post_map:
+  amap:
+    map_style: amap://styles/d6bf8c1d69cea9f5c696185ad4ac4c86
+```
+
+See [AMap's custom map guide](https://lbs.amap.com/api/javascript-api-v2/guide/map/map-style) for previews and GeoHUB publishing. Rebuild the Hexo site after changing the style. When using `service_host`, make sure the proxy also supports the `webapi.amap.com` custom-style upstream described by AMap.
 
 ### Local preview and Bucket deployment
 
