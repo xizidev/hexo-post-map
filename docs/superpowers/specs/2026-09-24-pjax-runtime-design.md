@@ -2,7 +2,7 @@
 
 Date: 2026-09-24
 
-Status: revised after asset-loading review; pending written-spec review
+Status: revised after no-JavaScript fallback review; pending written-spec review
 
 Target release: `hexo-post-map` v0.4.0
 
@@ -60,12 +60,12 @@ every enabled HTML page
         v
 runtime.js bootstrap (no provider code)
         |
-        +-- observes detail root ----> loads style.css + post-map.js once
+        +-- observes detail root ----> ensures style.css + loads post-map.js once
         |                                      |
         |                                      v
         |                              detail hydrator/controller ----> AMap
         |
-        +-- observes overview root --> loads style.css + overview-map.js once
+        +-- observes overview root --> ensures style.css + loads overview-map.js once
                                                |
                                                v
                                        overview hydrator/controller --> AMap
@@ -75,11 +75,11 @@ runtime.js bootstrap (no provider code)
 
 The generated asset routes add `hexo-post-map/assets/runtime.js`. The existing `post-map.js`, `overview-map.js`, `style.css`, and `placeholder.svg` routes and filenames remain available.
 
-When the plugin is enabled, the `after_render:html` hook injects exactly one deferred `runtime.js` script into every rendered HTML document, including documents with no map markup. It no longer injects feature scripts or the stylesheet directly. The standalone overview route, which bypasses Hexo's HTML-render hook, passes through the same injector and therefore receives the same bootstrap.
+When the plugin is enabled, the `after_render:html` hook injects exactly one deferred `runtime.js` script into every rendered HTML document, including documents with no map markup. A document that already contains detail or overview markup also receives exactly one static `style.css` link so its server-rendered fallback retains the v0.3.0 appearance when JavaScript is disabled. Feature scripts are never injected directly. The standalone overview route, which bypasses Hexo's HTML-render hook, passes through the same injector and therefore receives the bootstrap and static stylesheet.
 
 The runtime derives its asset base from the fully resolved `src` of its own script element. This supports root deployments, non-root Hexo deployments such as `/blog/`, and an explicitly relocated runtime asset without adding configuration. It never derives executable resource URLs from Front Matter, article data, or the public API.
 
-An ordinary page therefore downloads only the local minified runtime. It must not request `style.css`, either feature bundle, the overview JSON, or the AMap SDK until a matching map root exists. The built `runtime.js` must remain at or below 8 KiB before compression and must not import provider, marker, panel, or post-data modules.
+An ordinary page therefore downloads only the local minified runtime. It must not request `style.css`, either feature bundle, the overview JSON, or the AMap SDK until a matching map root exists. An initially mapped document loads its stylesheet from the static link but still defers its feature bundle and AMap SDK to the runtime. The built `runtime.js` must remain at or below 8 KiB before compression and must not import provider, marker, panel, or post-data modules.
 
 ### 5.2 Runtime ownership
 
@@ -105,7 +105,7 @@ The runtime contains a fixed internal catalog:
 | Detail   | `[data-hpm-detail]`   | `post-map.js`     |
 | Overview | `[data-hpm-overview]` | `overview-map.js` |
 
-On the first connected root for a feature, the runtime starts one shared `style.css` load and one load for that feature's IIFE. Concurrent roots and repeated scans reuse the same promises. Detail and overview roots share the stylesheet but load their feature bundles independently. The feature is mountable only after the stylesheet has loaded and its IIFE has registered the expected hydrator.
+On the first connected root for a feature, the runtime ensures one shared `style.css` load and starts one load for that feature's IIFE. A static stylesheet already injected for initial map markup is adopted rather than duplicated. Concurrent roots and repeated scans reuse the same promises. Detail and overview roots share the stylesheet but load their feature bundles independently. The feature is mountable only after the stylesheet has loaded and its IIFE has registered the expected hydrator.
 
 The runtime recognizes its own canonical resource URLs and never inserts a duplicate matching link or script. If a resource element already exists, it adopts that element's pending or completed load rather than adding another. A successful feature load remains reusable for the page lifetime.
 
@@ -304,7 +304,7 @@ The fixture must verify:
 
 ### 11.3 Integration matrix
 
-The packed-artifact integration matrix remains required. It verifies that every enabled HTML page contains one runtime script, ordinary pages contain no eager map feature resources, mapped pages still render their fallback markup, all five asset routes are packaged, and root plus `/blog/` URLs resolve correctly. Add or extend fixtures for a conventional theme, a synthetic PJAX theme, theme page-layout fallback, and a non-root Hexo deployment. The real blog is validated locally at `127.0.0.1`, never `localhost`.
+The packed-artifact integration matrix remains required. It verifies that every enabled HTML page contains one runtime script, ordinary pages contain no eager map resources, initially mapped pages contain one stylesheet but no feature script, mapped pages still render their styled fallback markup without JavaScript, all five asset routes are packaged, and root plus `/blog/` URLs resolve correctly. Add or extend fixtures for a conventional theme, a synthetic PJAX theme, theme page-layout fallback, and a non-root Hexo deployment. The real blog is validated locally at `127.0.0.1`, never `localhost`.
 
 ## 12. Documentation and Release
 
@@ -333,6 +333,7 @@ The real blog consumes the packed development artifact before npm publication. A
 - A detail or overview root inserted after initial page load becomes functional without reloading the document.
 - Starting from an ordinary page works because that page already has the lightweight runtime and no eager map dependencies.
 - Ordinary pages do not load the stylesheet, detail bundle, overview bundle, overview JSON, or AMap SDK.
+- Initially mapped HTML includes the stylesheet for its no-JavaScript fallback but no eager feature bundle.
 - Each local feature resource is requested at most once after success; explicit refresh is the only automatic-contract path that retries a failed resource load.
 - Removing that root destroys its controller and owned resources exactly once.
 - Moving the same root within the document does not recreate its map.
