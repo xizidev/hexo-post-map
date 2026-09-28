@@ -30,9 +30,10 @@ export function createFeatureResourceLoader(options: {
   let stopped = false;
 
   function matchingStyle(): HTMLLinkElement | undefined {
-    return Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"]')).find(
-      (link) => !link.disabled && link.href === styleUrl,
-    );
+    const canonical = Array.from(
+      document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"]'),
+    ).filter((link) => !link.disabled && link.href === styleUrl);
+    return canonical.find((link) => link.sheet !== null) ?? canonical[0];
   }
 
   function matchingScript(feature: FeatureId): HTMLScriptElement | undefined {

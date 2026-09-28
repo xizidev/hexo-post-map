@@ -91,6 +91,49 @@ describe('feature resource loader', () => {
     expect(h.scripts()).toHaveLength(1);
   });
 
+  it('prefers a loaded canonical stylesheet after an unfinished duplicate', async () => {
+    const h = resourceHarness({ existingDetailScript: true });
+    const first = h.document.createElement('link');
+    first.rel = 'stylesheet';
+    first.href = 'https://example.test/blog/hexo-post-map/assets/style.css';
+    h.document.head.append(first);
+    const loaded = h.document.createElement('link');
+    loaded.rel = 'stylesheet';
+    loaded.href = 'https://example.test/blog/hexo-post-map/assets/style.css';
+    Object.defineProperty(loaded, 'sheet', { value: {} as CSSStyleSheet });
+    h.document.head.append(loaded);
+    expect(first.sheet).toBeNull();
+    expect(loaded.sheet).not.toBeNull();
+
+    const pending = h.loader.ensure('detail');
+    try {
+      expect(h.loader.isReady('detail')).toBe(true);
+      await expect(pending).resolves.toBe(true);
+      expect(h.links()).toHaveLength(2);
+      expect(h.document.querySelectorAll('link[rel="stylesheet"]')).toHaveLength(2);
+    } finally {
+      h.loader.stop();
+    }
+  });
+
+  it('reuses the first canonical stylesheet when duplicate links are unfinished', async () => {
+    const h = resourceHarness({ existingDetailScript: true });
+    for (let index = 0; index < 2; index++) {
+      const link = h.document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'https://example.test/blog/hexo-post-map/assets/style.css';
+      h.document.head.append(link);
+    }
+
+    const pending = h.loader.ensure('detail');
+    expect(h.links()).toHaveLength(2);
+    expect(h.document.querySelectorAll('link[rel="stylesheet"]')).toHaveLength(2);
+    h.dispatch(h.links()[1]!, 'error');
+    expect(h.loader.isReady('detail')).toBe(false);
+    h.dispatch(h.links()[0]!, 'load');
+    await expect(pending).resolves.toBe(true);
+  });
+
   it('suppresses automatic retries and retries only the failed shared resource explicitly', async () => {
     const h = resourceHarness();
     const detail = h.loader.ensure('detail');
