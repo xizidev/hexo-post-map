@@ -384,8 +384,9 @@ describe('overview generation', () => {
         '/blog/hexo-post-map/assets/style.css',
       );
       expect(doc.querySelector('script[src]')!.getAttribute('src')).toBe(
-        '/blog/hexo-post-map/assets/overview-map.js',
+        '/blog/hexo-post-map/assets/runtime.js',
       );
+      expect(doc.querySelectorAll('script[src]')).toHaveLength(1);
     },
   );
   it('renders a readable empty state and empty versioned data', () => {
@@ -404,13 +405,20 @@ describe('overview generation', () => {
     ).toEqual([
       'hexo-post-map/assets/post-map.js',
       'hexo-post-map/assets/overview-map.js',
+      'hexo-post-map/assets/runtime.js',
       'hexo-post-map/assets/style.css',
       'hexo-post-map/assets/placeholder.svg',
     ]);
   });
   it('registers namespaced asset routes with fresh data functions', () => {
     const routes = generate();
-    for (const file of ['post-map.js', 'overview-map.js', 'style.css', 'placeholder.svg']) {
+    for (const file of [
+      'post-map.js',
+      'overview-map.js',
+      'runtime.js',
+      'style.css',
+      'placeholder.svg',
+    ]) {
       expect(typeof routes.find((r) => r.path === `hexo-post-map/assets/${file}`)!.data).toBe(
         'function',
       );

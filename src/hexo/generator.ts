@@ -9,7 +9,7 @@ import { safeUrl } from '../presentation/safe-html';
 import { serializeForHtmlScript } from '../presentation/serialize';
 import { renderOverview, type OverviewPost } from '../templates/overview';
 import { renderStandalone } from '../templates/standalone';
-import { injectMarkedAssets } from './injector';
+import { injectBrowserRuntime } from './injector';
 
 export type { OverviewPost } from '../templates/overview';
 
@@ -137,11 +137,13 @@ function publicImage(post: OverviewSourcePost, hexo: Hexo, placeholderUrl: strin
 }
 
 function assetRoutes(): HexoRoute[] {
-  return ['post-map.js', 'overview-map.js', 'style.css', 'placeholder.svg'].map((name) => ({
-    path: `hexo-post-map/assets/${name}`,
-    // The published entry is dist/index.cjs; factories open a fresh stream for every route read.
-    data: () => createReadStream(join(__dirname, 'assets', name)),
-  }));
+  return ['post-map.js', 'overview-map.js', 'runtime.js', 'style.css', 'placeholder.svg'].map(
+    (name) => ({
+      path: `hexo-post-map/assets/${name}`,
+      // The published entry is dist/index.cjs; factories open a fresh stream for every route read.
+      data: () => createReadStream(join(__dirname, 'assets', name)),
+    }),
+  );
 }
 
 export function createOverviewRoutes(
@@ -190,7 +192,7 @@ export function createOverviewRoutes(
     page.data = { title: config.overview.title, type: 'post-map-overview', content };
   } else {
     // Direct routes bypass Hexo's HTML renderer and its after_render:html hook.
-    page.data = injectMarkedAssets(
+    page.data = injectBrowserRuntime(
       renderStandalone(config.overview.title, content),
       hexo.config.root,
     );
