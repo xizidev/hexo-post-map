@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Window } from 'happy-dom';
 import { describe, expect, it } from 'vitest';
@@ -13,9 +13,21 @@ const html = async (path: string) => {
       disableCSSFileLoading: true,
     },
   });
-  window.document.write(await readFile(join(directory!, path, 'index.html'), 'utf8'));
+  window.document.write(
+    await readFile(join(directory!, path.endsWith('.html') ? path : `${path}/index.html`), 'utf8'),
+  );
   return window.document;
 };
+
+async function htmlPaths(path = ''): Promise<string[]> {
+  const paths: string[] = [];
+  for (const entry of await readdir(join(directory!, path), { withFileTypes: true })) {
+    const child = join(path, entry.name);
+    if (entry.isDirectory()) paths.push(...(await htmlPaths(child)));
+    else if (entry.name.endsWith('.html')) paths.push(child);
+  }
+  return paths;
+}
 
 describe.skipIf(!directory)('installed tarball generated output', () => {
   it('projects only public fields and sorts the complete mapped-post fallback', async () => {
@@ -59,25 +71,41 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
     expect(detail.querySelector('script')?.textContent).not.toContain('<script>');
   });
 
-  it('emits one detail component per mapped article and no assets on ordinary posts', async () => {
+  it('emits one root-aware runtime on every HTML page and only static map styles', async () => {
+    const paths = await htmlPaths();
+    expect(paths.length).toBeGreaterThan(5);
+    for (const path of paths) {
+      const document = await html(path);
+      expect(
+        [...document.querySelectorAll('script[src]')]
+          .map((script) => script.getAttribute('src'))
+          .filter((src) => src?.includes('hexo-post-map/assets/')),
+        path,
+      ).toEqual([`${root}hexo-post-map/assets/runtime.js`]);
+      expect(
+        document.querySelectorAll(`link[href="${root}hexo-post-map/assets/style.css"]`),
+        path,
+      ).toHaveLength(document.querySelector('[data-hpm-detail], [data-hpm-overview]') ? 1 : 0);
+    }
     for (const slug of ['single', 'multi', 'route', 'overlap']) {
       const document = await html(`posts/${slug}`);
       expect(document.querySelectorAll('[data-hpm-detail]')).toHaveLength(1);
       expect(
-        document.querySelectorAll(`script[src="${root}hexo-post-map/assets/post-map.js"]`),
-      ).toHaveLength(1);
-      expect(
-        document.querySelectorAll(`link[href="${root}hexo-post-map/assets/style.css"]`),
-      ).toHaveLength(1);
+        document.querySelectorAll('[data-hpm-detail] [data-hpm-fallback] a').length,
+      ).toBeGreaterThan(0);
     }
     const ordinary = await html('posts/plain');
-    expect(ordinary.querySelector('[data-hpm-detail]')).toBeNull();
-    expect(ordinary.querySelector('[src*="hexo-post-map"], [href*="hexo-post-map"]')).toBeNull();
+    expect(ordinary.querySelector('[data-hpm-detail], [data-hpm-overview]')).toBeNull();
+    expect(ordinary.querySelector('link[href*="hexo-post-map/assets/"]')).toBeNull();
     const overview = await html('map');
-    expect(
-      overview.querySelectorAll(`script[src="${root}hexo-post-map/assets/overview-map.js"]`),
-    ).toHaveLength(1);
-    for (const name of ['post-map.js', 'overview-map.js', 'style.css', 'placeholder.svg'])
+    expect(overview.querySelectorAll('[data-hpm-overview]')).toHaveLength(1);
+    for (const name of [
+      'runtime.js',
+      'post-map.js',
+      'overview-map.js',
+      'style.css',
+      'placeholder.svg',
+    ])
       expect(
         (await readFile(join(directory!, 'hexo-post-map/assets', name))).length,
       ).toBeGreaterThan(0);

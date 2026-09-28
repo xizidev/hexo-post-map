@@ -7,6 +7,7 @@ import { createServer } from 'node:http';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument, stringify } from 'yaml';
+import { Window } from 'happy-dom';
 import { normalizeNpmPackJson } from '../../scripts/npm-pack-json.mjs';
 import { withTemporaryWorkspace } from './runner-lifecycle.mjs';
 
@@ -25,6 +26,11 @@ const excluded = new Set([
   '.parcel-cache',
   '.hexo',
   'db.json',
+  '.codex-worktrees',
+  '.worktrees',
+  '.superpowers',
+  '.codex',
+  '.agents',
 ]);
 const execute = promisify(execFile);
 const auditExclusions = new Set([
@@ -34,6 +40,7 @@ const auditExclusions = new Set([
   '.codex',
   '.agents',
   '.worktrees',
+  '.codex-worktrees',
 ]);
 
 async function readOnlyGit(command, args, cwd) {
@@ -90,6 +97,7 @@ export async function withAuditedWorkspace(directories, work) {
                 credentialFiles(files),
                 'Smoke credentials escaped into a repository',
               );
+              assert.deepEqual(current, files, 'Repository file bytes changed during smoke');
             }),
           ]);
           const failed = checks.filter((result) => result.status === 'rejected');
@@ -173,6 +181,21 @@ export async function configureCopy(site, root) {
   theme.nav = { ...theme.nav, map: '/map/' };
   await writeFile(themePath, stringify(theme));
   const postPath = join(site, 'source/_posts/魔都.md');
+  // The live blog can gain maps over time. Normalize only this disposable copy
+  // to one mapped article so the Shanghai preview remains a deterministic fixture.
+  for (const path of await filesWithExtension(join(site, 'source/_posts'), '.md')) {
+    if (path === postPath) continue;
+    const contents = await readFile(path, 'utf8');
+    const frontMatter = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(contents);
+    if (!frontMatter) continue;
+    const metadata = yamlObject(frontMatter[1]);
+    if (!Object.hasOwn(metadata, 'map')) continue;
+    delete metadata.map;
+    await writeFile(
+      path,
+      `---\n${stringify(metadata)}---\n${contents.slice(frontMatter[0].length)}`,
+    );
+  }
   const post = await readFile(postPath, 'utf8');
   const match = /^(?:\uFEFF)?---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(post);
   assert.ok(match, 'Shanghai article must have YAML front matter');
@@ -223,12 +246,12 @@ async function credentialInventory(directory) {
   return files;
 }
 
-async function htmlFiles(directory) {
+async function filesWithExtension(directory, extension) {
   const found = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isDirectory()) found.push(...(await htmlFiles(path)));
-    else if (entry.name.endsWith('.html')) found.push(path);
+    if (entry.isDirectory()) found.push(...(await filesWithExtension(path, extension)));
+    else if (entry.name.endsWith(extension)) found.push(path);
   }
   return found;
 }
@@ -237,7 +260,6 @@ async function verifyGenerated(site, root) {
   const output = join(site, 'public');
   const detail = await readFile(join(output, articleRoute, 'index.html'), 'utf8');
   assert.ok(detail.includes('data-hpm-detail'), 'Shanghai detail card missing');
-  assert.ok(detail.includes(`${root}hexo-post-map/assets/post-map.js`));
   assert.ok(
     detail.includes(`https://lifeifan.com${root}${articleRoute}`),
     'Canonical article URL has the wrong root',
@@ -248,7 +270,15 @@ async function verifyGenerated(site, root) {
   assert.ok(overview.includes(`href="${root}${articleRoute}"`));
   assert.ok(detail.includes(`href="${root}map/"`), 'Cactus map navigation does not respect root');
   const data = JSON.parse(await readFile(join(output, 'map/posts.json'), 'utf8'));
+  assert.equal(data.version, 1);
   assert.equal(data.posts.length, 1, 'Only the copied Shanghai article should be mapped');
+  assert.deepEqual(Object.keys(data.posts[0]).sort(), [
+    'date',
+    'image',
+    'location',
+    'title',
+    'url',
+  ]);
   assert.deepEqual(data.posts[0].location, {
     name: '上海',
     longitude: 121.4737,
@@ -256,21 +286,69 @@ async function verifyGenerated(site, root) {
   });
   assert.equal(data.posts[0].url, `${root}${articleRoute}`);
   assert.equal(data.posts[0].image, imageUrl);
+  for (const asset of [
+    'runtime.js',
+    'style.css',
+    'post-map.js',
+    'overview-map.js',
+    'placeholder.svg',
+  ])
+    assert.ok((await readFile(join(output, 'hexo-post-map/assets', asset))).length > 0);
   let ordinary = 0;
-  for (const path of await htmlFiles(join(output, 'archives'))) {
-    const html = await readFile(path, 'utf8');
-    if (path === join(output, articleRoute, 'index.html')) continue;
-    assert.ok(
-      !html.includes('data-hpm-detail') && !html.includes('hexo-post-map/assets'),
-      `Unmapped page loaded plugin: ${relative(output, path)}`,
-    );
-    ordinary++;
+  let ordinaryRoute;
+  for (const path of await filesWithExtension(output, '.html')) {
+    const window = new Window({
+      settings: {
+        disableJavaScriptEvaluation: true,
+        disableJavaScriptFileLoading: true,
+        disableCSSFileLoading: true,
+      },
+    });
+    try {
+      window.document.write(await readFile(path, 'utf8'));
+      const document = window.document;
+      const route = relative(output, path).split(sep).join('/');
+      assert.deepEqual(
+        [...document.querySelectorAll('script[src]')]
+          .map((script) => script.getAttribute('src'))
+          .filter((src) => src?.includes('hexo-post-map/assets/')),
+        [`${root}hexo-post-map/assets/runtime.js`],
+        `Runtime/feature scripts: ${route}`,
+      );
+      const mapRoot = document.querySelector('[data-hpm-detail], [data-hpm-overview]');
+      assert.equal(
+        document.querySelectorAll(`link[href="${root}hexo-post-map/assets/style.css"]`).length,
+        mapRoot ? 1 : 0,
+        route,
+      );
+      if (mapRoot) {
+        assert.ok(
+          mapRoot.querySelector('[data-hpm-fallback] a'),
+          `Static fallback missing: ${route}`,
+        );
+      } else {
+        assert.equal(
+          document.querySelector(
+            '[data-hpm-detail], [data-hpm-overview], .hpm-detail-marker, .hpm-image-marker, .hpm-cluster',
+          ),
+          null,
+          route,
+        );
+        assert.equal(document.querySelector('link[href*="hexo-post-map/assets/"]'), null, route);
+        if (route.startsWith('archives/')) {
+          ordinary++;
+          ordinaryRoute ??= `${root}${route.replace(/index\.html$/u, '')}`;
+        }
+      }
+    } finally {
+      await window.happyDOM.close();
+    }
   }
   assert.ok(ordinary > 0, 'Expected ordinary articles in the real blog');
-  return ordinary;
+  return { ordinary, ordinaryRoute };
 }
 
-async function browserSmoke(site, root) {
+async function browserSmoke(site, root, ordinaryRoute) {
   const { chromium } = await import('playwright');
   const { expect } = await import('playwright/test');
   const { transform } = await import('esbuild');
@@ -284,7 +362,7 @@ async function browserSmoke(site, root) {
   const output = join(site, 'public');
   const server = createServer(async (request, response) => {
     try {
-      const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
+      const pathname = decodeURIComponent(new URL(request.url, 'http://127.0.0.1').pathname);
       assert.ok(pathname.startsWith(root));
       let path = resolve(output, pathname.slice(root.length));
       assert.ok(path === output || path.startsWith(`${output}${sep}`));
@@ -313,10 +391,13 @@ async function browserSmoke(site, root) {
     browser = await chromium.launch({ channel: 'chromium' });
     const context = await browser.newContext({ serviceWorkers: 'block' });
     let sdkRequests = 0;
+    const local = {};
     await context.route('**/*', async (route) => {
       const url = new URL(route.request().url());
-      if (url.origin === origin) await route.continue();
-      else if (url.hostname === 'webapi.amap.com' && url.pathname === '/maps') {
+      if (url.origin === origin) {
+        local[url.pathname] = (local[url.pathname] ?? 0) + 1;
+        await route.continue();
+      } else if (url.hostname === 'webapi.amap.com' && url.pathname === '/maps') {
         sdkRequests++;
         await route.fulfill({ contentType: 'text/javascript', body: fakeSdk });
       } else if (url.href === imageUrl)
@@ -331,20 +412,58 @@ async function browserSmoke(site, root) {
     });
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
+    await page.goto(`${origin}${ordinaryRoute}`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator(`script[src="${root}hexo-post-map/assets/runtime.js"]`)).toHaveCount(
+      1,
+    );
+    await expect(
+      page.locator(
+        '[data-hpm-detail], [data-hpm-overview], link[href*="hexo-post-map/assets/"], script[src$="post-map.js"], script[src$="overview-map.js"]',
+      ),
+    ).toHaveCount(0);
+    assert.equal(sdkRequests, 0);
+    const replaceMap = (path) =>
+      page.evaluate(async (path) => {
+        const response = await fetch(path);
+        if (!response.ok) throw new Error(`PJAX fetch failed: ${response.status}`);
+        const target = new DOMParser().parseFromString(await response.text(), 'text/html');
+        const root = target.querySelector('[data-hpm-detail], [data-hpm-overview]');
+        if (!root) throw new Error('PJAX map root missing');
+        let host = document.querySelector('#hpm-smoke-host');
+        if (!host) {
+          host = document.createElement('main');
+          host.id = 'hpm-smoke-host';
+          document.body.append(host);
+        }
+        host.replaceChildren(document.importNode(root, true));
+      }, path);
+    await replaceMap(`${root}${articleRoute}`);
+    await expect(page.locator('#hpm-smoke-host [data-hpm-detail]')).toHaveAttribute(
+      'data-hpm-active',
+      'true',
+    );
+    await replaceMap(`${root}map/`);
+    await expect(page.locator('#hpm-smoke-host [data-hpm-overview]')).toHaveAttribute(
+      'data-hpm-active',
+      'true',
+    );
+    for (const asset of ['runtime.js', 'style.css', 'post-map.js', 'overview-map.js'])
+      assert.equal(local[`${root}hexo-post-map/assets/${asset}`], 1, asset);
+    assert.equal(local[`${root}map/posts.json`], 1);
+    assert.equal(sdkRequests, 1);
+    await expect(page).toHaveURL(`${origin}${ordinaryRoute}`);
+
     await page.goto(`${origin}${root}${articleRoute}`, { waitUntil: 'domcontentloaded' });
     const detail = page.locator('[data-hpm-detail]');
     await expect(detail).toBeVisible();
-    await detail.locator('[data-hpm-activate]').click();
     await expect(detail).toHaveAttribute('data-hpm-active', 'true');
-    await detail.getByRole('button', { name: '上海', exact: true }).click();
-    await expect(detail.getByRole('link', { name: '在高德地图中查看' })).toHaveAttribute(
-      'href',
-      /coordinate=gaode/u,
-    );
+    await detail.getByRole('button', { name: '显示地点：上海', exact: true }).click();
+    await expect(detail.getByRole('tooltip')).toBeVisible();
+    await expect(detail.getByRole('tooltip')).toHaveText('上海');
     await page.goto(`${origin}${root}map/`, { waitUntil: 'domcontentloaded' });
-    await page.locator('[data-hpm-activate]').click();
+    await expect(page.locator('[data-hpm-overview]')).toHaveAttribute('data-hpm-active', 'true');
     await page.getByRole('button', { name: '预览文章：魔都' }).click();
-    const preview = page.getByRole('dialog', { name: '文章预览' });
+    const preview = page.getByRole('dialog', { name: '1 篇文章' });
     await expect(preview.locator('img')).toHaveAttribute('src', imageUrl);
     await expect
       .poll(() =>
@@ -356,8 +475,8 @@ async function browserSmoke(site, root) {
       .filter({ has: page.locator('img') })
       .click();
     await expect(page).toHaveURL(`${origin}${root}${articleRoute}`);
-    await expect(page.locator('[data-hpm-detail]')).toBeVisible();
-    assert.ok(sdkRequests >= 2, 'Browser never exercised the packed SDK adapter');
+    await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true');
+    assert.equal(sdkRequests, 4, 'One SDK request per full document, shared by PJAX roots');
   } finally {
     if (browser) await browser.close();
     server.closeAllConnections();
@@ -429,19 +548,20 @@ export async function runRealBlogSmoke(blog = defaultBlog) {
       };
       success(await run('npm', ['run', 'clean'], site, smokeEnv), 'real blog clean');
       success(await run('npm', ['run', 'build'], site, smokeEnv), 'real blog build');
-      const ordinary = await verifyGenerated(site, root);
+      const { ordinary, ordinaryRoute } = await verifyGenerated(site, root);
       success(
-        await run(process.execPath, [filename, '--browser', site, root], repository),
+        await run(process.execPath, [filename, '--browser', site, root, ordinaryRoute], repository),
         'real blog browser',
       );
       console.log(
-        `PASS real Cactus / Hexo ${installed.version} / ${root}: Shanghai detail, overview image navigation, ${ordinary} unmapped pages`,
+        `PASS real Cactus / Hexo ${installed.version} / ${root}: ordinary-to-map PJAX, Shanghai tooltip, overview image navigation, ${ordinary} ordinary pages`,
       );
     }
   });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === filename) {
-  if (process.argv[2] === '--browser') await browserSmoke(process.argv[3], process.argv[4]);
+  if (process.argv[2] === '--browser')
+    await browserSmoke(process.argv[3], process.argv[4], process.argv[5]);
   else await runRealBlogSmoke();
 }

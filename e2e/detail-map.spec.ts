@@ -587,7 +587,12 @@ test('multiple detail maps reuse one SDK load and ordinary pages request none', 
 }) => {
   await page.goto('/blog/posts/plain/');
   expect(network.sdkRequests).toBe(0);
-  await expect(page.locator('[data-hpm-detail], script[src*="hexo-post-map"]')).toHaveCount(0);
+  await expect(page.locator('script[src="/blog/hexo-post-map/assets/runtime.js"]')).toHaveCount(1);
+  await expect(
+    page.locator(
+      '[data-hpm-detail], link[href="/blog/hexo-post-map/assets/style.css"], script[src="/blog/hexo-post-map/assets/post-map.js"], script[src="/blog/hexo-post-map/assets/overview-map.js"]',
+    ),
+  ).toHaveCount(0);
   await page.route('**/posts/single/', async (route) => {
     const response = await route.fetch();
     const html = await response.text();

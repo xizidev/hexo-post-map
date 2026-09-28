@@ -3,7 +3,7 @@ export const fakeSdk = String.raw`
 (() => {
   const maps = [];
   const markerLayout = window.__hpmSdkMarkerLayout ?? [];
-  window.__hpmSdk = { maps, paths: [], markers: [] };
+  window.__hpmSdk = { maps, paths: [], markers: [], destroyedMaps: 0 };
   class Map {
     constructor(container, options) {
       this.container = container; this.options = options; this.zoom = options.zoom;
@@ -28,7 +28,10 @@ export const fakeSdk = String.raw`
     }); }
     setFitView(overlays, immediately, padding) { this.fitted = true; this.fitPadding = padding; }
     setStatus(status) { this.status = status; }
-    destroy() { this.container.removeEventListener('click', this.onCanvasClick); this.container.replaceChildren(); }
+    destroy() {
+      window.__hpmSdk.destroyedMaps++;
+      this.container.removeEventListener('click', this.onCanvasClick); this.container.replaceChildren();
+    }
     getZoom() { return this.zoom; }
     setZoom(zoom) { this.zoom = zoom; this.cluster?.render(); }
     setBounds(bounds, immediately, padding) { this.bounds.push(bounds); (this.boundsPadding ??= []).push(padding); }
