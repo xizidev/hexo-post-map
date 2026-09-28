@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { hydrateDetail, initializeDetailMaps } from '../../src/browser/detail/index';
+import { hydrateDetail as mountDetail, initializeDetailMaps } from '../../src/browser/detail/index';
 import { renderDetailMap } from '../../src/templates/detail';
 import { resolveConfig } from '../../src/config/resolve';
 import { normalizePostMap } from '../../src/domain/normalize';
@@ -30,19 +30,46 @@ function deferred<T>() {
 const flush = async () => {
   for (let i = 0; i < 8; i++) await Promise.resolve();
 };
-function pageTransition(type: 'pagehide' | 'pageshow', persisted: boolean) {
-  const event = new PageTransitionEvent(type, { persisted });
-  // happy-dom aliases PageTransitionEvent to Event and omits the persisted property.
-  Object.defineProperty(event, 'persisted', { value: persisted });
-  window.dispatchEvent(event);
+const activeControllers = new Set<ReturnType<typeof mountDetail>>();
+function hydrateDetail(...args: Parameters<typeof mountDetail>) {
+  const controller = mountDetail(...args);
+  activeControllers.add(controller);
+  return controller;
 }
 afterEach(() => {
-  pageTransition('pagehide', false);
+  activeControllers.forEach((controller) => controller.destroy());
+  activeControllers.clear();
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
 });
 
 describe('detail hydration', () => {
+  it.each(['canvas', 'data'])('detects replacement of the captured %s node', (node) => {
+    const root = fixture();
+    const controller = hydrateDetail(root, vi.fn());
+    expect(controller.isCurrent()).toBe(true);
+    const original = root.querySelector(`[data-hpm-${node}]`)!;
+    original.replaceWith(original.cloneNode(true));
+    expect(controller.isCurrent()).toBe(false);
+    controller.destroy();
+    expect(controller.isCurrent()).toBe(false);
+  });
+
+  it('stays current when a connected root moves, but not when disconnected or destroyed', () => {
+    const root = fixture();
+    const controller = hydrateDetail(root, vi.fn());
+    const container = document.createElement('aside');
+    document.body.append(container);
+    container.append(root);
+    expect(controller.isCurrent()).toBe(true);
+    root.remove();
+    expect(controller.isCurrent()).toBe(false);
+    container.append(root);
+    expect(controller.isCurrent()).toBe(true);
+    controller.destroy();
+    expect(controller.isCurrent()).toBe(false);
+  });
+
   it('embeds the normalized map style in detail configuration', () => {
     const root = fixture();
     const embedded = JSON.parse(root.querySelector('[data-hpm-data]')!.textContent ?? '{}') as {
@@ -52,7 +79,7 @@ describe('detail hydration', () => {
     expect(embedded.amap?.mapStyle).toBe('amap://styles/normal');
   });
 
-  it('keeps one usable map across repeated BFCache restores and destroys it on ordinary pagehide', async () => {
+  it('keeps one usable map across repeated hydration until explicitly destroyed', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const root = fixture();
     const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
@@ -64,10 +91,6 @@ describe('detail hydration', () => {
     await flush();
     expect(canvas.tabIndex).toBe(0);
     for (let visit = 0; visit < 2; visit++) {
-      pageTransition('pagehide', true);
-      expect(canvas.tabIndex).toBe(0);
-      pageTransition('pageshow', true);
-      pageTransition('pageshow', true);
       await flush();
       expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
       expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
@@ -79,15 +102,14 @@ describe('detail hydration', () => {
     expect(load).toHaveBeenCalledTimes(1);
     expect(mountDetail).toHaveBeenCalledTimes(1);
     expect(handle.destroy).not.toHaveBeenCalled();
-    pageTransition('pagehide', false);
+    controller.destroy();
     expect(canvas.tabIndex).toBe(-1);
-    pageTransition('pageshow', false);
     expect(handle.destroy).toHaveBeenCalledTimes(1);
     expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
     expect(load).toHaveBeenCalledTimes(1);
   });
-  it('allows a pending map to finish after BFCache restore without aborting its owner', async () => {
+  it('allows a pending map to finish without aborting its owner', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const root = fixture();
     const pending = deferred<MapHandle>();
@@ -100,8 +122,6 @@ describe('detail hydration', () => {
       mountOverview: vi.fn(),
     }));
     await flush();
-    pageTransition('pagehide', true);
-    pageTransition('pageshow', true);
     expect(signal?.aborted).toBe(false);
     expect(root.querySelector<HTMLElement>('[data-hpm-canvas]')!.tabIndex).toBe(-1);
     const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
@@ -113,7 +133,7 @@ describe('detail hydration', () => {
     expect(handle.destroy).not.toHaveBeenCalled();
     expect(root.querySelector<HTMLElement>('[data-hpm-canvas]')!.tabIndex).toBe(0);
   });
-  it('releases failed configuration registration on pagehide before explicit rebuild', async () => {
+  it('releases failed configuration registration on destroy before explicit rebuild', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const root = fixture();
     const data = root.querySelector('[data-hpm-data]')!;
@@ -124,7 +144,7 @@ describe('detail hydration', () => {
       mountOverview: vi.fn(),
     }));
     const failed = hydrateDetail(root, load);
-    window.dispatchEvent(new Event('pagehide'));
+    failed.destroy();
     data.textContent = valid;
     const rebuilt = hydrateDetail(root, load);
     expect(rebuilt).not.toBe(failed);
@@ -151,40 +171,36 @@ describe('detail hydration', () => {
     first.destroy();
   });
 
-  it.each(['destroy', 'pagehide'])(
-    'releases the section registration after %s so explicit initialization can rebuild',
-    async (reason) => {
-      vi.stubGlobal('IntersectionObserver', undefined);
-      const root = fixture();
-      const handles = Array.from({ length: 2 }, () => ({
-        destroy: vi.fn(),
-        setInteractive: vi.fn(),
-      }));
-      const mountDetail = vi
-        .fn<MapProvider['mountDetail']>()
-        .mockResolvedValueOnce(handles[0]!)
-        .mockResolvedValueOnce(handles[1]!);
-      const load = async () => ({ mountDetail, mountOverview: vi.fn() });
-      const first = hydrateDetail(root, load);
-      await flush();
-      const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]')!;
-      expect(canvas.tabIndex).toBe(0);
-      if (reason === 'destroy') first.destroy();
-      else window.dispatchEvent(new Event('pagehide'));
-      expect(canvas.tabIndex).toBe(-1);
-      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
-      const second = hydrateDetail(root, load);
-      expect(second).not.toBe(first);
-      await flush();
-      expect(mountDetail).toHaveBeenCalledTimes(2);
-      expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
-      expect(handles[1]!.setInteractive).toHaveBeenLastCalledWith(true);
-      expect(handles[0]!.destroy).toHaveBeenCalledTimes(1);
-      expect(canvas.tabIndex).toBe(0);
-      second.destroy();
-      expect(canvas.tabIndex).toBe(-1);
-    },
-  );
+  it('releases the section registration after destroy so explicit initialization can rebuild', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = fixture();
+    const handles = Array.from({ length: 2 }, () => ({
+      destroy: vi.fn(),
+      setInteractive: vi.fn(),
+    }));
+    const mountDetail = vi
+      .fn<MapProvider['mountDetail']>()
+      .mockResolvedValueOnce(handles[0]!)
+      .mockResolvedValueOnce(handles[1]!);
+    const load = async () => ({ mountDetail, mountOverview: vi.fn() });
+    const first = hydrateDetail(root, load);
+    await flush();
+    const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]')!;
+    expect(canvas.tabIndex).toBe(0);
+    first.destroy();
+    expect(canvas.tabIndex).toBe(-1);
+    expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
+    const second = hydrateDetail(root, load);
+    expect(second).not.toBe(first);
+    await flush();
+    expect(mountDetail).toHaveBeenCalledTimes(2);
+    expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
+    expect(handles[1]!.setInteractive).toHaveBeenLastCalledWith(true);
+    expect(handles[0]!.destroy).toHaveBeenCalledTimes(1);
+    expect(canvas.tabIndex).toBe(0);
+    second.destroy();
+    expect(canvas.tabIndex).toBe(-1);
+  });
   it('waits until intersection within 300px and keeps SSR links until complete', async () => {
     let intersect!: IntersectionObserverCallback;
     const disconnect = vi.fn();
@@ -287,7 +303,7 @@ describe('detail hydration', () => {
     },
   );
 
-  it('aborts pending mounts on pagehide and destroys late handles without hiding fallback', async () => {
+  it('aborts pending mounts on destroy and destroys late handles without hiding fallback', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const root = fixture();
     const pending = deferred<MapHandle>();
@@ -300,7 +316,7 @@ describe('detail hydration', () => {
       mountOverview: vi.fn(),
     }));
     await flush();
-    window.dispatchEvent(new Event('pagehide'));
+    controller.destroy();
     expect(signal?.aborted).toBe(true);
     const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
     pending.resolve(handle);
