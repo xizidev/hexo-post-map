@@ -294,9 +294,20 @@ async function verifyGenerated(site, root) {
     'placeholder.svg',
   ])
     assert.ok((await readFile(join(output, 'hexo-post-map/assets', asset))).length > 0);
-  let ordinary = 0;
+  // configureCopy leaves only Shanghai mapped. Every other archive route is
+  // independently ordinary, even if a regression accidentally inserts a map root.
+  const expectedFeatures = new Map([
+    [`${articleRoute}index.html`, 'detail'],
+    ['map/index.html', 'overview'],
+  ]);
+  const htmlPaths = await filesWithExtension(output, '.html');
+  const ordinaryRoutes = new Set(
+    htmlPaths
+      .map((path) => relative(output, path).split(sep).join('/'))
+      .filter((route) => route.startsWith('archives/') && !expectedFeatures.has(route)),
+  );
   let ordinaryRoute;
-  for (const path of await filesWithExtension(output, '.html')) {
+  for (const path of htmlPaths) {
     const window = new Window({
       settings: {
         disableJavaScriptEvaluation: true,
@@ -315,28 +326,29 @@ async function verifyGenerated(site, root) {
         [`${root}hexo-post-map/assets/runtime.js`],
         `Runtime/feature scripts: ${route}`,
       );
-      const mapRoot = document.querySelector('[data-hpm-detail], [data-hpm-overview]');
+      const feature = expectedFeatures.get(route);
       assert.equal(
         document.querySelectorAll(`link[href="${root}hexo-post-map/assets/style.css"]`).length,
-        mapRoot ? 1 : 0,
+        feature ? 1 : 0,
         route,
       );
-      if (mapRoot) {
+      if (feature) {
+        const mapRoots = document.querySelectorAll(`[data-hpm-${feature}]`);
+        assert.equal(mapRoots.length, 1, `Expected ${feature} map: ${route}`);
         assert.ok(
-          mapRoot.querySelector('[data-hpm-fallback] a'),
+          mapRoots[0].querySelector('[data-hpm-fallback] a'),
           `Static fallback missing: ${route}`,
         );
       } else {
         assert.equal(
           document.querySelector(
-            '[data-hpm-detail], [data-hpm-overview], .hpm-detail-marker, .hpm-image-marker, .hpm-cluster',
+            '[data-hpm-detail], [data-hpm-overview], .hpm-detail-marker, .hpm-image-marker, .hpm-cluster, .hpm-panel',
           ),
           null,
           route,
         );
         assert.equal(document.querySelector('link[href*="hexo-post-map/assets/"]'), null, route);
-        if (route.startsWith('archives/')) {
-          ordinary++;
+        if (ordinaryRoutes.has(route)) {
           ordinaryRoute ??= `${root}${route.replace(/index\.html$/u, '')}`;
         }
       }
@@ -344,8 +356,8 @@ async function verifyGenerated(site, root) {
       await window.happyDOM.close();
     }
   }
-  assert.ok(ordinary > 0, 'Expected ordinary articles in the real blog');
-  return { ordinary, ordinaryRoute };
+  assert.ok(ordinaryRoutes.size > 0, 'Expected ordinary articles in the real blog');
+  return { ordinary: ordinaryRoutes.size, ordinaryRoute };
 }
 
 async function browserSmoke(site, root, ordinaryRoute) {

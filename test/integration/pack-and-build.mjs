@@ -228,6 +228,7 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
               {
                 HPM_INTEGRATION_SITE: publicDirectory,
                 HPM_INTEGRATION_ROOT: root,
+                HPM_INTEGRATION_THEME: theme,
               },
             ),
             'generated output',

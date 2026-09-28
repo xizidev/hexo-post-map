@@ -1,11 +1,15 @@
 // @vitest-environment happy-dom
 import { Window } from 'happy-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createFeatureResourceLoader } from '../../src/browser/runtime/resources';
 import type { FeatureId } from '../../src/browser/runtime/types';
 
 function resourceHarness(
-  options: { existingStyle?: 'loaded'; existingDetailScript?: boolean; assetBase?: string } = {},
+  options: {
+    existingStyle?: 'loaded' | 'failed';
+    existingDetailScript?: boolean;
+    assetBase?: string;
+  } = {},
 ) {
   const window = new Window({ url: 'https://example.test/blog/post/' });
   const document = window.document as unknown as Document;
@@ -30,12 +34,18 @@ function resourceHarness(
     },
   });
   const assetBase = new URL(options.assetBase ?? 'https://example.test/blog/hexo-post-map/assets/');
+  const applyStylesheet = () => {
+    const style = document.createElement('style');
+    style.textContent = ':root { --hpm-style-ready: 1; }';
+    document.head.append(style);
+  };
   if (options.existingStyle) {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = 'https://example.test/blog/hexo-post-map/assets/style.css';
-    Object.defineProperty(link, 'sheet', { value: {} as CSSStyleSheet });
+    Object.defineProperty(link, 'sheet', { value: new window.CSSStyleSheet() });
     document.head.append(link);
+    if (options.existingStyle === 'loaded') applyStylesheet();
   }
   if (options.existingDetailScript) {
     const script = document.createElement('script');
@@ -53,11 +63,13 @@ function resourceHarness(
     document,
     hydrators,
     loader,
+    applyStylesheet,
     links: () => createdLinks,
     scripts: () => createdScripts,
-    dispatch: (element: Element, type: 'load' | 'error') => {
+    dispatch: (element: Element, type: 'load' | 'error', applied = true) => {
       syntheticDispatch = true;
       try {
+        if (element.tagName === 'LINK' && type === 'load' && applied) applyStylesheet();
         element.dispatchEvent(new window.Event(type) as unknown as Event);
       } finally {
         syntheticDispatch = false;
@@ -91,6 +103,63 @@ describe('feature resource loader', () => {
     expect(h.scripts()).toHaveLength(1);
   });
 
+  it('settles a static stylesheet whose error passed before startup without trusting its sheet', async () => {
+    const h = resourceHarness({ existingStyle: 'failed', existingDetailScript: true });
+    expect(h.links()[0]!.sheet).not.toBeNull();
+    const pending = h.loader.ensure('detail');
+    h.window.dispatchEvent(new h.window.Event('load'));
+    await expect(pending).resolves.toBe(false);
+    expect(h.loader.isReady('detail')).toBe(false);
+    await expect(h.loader.ensure('detail')).resolves.toBe(false);
+    expect(h.links()).toHaveLength(1);
+
+    const retry = h.loader.ensure('detail', true);
+    expect(h.links()).toHaveLength(2);
+    expect(h.links()[0]!.isConnected).toBe(false);
+    expect(h.scripts()).toHaveLength(1);
+    h.dispatch(h.links()[1]!, 'load');
+    await expect(retry).resolves.toBe(true);
+  });
+
+  it('settles an unknown existing stylesheet even when the document load event already passed', async () => {
+    vi.useFakeTimers();
+    const h = resourceHarness({ existingStyle: 'failed', existingDetailScript: true });
+    Object.defineProperty(h.document, 'readyState', { value: 'complete' });
+    try {
+      const pending = h.loader.ensure('detail');
+      await vi.runAllTimersAsync();
+      await expect(pending).resolves.toBe(false);
+      expect(h.loader.isReady('detail')).toBe(false);
+      expect(h.links()).toHaveLength(1);
+    } finally {
+      h.loader.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  it('waits for a pending existing stylesheet after document load and adopts its applied CSS', async () => {
+    const h = resourceHarness({ existingDetailScript: true });
+    Object.defineProperty(h.document, 'readyState', { value: 'complete' });
+    const link = h.document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://example.test/blog/hexo-post-map/assets/style.css';
+    h.document.head.append(link);
+    const pending = h.loader.ensure('detail');
+    await Promise.resolve();
+    expect(h.loader.isReady('detail')).toBe(false);
+    h.dispatch(link, 'load');
+    await expect(pending).resolves.toBe(true);
+    expect(h.links()).toHaveLength(1);
+  });
+
+  it('does not accept a stylesheet load event without the applied CSS signal', async () => {
+    const h = resourceHarness({ existingDetailScript: true });
+    const pending = h.loader.ensure('detail');
+    h.dispatch(h.links()[0]!, 'load', false);
+    await expect(pending).resolves.toBe(false);
+    expect(h.loader.isReady('detail')).toBe(false);
+  });
+
   it('prefers a loaded canonical stylesheet after an unfinished duplicate', async () => {
     const h = resourceHarness({ existingDetailScript: true });
     const first = h.document.createElement('link');
@@ -100,8 +169,9 @@ describe('feature resource loader', () => {
     const loaded = h.document.createElement('link');
     loaded.rel = 'stylesheet';
     loaded.href = 'https://example.test/blog/hexo-post-map/assets/style.css';
-    Object.defineProperty(loaded, 'sheet', { value: {} as CSSStyleSheet });
+    Object.defineProperty(loaded, 'sheet', { value: new h.window.CSSStyleSheet() });
     h.document.head.append(loaded);
+    h.applyStylesheet();
     expect(first.sheet).toBeNull();
     expect(loaded.sheet).not.toBeNull();
 

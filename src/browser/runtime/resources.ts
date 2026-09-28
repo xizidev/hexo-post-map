@@ -29,11 +29,19 @@ export function createFeatureResourceLoader(options: {
   };
   let stopped = false;
 
+  function styleApplied(): boolean {
+    return (
+      document.defaultView
+        ?.getComputedStyle(document.documentElement)
+        .getPropertyValue('--hpm-style-ready')
+        .trim() === '1'
+    );
+  }
+
   function matchingStyle(): HTMLLinkElement | undefined {
-    const canonical = Array.from(
-      document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"]'),
-    ).filter((link) => !link.disabled && link.href === styleUrl);
-    return canonical.find((link) => link.sheet !== null) ?? canonical[0];
+    return Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel~="stylesheet"]')).find(
+      (link) => !link.disabled && link.href === styleUrl,
+    );
   }
 
   function matchingScript(feature: FeatureId): HTMLScriptElement | undefined {
@@ -66,7 +74,7 @@ export function createFeatureResourceLoader(options: {
 
     const existing = feature === undefined ? matchingStyle() : matchingScript(feature);
     if (
-      (feature === undefined && existing && (existing as HTMLLinkElement).sheet !== null) ||
+      (feature === undefined && existing && styleApplied()) ||
       (feature !== undefined && hasHydrator(feature))
     ) {
       state.status = 'ready';
@@ -97,13 +105,24 @@ export function createFeatureResourceLoader(options: {
         state.status = ready ? 'ready' : 'failed';
         resolve(ready);
       };
-      const onLoad = () => state.settle?.(feature === undefined || hasHydrator(feature));
+      const onLoad = () =>
+        state.settle?.(feature === undefined ? styleApplied() : hasHydrator(feature));
       const onError = () => state.settle?.(false);
       element.addEventListener('load', onLoad, { once: true });
       element.addEventListener('error', onError, { once: true });
+      let adoptionDeadline: ReturnType<typeof setTimeout> | undefined;
+      if (existing && feature === undefined) {
+        // A failed static link can expose a sheet after its error event has passed.
+        // Window load settles that initial attempt; the deadline also covers late
+        // bootstrap after window load while allowing a still-pending link to finish.
+        document.defaultView?.addEventListener('load', onLoad, { once: true });
+        adoptionDeadline = setTimeout(onLoad, 5000);
+      }
       state.cleanup = () => {
         element.removeEventListener('load', onLoad);
         element.removeEventListener('error', onError);
+        document.defaultView?.removeEventListener('load', onLoad);
+        clearTimeout(adoptionDeadline);
       };
     });
     if (!existing) {

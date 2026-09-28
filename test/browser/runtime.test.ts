@@ -511,7 +511,9 @@ describe('browser runtime', () => {
     const style = document.createElement('link');
     style.rel = 'stylesheet';
     style.href = 'https://example.test/blog/hexo-post-map/assets/style.css';
-    Object.defineProperty(style, 'sheet', { value: {} });
+    const sheet = new window.CSSStyleSheet();
+    sheet.replaceSync(':root { --hpm-style-ready: 1; }');
+    Object.defineProperty(style, 'sheet', { value: sheet });
     document.head.append(style);
     const script = document.createElement('script');
     script.src = 'https://example.test/blog/hexo-post-map/assets/runtime.js?v=4#hash';

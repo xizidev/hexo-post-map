@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 const directory = process.env.HPM_INTEGRATION_SITE;
 const root = process.env.HPM_INTEGRATION_ROOT ?? '/';
+const theme = process.env.HPM_INTEGRATION_THEME ?? 'cactus-minimal';
 const html = async (path: string) => {
   const window = new Window({
     settings: {
@@ -74,8 +75,23 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
   it('emits one root-aware runtime on every HTML page and only static map styles', async () => {
     const paths = await htmlPaths();
     expect(paths.length).toBeGreaterThan(5);
+    // These routes come from the committed fixture inputs, not generated map markup.
+    const expectedRoots = new Map([
+      ['posts/single/index.html', { detail: 1, overview: 0 }],
+      ['posts/multi/index.html', { detail: 1, overview: 0 }],
+      ['posts/route/index.html', { detail: 1, overview: 0 }],
+      ['posts/overlap/index.html', { detail: 1, overview: 0 }],
+      ['map/index.html', { detail: 0, overview: 1 }],
+      // Landscape/NexT render the four mapped posts; Cactus lists titles only.
+      ['index.html', { detail: theme === 'cactus-minimal' ? 0 : 4, overview: 0 }],
+    ]);
     for (const path of paths) {
       const document = await html(path);
+      const expected = expectedRoots.get(path.replaceAll('\\', '/')) ?? {
+        detail: 0,
+        overview: 0,
+      };
+      const mapped = expected.detail + expected.overview > 0;
       expect(
         [...document.querySelectorAll('script[src]')]
           .map((script) => script.getAttribute('src'))
@@ -85,7 +101,22 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
       expect(
         document.querySelectorAll(`link[href="${root}hexo-post-map/assets/style.css"]`),
         path,
-      ).toHaveLength(document.querySelector('[data-hpm-detail], [data-hpm-overview]') ? 1 : 0);
+      ).toHaveLength(mapped ? 1 : 0);
+      expect(document.querySelectorAll('[data-hpm-detail]'), path).toHaveLength(expected.detail);
+      expect(document.querySelectorAll('[data-hpm-overview]'), path).toHaveLength(
+        expected.overview,
+      );
+      if (!mapped) {
+        expect(
+          document.querySelectorAll(
+            '[data-hpm-detail], [data-hpm-overview], .hpm-detail-marker, .hpm-image-marker, .hpm-cluster, .hpm-panel',
+          ),
+          path,
+        ).toHaveLength(0);
+        expect(document.querySelectorAll('link[href*="hexo-post-map/assets/"]'), path).toHaveLength(
+          0,
+        );
+      }
     }
     for (const slug of ['single', 'multi', 'route', 'overlap']) {
       const document = await html(`posts/${slug}`);

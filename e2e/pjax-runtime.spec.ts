@@ -66,6 +66,91 @@ test('manual refresh initializes an inserted root without MutationObserver', asy
   await expect(page.locator('.hpm-detail-marker')).toHaveCount(1);
 });
 
+test('initial static stylesheet success is adopted without another request', async ({
+  page,
+  network,
+}) => {
+  await page.goto('/blog/posts/single/');
+  await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true');
+  await expect(page.locator('[data-hpm-canvas]')).toHaveCSS('height', '220px');
+  expect(network.local['/blog/hexo-post-map/assets/style.css']).toBe(1);
+  expect(network.local['/blog/hexo-post-map/assets/post-map.js']).toBe(1);
+});
+
+for (const failure of ['404', 'network'] as const) {
+  test(`initial static stylesheet ${failure} before deferred runtime retries once on scoped refresh`, async ({
+    page,
+    network,
+  }) => {
+    const stylePath = '/blog/hexo-post-map/assets/style.css';
+    let repaired = false;
+    let deferredRuntime: Route | undefined;
+    await page.addInitScript(() => {
+      document.addEventListener(
+        'error',
+        (event) => {
+          const link = event.target;
+          if (link instanceof HTMLLinkElement && link.href.endsWith('/assets/style.css')) {
+            Reflect.set(window, '__hpmInitialStyleFailure', {
+              sheetPresent: link.sheet !== null,
+              runtimePresent: Reflect.has(window, 'HexoPostMap'),
+            });
+          }
+        },
+        true,
+      );
+    });
+    await page.route(`**${stylePath}`, async (route) => {
+      if (repaired) await route.continue();
+      else if (failure === '404')
+        await route.fulfill({ status: 404, contentType: 'text/css', body: '' });
+      else await route.abort('failed');
+    });
+    await page.route('**/blog/hexo-post-map/assets/runtime.js', (route) => {
+      deferredRuntime = route;
+    });
+    try {
+      await page.goto('/blog/posts/single/', { waitUntil: 'commit' });
+      await expect.poll(() => Boolean(deferredRuntime)).toBe(true);
+      await expect
+        .poll(() => page.evaluate(() => Reflect.get(window, '__hpmInitialStyleFailure')))
+        .toEqual({ sheetPresent: true, runtimePresent: false });
+      const canvas = page.locator('[data-hpm-canvas]');
+      await expect(canvas).not.toHaveCSS('height', '220px');
+      await deferredRuntime!.continue();
+      deferredRuntime = undefined;
+      await page.waitForLoadState('load');
+      const root = page.locator('[data-hpm-detail]');
+      await expect(root.locator('[data-hpm-status]')).toHaveText(
+        '地图暂时无法加载，请使用下方地点链接。',
+      );
+      await expect(root).not.toHaveAttribute('data-hpm-active', 'true');
+      await expect(root.locator('[data-hpm-fallback]')).toBeVisible();
+      expect(network.local[stylePath]).toBe(1);
+      expect(network.sdkRequests).toBe(0);
+
+      repaired = true;
+      await root.evaluate((root) => {
+        const api = Reflect.get(window, 'HexoPostMap');
+        api.refresh(root);
+        api.refresh(root);
+      });
+      await expect(root).toHaveAttribute('data-hpm-active', 'true');
+      await expect(canvas).toHaveCSS('height', '220px');
+      await expect(root.locator('.hpm-detail-marker')).toHaveCSS('width', '44px');
+      await root.evaluate((root) => Reflect.get(window, 'HexoPostMap').refresh(root));
+      expect(network.local[stylePath]).toBe(2);
+      expect(network.local['/blog/hexo-post-map/assets/post-map.js']).toBe(1);
+      await expect(page.locator(`link[href$="${stylePath}"]`)).toHaveCount(1);
+      expect(network.sdkRequests).toBe(1);
+    } finally {
+      if (deferredRuntime) await deferredRuntime.abort();
+      await page.unroute(`**${stylePath}`);
+      await page.unroute('**/blog/hexo-post-map/assets/runtime.js');
+    }
+  });
+}
+
 test('late posts.json cannot revive an overview root removed during navigation', async ({
   page,
   network,
