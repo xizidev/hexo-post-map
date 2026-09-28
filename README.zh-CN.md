@@ -219,7 +219,23 @@ map:
 
 `cluster.grid_size` 必须是有限正数，单位为像素；`cluster.max_zoom` 范围为 2–20（含边界），默认 18。多篇文章可以填写完全相同的坐标。
 
-全国地图默认使用主题的 `page` 布局；没有该布局时降级为独立页面，也可以通过 `overview.layout: standalone` 主动选择独立页面。兼容目标是正常渲染 `post.content` 的传统主题；SPA/PJAX 主题可能需要单独适配导航生命周期，插件不会自动重新初始化。兼容测试覆盖 Landscape、NexT 和精简 Cactus 风格布局，不等于所有主题改版均已验证。
+全国地图默认使用主题的 `page` 布局；没有该布局时降级为独立页面，也可以通过 `overview.layout: standalone` 主动选择独立页面。兼容目标是正常渲染 `post.content` 的传统主题。兼容测试覆盖 Landscape、NexT 和精简 Cactus 风格布局，不等于所有主题改版均已验证。
+
+### PJAX 与生命周期接入
+
+启用插件后，每个 HTML 页面都会加载不含地图服务商代码的 `runtime.js`。普通页面不会加载地图界面资源或高德资源。首次打开的地图页面还会包含静态 CSS，保证禁用 JavaScript 时的降级内容可用；详情、全国地图的功能脚本（IIFE）和高德仍按需加载。常规 PJAX 在普通 DOM（light DOM）中插入、移除或替换地图内容时，插件会自动处理初始化和清理。
+
+需要手动接入时，在运行时已加载且内容插入后调用以下方法，`container` 为已插入的容器元素：
+
+```js
+if (window.HexoPostMap?.apiVersion === 1) {
+  window.HexoPostMap.refresh(container);
+}
+```
+
+移除容器前可以调用 `window.HexoPostMap.destroy(container)`，但常规 PJAX 不要求这一步。两个方法都默认作用于 `document`，也接受属于当前文档的元素或文档片段；无效作用域会抛出 `TypeError`。方法会立即返回，不等待高德加载或初始化完成。关闭的或未被观察的 Shadow Root、其他文档、被禁止执行的运行时脚本，以及非标准页面切换方式，不在自动兼容保证内。
+
+本地功能脚本或样式加载失败时，修复资源问题后可调用 `refresh(container)` 重试；高德 SDK 加载超时仍需完整刷新页面。完整接入边界和生命周期说明见[兼容性文档](https://github.com/xizidev/hexo-post-map/blob/main/docs/compatibility.md)。
 
 ### 主题定制
 
@@ -258,4 +274,4 @@ map:
 
 [贡献指南](https://github.com/xizidev/hexo-post-map/blob/main/CONTRIBUTING.md)包含构建、npm 打包安装兼容测试、确定性浏览器测试及可选高德实网 smoke 的方法。普通问题使用 [GitHub Issues](https://github.com/xizidev/hexo-post-map/issues)，安全问题按 [SECURITY](https://github.com/xizidev/hexo-post-map/blob/main/SECURITY.md) 私下报告。
 
-Front Matter 和站点配置是公开契约；内部模块与地图适配器不是公开扩展 API。插件使用 MIT 许可证，高德服务另有自己的条款与使用要求。
+Front Matter、站点配置、文档列出的主题变量，以及带版本号的 `window.HexoPostMap` 生命周期 API 是公开契约；内部模块与地图适配器不是公开扩展 API。插件使用 MIT 许可证，高德服务另有自己的条款与使用要求。

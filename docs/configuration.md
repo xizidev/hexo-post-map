@@ -78,7 +78,9 @@ The overview uses one representative location per published mapped post. A detai
 
 The route belongs to the site root: `root: /blog/` with `overview.path: travel/` produces `/blog/travel/` and `/blog/travel/posts.json`. Add that URL to your theme's menu yourself. Do not create a separate source page at the same route; use an unused `overview.path` if it would collide. Rebuild with `hexo clean` after changing routes to remove stale generated files.
 
-Assets are emitted under `hexo-post-map/assets/` relative to the site root. Asset tags are injected only into rendered HTML containing a plugin map marker; an index or archive showing full mapped post content can therefore also contain a card and its assets.
+Assets are emitted under `hexo-post-map/assets/` relative to the site root: `runtime.js`, `post-map.js`, `overview-map.js`, `style.css`, and `placeholder.svg`. Enabled sites inject the provider-free runtime into every rendered HTML page. Only HTML initially containing a plugin map marker also includes the static stylesheet, preserving the no-JavaScript fallback. An index or archive showing full mapped post content can therefore also contain a card and static CSS.
+
+Detail and overview feature scripts are loaded dynamically when needed; AMap remains lazy. Ordinary pages load no map UI or provider resources until map content is inserted. The runtime handles conventional light-DOM PJAX replacement automatically and loads missing feature scripts/styles using the runtime's asset base, respecting roots such as `/blog/`. See [compatibility](compatibility.md) for the versioned manual lifecycle API and retry boundaries.
 
 ## Exact diagnostic examples
 
