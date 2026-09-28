@@ -2,7 +2,7 @@
 
 Date: 2026-09-24
 
-Status: revised after no-JavaScript fallback review; pending written-spec review
+Status: approved 2026-09-28
 
 Target release: `hexo-post-map` v0.4.0
 
