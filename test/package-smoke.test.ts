@@ -1,7 +1,18 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
+import {
+  appendFile,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { runInNewContext } from 'node:vm';
@@ -37,6 +48,44 @@ describe('registerPlugin', () => {
 });
 
 describe('package build', () => {
+  it('rejects forbidden runtime inputs when invoked outside the project directory', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'hpm-build-guard-'));
+    const script = join(fixture, 'scripts/build.mjs');
+    const outsideCwd = dirname(fixture);
+    try {
+      await cp(resolve('src'), join(fixture, 'src'), { recursive: true });
+      await mkdir(join(fixture, 'scripts'));
+      await cp(resolve('scripts/build.mjs'), script);
+      await symlink(
+        resolve('node_modules'),
+        join(fixture, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+
+      await execFileAsync(process.execPath, [script], { cwd: outsideCwd });
+      expect((await stat(join(fixture, 'dist/assets/runtime.js'))).size).toBeGreaterThan(0);
+
+      await writeFile(
+        join(fixture, 'src/browser/providers/build-guard-fixture.ts'),
+        "console.info('forbidden runtime dependency');\n",
+      );
+      await appendFile(
+        join(fixture, 'src/browser/runtime/index.ts'),
+        "\nimport '../providers/build-guard-fixture';\n",
+      );
+      const failure = await execFileAsync(process.execPath, [script], { cwd: outsideCwd }).then(
+        () => null,
+        (error: { stderr: string }) => error,
+      );
+      expect(failure).not.toBeNull();
+      expect(failure?.stderr).toContain(
+        'Runtime entry imports forbidden source: src/browser/providers/build-guard-fixture.ts',
+      );
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('produces the CommonJS entry and readable routes for every browser asset', async () => {
     await execFileAsync(process.execPath, ['scripts/build.mjs']);
 

@@ -50,6 +50,7 @@ for (const entry of browserEntries) {
   }
 
   const result = await build({
+    absWorkingDir: projectRoot,
     bundle: true,
     entryPoints: [source],
     format: 'iife',
