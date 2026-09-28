@@ -255,6 +255,58 @@ describe('browser runtime', () => {
     expect(duplicate).not.toHaveBeenCalled();
   });
 
+  it('cancels first pending hydration on destroy and allows a later explicit refresh', async () => {
+    const h = runtimeHarness({ ready: false, mutationObserver: null });
+    let resolve!: (ready: boolean) => void;
+    h.resources.ensure.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const root = h.detailRoot();
+    h.document.body.append(root);
+    h.api.refresh(root);
+    expect(h.controllers).toHaveLength(0);
+    h.api.destroy(root);
+    expect(h.resources.ensure).toHaveBeenCalledTimes(1);
+    h.setReady(true);
+    resolve(true);
+    await h.flush();
+    expect(h.mount).not.toHaveBeenCalled();
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe('');
+    h.api.refresh(root);
+    expect(h.mount).toHaveBeenCalledTimes(1);
+    expect(h.mount.mock.calls[0]![0]).toBe(root);
+  });
+
+  it('cancels only pending roots inside the destroyed scope without retrying resources', async () => {
+    const h = runtimeHarness({ ready: false, mutationObserver: null });
+    let resolve!: (ready: boolean) => void;
+    h.resources.ensure.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const scope = h.document.createElement('article');
+    const inside = h.detailRoot();
+    const outside = h.detailRoot();
+    scope.append(inside);
+    h.document.body.append(scope, outside);
+    h.api.refresh();
+    h.api.destroy(scope);
+    expect(h.resources.ensure).toHaveBeenCalledTimes(1);
+    h.setReady(true);
+    resolve(true);
+    await h.flush();
+    expect(h.mount).toHaveBeenCalledTimes(1);
+    expect(h.mount.mock.calls[0]![0]).toBe(outside);
+    h.api.refresh(inside);
+    expect(h.mount).toHaveBeenCalledTimes(2);
+    expect(h.mount.mock.calls[1]![0]).toBe(inside);
+  });
+
   it('destroys removed roots and mounts replacements', async () => {
     const h = runtimeHarness();
     const root = h.detailRoot();

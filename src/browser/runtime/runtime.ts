@@ -33,6 +33,7 @@ export function createBrowserRuntime(options: BrowserRuntimeOptions): BrowserRun
   const realm = document.defaultView!;
   const hydrators = new Map<FeatureId, RuntimeHydrator>();
   const generations = new WeakMap<HTMLElement, number>();
+  const pendingRoots = new Set<ReadonlySet<HTMLElement>>();
   const active = new Map<
     HTMLElement,
     { hydrator: RuntimeHydrator; controller: RuntimeController }
@@ -65,10 +66,10 @@ export function createBrowserRuntime(options: BrowserRuntimeOptions): BrowserRun
   }
 
   function destroy(root: HTMLElement): void {
+    generations.set(root, (generations.get(root) ?? 0) + 1);
     const record = active.get(root);
     if (!record) return;
     active.delete(root);
-    generations.set(root, (generations.get(root) ?? 0) + 1);
     try {
       record.controller.destroy();
     } catch {
@@ -141,6 +142,7 @@ export function createBrowserRuntime(options: BrowserRuntimeOptions): BrowserRun
             .filter(({ root, generation }) => (generations.get(root) ?? 0) === generation)
             .map(({ root }) => root);
         const pending = resources.ensure(feature, retry);
+        pendingRoots.add(roots);
         let mountedSynchronously = false;
         // Install the rejection handler before consulting readiness, which may throw.
         void pending
@@ -155,6 +157,9 @@ export function createBrowserRuntime(options: BrowserRuntimeOptions): BrowserRun
               warn();
               failed(feature, currentRoots());
             }
+          })
+          .finally(() => {
+            pendingRoots.delete(roots);
           });
         if (resources.isReady(feature)) {
           mountedSynchronously = true;
@@ -210,6 +215,7 @@ export function createBrowserRuntime(options: BrowserRuntimeOptions): BrowserRun
     stopped = true;
     observer?.disconnect();
     pendingScopes.clear();
+    pendingRoots.clear();
     document.removeEventListener('DOMContentLoaded', onReady);
     page.removeEventListener('pagehide', onPageHide);
     page.removeEventListener('pageshow', onPageShow);
@@ -232,7 +238,11 @@ export function createBrowserRuntime(options: BrowserRuntimeOptions): BrowserRun
     },
     destroy(scope?: Scope) {
       const target = validateScope(scope);
-      for (const root of active.keys()) {
+      const roots = new Set(active.keys());
+      for (const pending of pendingRoots) {
+        for (const root of pending) roots.add(root);
+      }
+      for (const root of roots) {
         if (target === document || target === root || target.contains(root)) destroy(root);
       }
     },
