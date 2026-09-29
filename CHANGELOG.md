@@ -2,6 +2,25 @@
 
 Changes are recorded through release pull requests.
 
+## [0.4.0](https://github.com/xizidev/hexo-post-map/compare/v0.3.0...v0.4.0) (2026-09-29)
+
+
+### Features
+
+* add lazy browser feature loader ([b1d3961](https://github.com/xizidev/hexo-post-map/commit/b1d3961e67b5a137d49c839c62849121b0a72bac))
+* add PJAX map lifecycle runtime ([29590f6](https://github.com/xizidev/hexo-post-map/commit/29590f647a7ce274dedaab5f576480b1c486327b))
+* publish lightweight map runtime ([95e38c5](https://github.com/xizidev/hexo-post-map/commit/95e38c5b1506ea2397d05a04e54fbdcab8ab9e63))
+* register maps with browser runtime ([e907c68](https://github.com/xizidev/hexo-post-map/commit/e907c68a2718d190605456c03180702594005386))
+* support PJAX map lifecycle runtime ([624a48f](https://github.com/xizidev/hexo-post-map/commit/624a48fee338df590648befc1d20717094449747))
+
+
+### Bug Fixes
+
+* adopt loaded duplicate browser stylesheet ([8813402](https://github.com/xizidev/hexo-post-map/commit/8813402c50a9bc4e5062e73676c93a35425ddb12))
+* anchor runtime build guard to project root ([104d4d7](https://github.com/xizidev/hexo-post-map/commit/104d4d76784dbbd076e367f06c96fdd1936cdcc3))
+* cancel pending map hydration on scoped destroy ([4990789](https://github.com/xizidev/hexo-post-map/commit/4990789f57551b4e5280c63ade094cfbcc730539))
+* verify applied styles before map hydration ([5fdb65f](https://github.com/xizidev/hexo-post-map/commit/5fdb65fb9fffdbb8810708dd6cc58ddfa94d4803))
+
 ## [0.3.0](https://github.com/xizidev/hexo-post-map/compare/v0.2.3...v0.3.0) (2026-09-24)
 
 
