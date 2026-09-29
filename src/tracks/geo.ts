@@ -28,8 +28,21 @@ export function interpolatePoint(
 ): RawTrackPoint {
   const ratio = clamp(fraction, 0, 1);
   const mix = (left: number, right: number) => left * (1 - ratio) + right * ratio;
+  // Follow the same shortest crossing as Haversine instead of interpolating through 0°.
+  const delta = b.coordinate[0] - a.coordinate[0];
+  const shortestDelta = delta > 180 ? delta - 360 : delta < -180 ? delta + 360 : delta;
+  const unwrappedLongitude = a.coordinate[0] + shortestDelta * ratio;
+  const wrappedLongitude =
+    unwrappedLongitude > 180
+      ? unwrappedLongitude - 360
+      : unwrappedLongitude < -180
+        ? unwrappedLongitude + 360
+        : unwrappedLongitude;
+  // Preserve an author's exact ±180 representation at the interpolation endpoints.
+  const longitude =
+    ratio === 0 ? a.coordinate[0] : ratio === 1 ? b.coordinate[0] : wrappedLongitude;
   return {
-    coordinate: [mix(a.coordinate[0], b.coordinate[0]), mix(a.coordinate[1], b.coordinate[1])],
+    coordinate: [longitude, mix(a.coordinate[1], b.coordinate[1])],
     ...(a.elevationMeters !== undefined && b.elevationMeters !== undefined
       ? { elevationMeters: mix(a.elevationMeters, b.elevationMeters) }
       : {}),

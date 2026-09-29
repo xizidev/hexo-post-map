@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { TrackBuildError } from '../../src/tracks/errors';
-import { haversineMeters } from '../../src/tracks/geo';
+import { haversineMeters, interpolatePoint } from '../../src/tracks/geo';
 import { trimTrack } from '../../src/tracks/privacy';
+import { calculateTrackStats } from '../../src/tracks/statistics';
 import type { RawTrack, RawTrackPoint } from '../../src/tracks/types';
 
 // Mean-earth radius 6,371,008.8 m gives this independently calculated equatorial degree.
@@ -27,6 +28,94 @@ describe('Haversine metres', () => {
 });
 
 describe('privacy trim', () => {
+  it.each([1, -1])('cuts the start across the antimeridian in direction %s', (direction) => {
+    // A 0.2-degree equatorial crossing is 22,239.01604670658 m; half is 0.1 degree.
+    const output = trimTrack(
+      [[point(direction * 179.9, 10, 1000), point(direction * -179.9, 30, 3000)]],
+      11119.50802335329,
+      0,
+    );
+    expect(output[0]).toHaveLength(2);
+    expect(Math.abs(output[0]![0]!.coordinate[0])).toBeCloseTo(180, 9);
+    expect(output[0]![1]!.coordinate[0]).toBe(direction * -179.9);
+    expect(output[0]![0]!.elevationMeters).toBeCloseTo(20, 9);
+    expect(output[0]![0]!.timeMilliseconds).toBeCloseTo(2000, 6);
+    expect(calculateTrackStats(output)).toEqual({
+      distanceMeters: 11119.508,
+      elevationGainMeters: 10,
+      durationSeconds: 1,
+    });
+  });
+
+  it.each([1, -1])('cuts the end across the antimeridian in direction %s', (direction) => {
+    const output = trimTrack(
+      [[point(direction * 179.9, 10, 1000), point(direction * -179.9, 30, 3000)]],
+      0,
+      11119.50802335329,
+    );
+    expect(output[0]).toHaveLength(2);
+    expect(output[0]![0]!.coordinate[0]).toBe(direction * 179.9);
+    expect(Math.abs(output[0]![1]!.coordinate[0])).toBeCloseTo(180, 9);
+    expect(output[0]![1]!.elevationMeters).toBeCloseTo(20, 9);
+    expect(output[0]![1]!.timeMilliseconds).toBeCloseTo(2000, 6);
+    expect(calculateTrackStats(output)).toEqual({
+      distanceMeters: 11119.508,
+      elevationGainMeters: 10,
+      durationSeconds: 1,
+    });
+  });
+
+  it.each([1, -1])('cuts both ends across the antimeridian in direction %s', (direction) => {
+    // Removing 0.05 degrees at each end retains the middle 0.1-degree crossing.
+    const output = trimTrack(
+      [[point(direction * 179.9, 10, 1000), point(direction * -179.9, 30, 3000)]],
+      5559.754011676645,
+      5559.754011676645,
+    );
+    expect(output[0]).toHaveLength(2);
+    expect(output[0]![0]!.coordinate[0]).toBeCloseTo(direction * 179.95, 9);
+    expect(output[0]![1]!.coordinate[0]).toBeCloseTo(direction * -179.95, 9);
+    expect(output[0]![0]!.elevationMeters).toBeCloseTo(15, 9);
+    expect(output[0]![1]!.elevationMeters).toBeCloseTo(25, 9);
+    expect(output[0]![0]!.timeMilliseconds).toBeCloseTo(1500, 6);
+    expect(output[0]![1]!.timeMilliseconds).toBeCloseTo(2500, 6);
+    expect(calculateTrackStats(output)).toEqual({
+      distanceMeters: 11119.508,
+      elevationGainMeters: 10,
+      durationSeconds: 1,
+    });
+  });
+
+  it.each([
+    [180, -179.8, -179.9],
+    [-180, 179.8, 179.9],
+    [179.8, -180, 179.9],
+    [-179.8, 180, -179.9],
+    [180, -180, 180],
+    [-180, 180, -180],
+  ])('interpolates exact antimeridian endpoint %s → %s within WGS84', (start, end, expected) => {
+    const output = interpolatePoint(point(start, 10, 1000), point(end, 30, 3000), 0.5);
+    expect(output.coordinate[0]).toBeCloseTo(expected, 9);
+    expect(output.coordinate[0]).toBeGreaterThanOrEqual(-180);
+    expect(output.coordinate[0]).toBeLessThanOrEqual(180);
+    expect(output.elevationMeters).toBe(20);
+    expect(output.timeMilliseconds).toBe(2000);
+  });
+
+  it.each([
+    [179.9, -179.9],
+    [-179.9, 179.9],
+    [180, -180],
+    [-180, 180],
+  ])('preserves exact coordinates at interpolation ratios zero and one: %s → %s', (start, end) => {
+    expect(interpolatePoint(point(start, 10, 1000), point(end, 30, 3000), 0)).toEqual(
+      point(start, 10, 1000),
+    );
+    expect(interpolatePoint(point(start, 10, 1000), point(end, 30, 3000), 1)).toEqual(
+      point(end, 30, 3000),
+    );
+  });
+
   it('copies and deeply freezes every level even with zero trims', () => {
     const input: RawTrack = [[point(0, 2, 10), point(1, 3, 20)]];
     const output = trimTrack(input, 0, 0);
