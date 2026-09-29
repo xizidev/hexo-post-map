@@ -1,8 +1,14 @@
 import { ZodError } from 'zod';
 
+import type { NormalizedTrackReference } from '../tracks/types';
 import { PostMapValidationError } from './errors';
 import { postMapSchema, type ParsedPostMap } from './schema';
-import type { Coordinate, NormalizedPoint, NormalizedPostMap } from './types';
+import type {
+  Coordinate,
+  NormalizedPoint,
+  NormalizedPostMap,
+  NormalizedPostMapDocument,
+} from './types';
 
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -77,7 +83,10 @@ function normalizePoint(point: ParsedPostMap['points'][number]): NormalizedPoint
  *
  * Coordinates are interpreted as GCJ-02 and are preserved without conversion or jitter.
  */
-export function normalizePostMap(raw: unknown, sourcePath: string): NormalizedPostMap | null {
+export function normalizePostMapDocument(
+  raw: unknown,
+  sourcePath: string,
+): NormalizedPostMapDocument | null {
   if (raw === undefined) {
     return null;
   }
@@ -127,5 +136,22 @@ export function normalizePostMap(raw: unknown, sourcePath: string): NormalizedPo
     ...(result.data.zoom === undefined ? {} : { zoom: result.data.zoom }),
   };
 
-  return deepFreeze(normalized);
+  const track: NormalizedTrackReference | undefined = result.data.track
+    ? {
+        source: result.data.track.source,
+        privacy: {
+          trimStartMeters: result.data.track.privacy.trim_start_meters,
+          trimEndMeters: result.data.track.privacy.trim_end_meters,
+        },
+        simplifyToleranceMeters: result.data.track.simplify_tolerance_meters,
+        playback: result.data.track.playback,
+      }
+    : undefined;
+
+  return deepFreeze({ map: normalized, ...(track === undefined ? {} : { track }) });
+}
+
+/** Returns only browser-safe point geometry; local track source paths remain server-only. */
+export function normalizePostMap(raw: unknown, sourcePath: string): NormalizedPostMap | null {
+  return normalizePostMapDocument(raw, sourcePath)?.map ?? null;
 }
