@@ -1,5 +1,6 @@
 import type { NormalizedPostMap } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
+import type { PublishedTrackAsset } from '../../tracks/types';
 
 export interface BrowserProviderConfig {
   readonly provider: 'amap';
@@ -14,8 +15,10 @@ export interface BrowserProviderConfig {
 export interface DetailMapModel {
   readonly map: NormalizedPostMap;
   readonly defaultZoom: number;
+  readonly track?: PublishedTrackAsset;
   readonly signal?: AbortSignal;
   readonly onError?: () => void;
+  readonly onTrackError?: () => void;
 }
 
 export interface OverviewMapOptions {
@@ -44,8 +47,14 @@ export interface MapHandle {
   destroy(): void;
 }
 
+/** Optional fields preserve compatibility until a provider mounts a validated track. */
+export interface DetailMapHandle extends MapHandle {
+  readonly hasTrack?: boolean;
+  setTrackProgress?(progress: number): void;
+}
+
 export interface MapProvider {
-  mountDetail(container: HTMLElement, model: DetailMapModel): Promise<MapHandle>;
+  mountDetail(container: HTMLElement, model: DetailMapModel): Promise<DetailMapHandle>;
   mountOverview(container: HTMLElement, options: OverviewMapOptions): Promise<MapHandle>;
 }
 
