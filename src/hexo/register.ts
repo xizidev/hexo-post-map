@@ -24,6 +24,11 @@ export function registerPlugin(instance: Hexo): void {
   const compiler = createTrackCompiler(instance.source_dir);
   const trackAssetGuard = createTrackAssetGuard(instance, config, compiler);
   instance.extend.filter.register('before_generate', () => compiler.beginGeneration(), 1);
+  instance.extend.filter.register(
+    'before_generate',
+    () => trackAssetGuard.invalidateTrackedPosts(),
+    5,
+  );
   instance.extend.filter.register('before_generate', () => trackAssetGuard.prepare(), 100);
   instance.extend.filter.register('after_generate', () => trackAssetGuard.afterGeneration(), 100);
   instance.extend.tag.register('post_map', postMapTag);

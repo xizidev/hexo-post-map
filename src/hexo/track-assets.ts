@@ -9,6 +9,11 @@ interface SourceAsset {
   readonly path?: string;
 }
 
+type CachedPost = Pick<HexoPostLike, 'source' | 'map'> & {
+  content?: string;
+  save(): PromiseLike<unknown>;
+};
+
 /** Filter raw assets before Router updates can start watch writes; recheck after generation. */
 export function createTrackAssetGuard(
   hexo: Hexo,
@@ -18,6 +23,14 @@ export function createTrackAssetGuard(
   const blocked = new Set<string>();
   const wrapped = new WeakSet<object>();
 
+  function trackedPosts(): CachedPost[] {
+    if (!config.post.enabled) return [];
+    const posts = hexo.locals.toObject().posts as { toArray(): unknown[] };
+    return (posts.toArray() as CachedPost[]).filter(
+      (post) => post.map !== null && typeof post.map === 'object' && 'track' in post.map,
+    );
+  }
+
   function blockRawRoutes(onlyRouted: boolean): void {
     let failed = false;
     const routed = new Set(hexo.route.list());
@@ -26,11 +39,7 @@ export function createTrackAssetGuard(
       for (const asset of hexo.model(name).toArray() as unknown as SourceAsset[]) {
         if (!asset.path) continue;
         const path = hexo.route.format(asset.path);
-        if (
-          (onlyRouted && !routed.has(path)) ||
-          /^hexo-post-map\/tracks\/[a-f0-9]{64}\.json$/u.test(path)
-        )
-          continue;
+        if (onlyRouted && !routed.has(path)) continue;
         try {
           if (!compiler.isActiveSource(asset.source)) continue;
         } catch {
@@ -38,7 +47,11 @@ export function createTrackAssetGuard(
           failed = true;
         }
         blocked.add(path);
-        hexo.route.remove(path);
+        // An Asset alias can collide with a real hash. Always block its raw generator output;
+        // after generation restore only bytes actually produced by this generation's compiler.
+        const canonical = onlyRouted ? compiler.activeAsset(path) : undefined;
+        if (canonical === undefined) hexo.route.remove(path);
+        else hexo.route.set(path, canonical);
       }
     }
     if (failed)
@@ -60,16 +73,23 @@ export function createTrackAssetGuard(
   }
 
   return {
+    async invalidateTrackedPosts(): Promise<void> {
+      for (const post of trackedPosts()) {
+        if (normalizePostMapDocument(post.map, post.source)?.track) {
+          // Hexo's priority-10 render_post rebuilds this from _content through the usual pipeline.
+          // Track-only file changes do not otherwise invalidate the parent Warehouse document.
+          post.content = undefined;
+          // Warehouse query results are copies: persist invalidation before render_post reads them.
+          await post.save();
+        }
+      }
+      hexo.locals.invalidate();
+    },
     prepare(): void {
       blocked.clear();
-      if (config.post.enabled) {
-        const posts = hexo.locals.toObject().posts as { toArray(): unknown[] };
-        for (const value of posts.toArray()) {
-          const post = value as HexoPostLike;
-          if (post.map === null || typeof post.map !== 'object' || !('track' in post.map)) continue;
-          const document = normalizePostMapDocument(post.map, post.source);
-          if (document?.track) compiler.compile(post.source, document.track);
-        }
+      for (const post of trackedPosts()) {
+        const document = normalizePostMapDocument(post.map, post.source);
+        if (document?.track) compiler.compile(post.source, document.track);
       }
       blockRawRoutes(false);
       // Other plugins can replace the generator between builds. Wrap the current function once.

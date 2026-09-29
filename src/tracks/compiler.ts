@@ -16,11 +16,17 @@ export function createTrackCompiler(sourceDir: string) {
   const cache = new Map<string, { fingerprint: string; compiled: CompiledTrack }>();
   const activeCanonicalPaths = new Set<string>();
   const activeEntryPaths = new Set<string>();
+  const activeAssets = new Map<string, string>();
   return {
     /** A watch rebuild retains cached compilation, but only current sources stay private. */
     beginGeneration(): void {
       activeCanonicalPaths.clear();
       activeEntryPaths.clear();
+      activeAssets.clear();
+    },
+    /** Only assets compiled in this generation can be restored as trusted publication data. */
+    activeAsset(routePath: string): string | undefined {
+      return activeAssets.get(routePath);
     },
     isActiveSource(source: string): boolean {
       if (activeCanonicalPaths.size === 0) return false;
@@ -49,7 +55,10 @@ export function createTrackCompiler(sourceDir: string) {
         reference.playback,
       ]);
       const cached = cache.get(cacheKey);
-      if (cached?.fingerprint === file.fingerprint) return cached.compiled;
+      if (cached?.fingerprint === file.fingerprint) {
+        activeAssets.set(cached.compiled.routePath, cached.compiled.serialized);
+        return cached.compiled;
+      }
       try {
         const raw = parseTrackSource(file);
         const trimmed = trimTrack(raw, trimStartMeters, trimEndMeters);
@@ -66,6 +75,7 @@ export function createTrackCompiler(sourceDir: string) {
           playback: reference.playback,
         });
         cache.set(cacheKey, { fingerprint: file.fingerprint, compiled });
+        activeAssets.set(compiled.routePath, compiled.serialized);
         return compiled;
       } catch (error) {
         if (error instanceof TrackBuildError) {

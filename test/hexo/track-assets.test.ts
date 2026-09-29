@@ -1,9 +1,10 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import Hexo from 'hexo';
 import type { SiteLocals } from 'hexo/dist/types';
+import { Window } from 'happy-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import { registerPlugin } from '../../src/hexo/register';
 
@@ -29,15 +30,18 @@ const rawGeoJson = JSON.stringify({
 });
 const points = [{ id: 'shanghai', name: '上海', longitude: 121.4737, latitude: 31.2304 }];
 
-async function fixture(overview = false) {
+async function fixture(overview = false, postOptions: Record<string, unknown> = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'hpm-track-assets-'));
   const hexo = new Hexo(directory, { silent: true });
   temporarySites.push(hexo);
   await hexo.init();
+  // Exercise Hexo's real post pipeline without requiring an external Markdown renderer.
+  hexo.extend.renderer.register('md', 'html', (data) => data.text ?? '', true);
   hexo.config.post_asset_folder = true;
   hexo.config.post_map = {
     enabled: true,
     overview: { enabled: overview },
+    post: postOptions,
     amap: { key: 'key', security: { security_js_code: 'code' } },
   };
   registerPlugin(hexo);
@@ -48,6 +52,7 @@ async function fixture(overview = false) {
     title: 'Trip',
     date: new Date('2026-01-01T00:00:00Z'),
     content: '<p>Trip</p>',
+    _content: '<p>Trip</p>',
     map: { points, track: { source: 'trip/private.gpx' } },
   });
   async function postAsset(name: string, content: string) {
@@ -62,6 +67,7 @@ async function fixture(overview = false) {
   }
   async function asset(name: string, target: string) {
     const source = join(hexo.source_dir, name);
+    await mkdir(dirname(source), { recursive: true });
     await symlink(target, source);
     return await hexo
       .model('Asset')
@@ -71,6 +77,122 @@ async function fixture(overview = false) {
 }
 
 describe('raw track route privacy across Hexo generation', () => {
+  it.each(['after', 'manual'])(
+    'refreshes cached track HTML and statistics after only the GPX changes (%s)',
+    async (position) => {
+      const { hexo, post, postAsset } = await fixture(false, { position });
+      const raw = await postAsset('private.gpx', rawGpx);
+      const ordinary = await hexo.model('Post').insert({
+        source: '_posts/ordinary.md',
+        slug: 'ordinary',
+        _content: '<p>Different raw input</p>',
+        content: '<p>UNCHANGED CACHED ARTICLE</p>',
+      });
+      if (position === 'manual') {
+        post._content = '<p>Before</p>{% post_map %}<p>After</p>';
+        post.content = post._content;
+      }
+      await hexo.post.render(post.full_source, post);
+      await post.save();
+      const inspect = () => {
+        const window = new Window();
+        // Warehouse returns copies; read the persisted record rendered by Hexo's own lifecycle.
+        window.document.body.innerHTML = hexo.model('Post').findById(post._id).content;
+        return {
+          url: JSON.parse(window.document.querySelector('[data-hpm-data]')!.textContent!).track
+            .url as string,
+          distance: window.document.querySelector('[data-hpm-track-stats] dd')!.textContent,
+          count: window.document.querySelectorAll('[data-hpm-detail]').length,
+          previous:
+            window.document.querySelector('[data-hpm-detail]')!.previousElementSibling?.textContent,
+          next: window.document.querySelector('[data-hpm-detail]')!.nextElementSibling?.textContent,
+        };
+      };
+      await hexo._generate();
+      const first = inspect();
+      const cachedContent = hexo.model('Post').findById(post._id).content;
+      expect(first.distance).toBe('111 米');
+      expect(hexo.route.get(first.url.slice(1))).toBeDefined();
+      await writeFile(raw.source, rawGpx.replace('lon="0.001"', 'lon="0.002"'));
+      await hexo._generate({ cache: true });
+      const second = inspect();
+      expect(second.url).not.toBe(first.url);
+      expect(second.distance).toBe('222 米');
+      const persisted = hexo.model('Post').findById(post._id);
+      expect(persisted.content).not.toBe(cachedContent);
+      expect(persisted._id).toBe(post._id);
+      expect(persisted.source).toBe(post.source);
+      expect(hexo.route.get(second.url.slice(1))).toBeDefined();
+      expect(hexo.route.get(first.url.slice(1))).toBeUndefined();
+      expect(second.count).toBe(1);
+      if (position === 'manual') {
+        expect(second.previous).toBe('Before');
+        expect(second.next).toBe('After');
+      }
+      expect(hexo.model('Post').findById(ordinary._id).content).toBe(
+        '<p>UNCHANGED CACHED ARTICLE</p>',
+      );
+    },
+  );
+
+  it('does not invalidate tracked cached posts when detail maps are disabled', async () => {
+    const { hexo, post } = await fixture(false, { enabled: false });
+    await hexo._generate({ cache: true });
+    expect(hexo.model('Post').findById(post._id).content).toBe('<p>Trip</p>');
+  });
+
+  it.each([false, true])(
+    'filters hash-shaped raw aliases before watch reads, including real hash collision=%s',
+    async (collision) => {
+      const { hexo, postAsset, asset } = await fixture();
+      const raw = await postAsset('private.gpx', rawGpx);
+      await hexo._generate();
+      const canonicalPath = hexo.route
+        .list()
+        .find((path) => path.startsWith('hexo-post-map/tracks/'))!;
+      const canonicalChunks: string[] = [];
+      for await (const chunk of hexo.route.get(canonicalPath)!) canonicalChunks.push(String(chunk));
+      const canonical = canonicalChunks.join('');
+      const aliasPath = collision ? canonicalPath : `hexo-post-map/tracks/${'a'.repeat(64)}.json`;
+      await asset(aliasPath, raw.source);
+      const reads: Promise<string>[] = [];
+      hexo.route.on('update', (path: string) => {
+        if (path !== aliasPath) return;
+        const stream = hexo.route.get(path)!;
+        reads.push(
+          (async () => {
+            const chunks: string[] = [];
+            for await (const chunk of stream) chunks.push(String(chunk));
+            return chunks.join('');
+          })(),
+        );
+      });
+      await hexo._generate({ cache: true });
+      const observed = await Promise.all(reads);
+      expect(observed.join('')).not.toMatch(/PRIVATE_NAME|<gpx|2026-01-01/);
+      if (collision) {
+        expect(observed.length).toBeGreaterThan(0);
+        expect(observed.every((content) => content === canonical)).toBe(true);
+        const chunks: string[] = [];
+        for await (const chunk of hexo.route.get(canonicalPath)!) chunks.push(String(chunk));
+        expect(chunks.join('')).toBe(canonical);
+        const previousReads = reads.length;
+        await writeFile(raw.source, rawGpx.replace('lon="0.001"', 'lon="0.002"'));
+        await hexo._generate({ cache: true });
+        await Promise.all(reads);
+        expect(reads).toHaveLength(previousReads);
+        expect(hexo.route.get(canonicalPath)).toBeUndefined();
+        expect(
+          hexo.route.list().filter((path) => path.startsWith('hexo-post-map/tracks/')),
+        ).toHaveLength(1);
+      } else {
+        expect(observed).toEqual([]);
+        expect(hexo.route.get(aliasPath)).toBeUndefined();
+        expect(hexo.route.get(canonicalPath)).toBeDefined();
+      }
+    },
+  );
+
   it('never exposes tracked raw routes to watch update listeners, including cached post content', async () => {
     const { hexo, post, postAsset } = await fixture();
     const raw = await postAsset('private.gpx', rawGpx);
