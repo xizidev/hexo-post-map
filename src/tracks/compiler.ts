@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { realpathSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 
 import { createTrackAsset } from './asset';
 import { TrackBuildError } from './errors';
@@ -12,10 +14,31 @@ import type { CompiledTrack, NormalizedTrackReference } from './types';
 export function createTrackCompiler(sourceDir: string) {
   // Only the most recent fingerprint for each path/options combination is retained.
   const cache = new Map<string, { fingerprint: string; compiled: CompiledTrack }>();
+  const activeCanonicalPaths = new Set<string>();
+  const activeEntryPaths = new Set<string>();
   return {
+    /** A watch rebuild retains cached compilation, but only current sources stay private. */
+    beginGeneration(): void {
+      activeCanonicalPaths.clear();
+      activeEntryPaths.clear();
+    },
+    isActiveSource(source: string): boolean {
+      if (activeCanonicalPaths.size === 0) return false;
+      const entry = resolve(source);
+      // Remember both names so deleted files and broken author symlinks still match exactly.
+      if (activeEntryPaths.has(entry) || activeCanonicalPaths.has(entry)) return true;
+      try {
+        return activeCanonicalPaths.has(realpathSync(entry));
+      } catch {
+        // A missing alias cannot safely be classified as unrelated to an active track.
+        throw new Error('[hexo-post-map] cannot verify raw asset source during track publication');
+      }
+    },
     compile(postSource: string, reference: NormalizedTrackReference): CompiledTrack {
       // Revalidate and read securely on every call, including cache hits.
       const file = readTrackSource(sourceDir, postSource, reference.source);
+      activeCanonicalPaths.add(file.canonicalPath);
+      activeEntryPaths.add(resolve(dirname(resolve(sourceDir, postSource)), reference.source));
       const { trimStartMeters, trimEndMeters } = reference.privacy;
       const cacheKey = JSON.stringify([
         file.canonicalPath,
