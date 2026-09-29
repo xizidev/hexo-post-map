@@ -1,3 +1,7 @@
+:root {
+  --hpm-style-ready: 1;
+}
+
 .hpm-detail {
   --hpm-detail-height: 220px;
   --hpm-mobile-height: 180px;

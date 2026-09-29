@@ -81,12 +81,15 @@ function safeInsertionOffset(
 }
 
 /** Preserves the original HTML bytes and uses parsed elements only to locate safe insertions. */
-export function injectMarkedAssets(html: string, root: string): string {
+export function injectBrowserRuntime(html: string, root: string): string {
   const document = parse(html, { sourceCodeLocationInfo: true });
   const nodes = elements(document);
-  const detail = nodes.some((node) => attribute(node, 'data-hpm-detail') !== undefined);
-  const overview = nodes.some((node) => attribute(node, 'data-hpm-overview') !== undefined);
-  if (!detail && !overview) return html;
+  const hasMap = nodes.some(
+    (node) =>
+      node.namespaceURI === HTML_NAMESPACE &&
+      (attribute(node, 'data-hpm-detail') !== undefined ||
+        attribute(node, 'data-hpm-overview') !== undefined),
+  );
 
   const base = `${root.replace(/\/$/u, '')}/hexo-post-map/assets/`;
   const assetUrl = (name: string): string => {
@@ -96,23 +99,24 @@ export function injectMarkedAssets(html: string, root: string): string {
     }
     return url;
   };
-  const style = assetUrl('style.css');
-  const hasStyle = nodes.some(
-    (node) =>
-      node.namespaceURI === HTML_NAMESPACE &&
-      node.tagName === 'link' &&
-      attribute(node, 'disabled') === undefined &&
-      attribute(node, 'href') === style &&
-      attribute(node, 'rel')?.toLowerCase().split(/\s+/u).includes('stylesheet'),
-  );
-  const css = hasStyle ? '' : `<link rel="stylesheet" href="${escapeHtml(style)}">`;
-  const scripts = [...(detail ? ['post-map.js'] : []), ...(overview ? ['overview-map.js'] : [])]
-    .map(assetUrl)
-    .filter(
-      (url) => !nodes.some((node) => isExecutableScript(node) && attribute(node, 'src') === url),
-    )
-    .map((url) => `<script defer src="${escapeHtml(url)}"></script>`)
-    .join('');
+  const style = hasMap ? assetUrl('style.css') : '';
+  const hasStyle =
+    hasMap &&
+    nodes.some(
+      (node) =>
+        node.namespaceURI === HTML_NAMESPACE &&
+        node.tagName === 'link' &&
+        attribute(node, 'disabled') === undefined &&
+        attribute(node, 'href') === style &&
+        attribute(node, 'rel')?.toLowerCase().split(/\s+/u).includes('stylesheet'),
+    );
+  const css = hasMap && !hasStyle ? `<link rel="stylesheet" href="${escapeHtml(style)}">` : '';
+  const runtime = assetUrl('runtime.js');
+  const script = nodes.some(
+    (node) => isExecutableScript(node) && attribute(node, 'src') === runtime,
+  )
+    ? ''
+    : `<script defer src="${escapeHtml(runtime)}"></script>`;
 
   const closingOffset = (tag: string): number | undefined =>
     nodes.find((node) => node.namespaceURI === HTML_NAMESPACE && node.tagName === tag)
@@ -128,7 +132,7 @@ export function injectMarkedAssets(html: string, root: string): string {
     headEnd ?? openingEnd('head') ?? openingEnd('body') ?? openingEnd('html') ?? doctypeEnd ?? 0;
   const insertions = [
     { offset: safeInsertionOffset(document, styleOffset), value: css },
-    { offset: safeInsertionOffset(document, bodyEnd), value: scripts },
+    { offset: safeInsertionOffset(document, bodyEnd), value: script },
   ];
   for (const { offset, value } of insertions.sort((a, b) => b.offset - a.offset)) {
     html = html.slice(0, offset) + value + html.slice(offset);

@@ -219,7 +219,23 @@ The overview fits every article's representative point. Each thumbnail sits abov
 
 `cluster.grid_size` is a finite positive pixel size; `cluster.max_zoom` must be between 2 and 20 inclusive. The default maximum is 18. Multiple articles may use exactly the same coordinates.
 
-The default overview requests the theme's `page` layout, with a standalone fallback when unavailable. Set `overview.layout: standalone` to use the independent page explicitly. Conventional themes rendering `post.content` are the target; SPA/PJAX themes may need their own navigation integration and are not automatically rehydrated. The compatibility fixtures cover Landscape, NexT, and a minimal Cactus-style layout; they do not guarantee every theme customization.
+The default overview requests the theme's `page` layout, with a standalone fallback when unavailable. Set `overview.layout: standalone` to use the independent page explicitly. Conventional themes rendering `post.content` are the target. The compatibility fixtures cover Landscape, NexT, and a minimal Cactus-style layout; they do not guarantee every theme customization.
+
+### PJAX and lifecycle integration
+
+Enabled sites load a provider-free `runtime.js` on every HTML page. Ordinary pages do not load map UI or provider resources. Initial map pages also include static CSS for the no-JavaScript fallback; the detail/overview feature IIFEs and AMap remain lazy. Conventional light-DOM PJAX replacement is detected automatically, including insertion and removal of map content.
+
+For manual integration, call this after inserting the content, once the runtime is available (`container` is the inserted element):
+
+```js
+if (window.HexoPostMap?.apiVersion === 1) {
+  window.HexoPostMap.refresh(container);
+}
+```
+
+Calling `window.HexoPostMap.destroy(container)` before removal is optional. Both methods default to `document`, accept an element or document fragment owned by the current document, and throw `TypeError` for invalid scopes. They return immediately without waiting for AMap to finish. Closed or unobserved shadow roots, another document, a suppressed runtime script, and nonstandard transitions are outside the automatic guarantee.
+
+After correcting a local bundle or stylesheet load failure, call `refresh(container)` to retry. An AMap SDK timeout still requires a full page reload. See the [compatibility contract](https://github.com/xizidev/hexo-post-map/blob/main/docs/compatibility.md) for integration boundaries and lifecycle details.
 
 ### Theme customization
 
@@ -258,4 +274,4 @@ Read [security, CSP, and privacy](https://github.com/xizidev/hexo-post-map/blob/
 
 See [CONTRIBUTING](https://github.com/xizidev/hexo-post-map/blob/main/CONTRIBUTING.md) for clean builds, packed-artifact theme tests, deterministic browser tests, and the optional live AMap smoke test. Report bugs via [GitHub Issues](https://github.com/xizidev/hexo-post-map/issues); disclose security issues using [SECURITY](https://github.com/xizidev/hexo-post-map/blob/main/SECURITY.md).
 
-The Front Matter and site configuration are the public contracts. Internal modules and provider adapters are not an extension API. The project is MIT licensed; AMap's service has its own terms and requirements.
+The Front Matter, site configuration, documented theme variables, and versioned `window.HexoPostMap` lifecycle API are public contracts. Internal modules and provider adapters are not an extension API. The project is MIT licensed; AMap's service has its own terms and requirements.

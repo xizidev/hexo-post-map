@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
-import { injectMarkedAssets } from '../../src/hexo/injector';
+import { injectBrowserRuntime } from '../../src/hexo/injector';
 
 function parsedElements(node: DefaultTreeAdapterMap['node']): DefaultTreeAdapterMap['element'][] {
   return [
@@ -15,13 +15,33 @@ function injectedScripts(html: string) {
       node.namespaceURI === 'http://www.w3.org/1999/xhtml' &&
       node.tagName === 'script' &&
       node.attrs.some(
-        (attr) => attr.name === 'src' && attr.value === '/hexo-post-map/assets/post-map.js',
+        (attr) => attr.name === 'src' && attr.value === '/hexo-post-map/assets/runtime.js',
       ) &&
       !node.attrs.some((attr) => attr.name === 'type'),
   );
 }
 
-describe('selective asset injection', () => {
+describe('browser runtime injection', () => {
+  it('injects only the runtime into ordinary enabled HTML', () => {
+    const html = injectBrowserRuntime(
+      '<html><head></head><body><p>Plain</p></body></html>',
+      '/blog/',
+    );
+    expect(html).toContain('<script defer src="/blog/hexo-post-map/assets/runtime.js"></script>');
+    expect(html).not.toContain('style.css');
+    expect(html).not.toContain('post-map.js');
+    expect(html).not.toContain('overview-map.js');
+    expect(injectBrowserRuntime(html, '/blog/')).toBe(html);
+  });
+  it.each(['data-hpm-detail', 'data-hpm-overview'])(
+    'keeps one static fallback stylesheet for %s',
+    (marker) => {
+      const html = injectBrowserRuntime(`<section ${marker}></section>`, '/');
+      expect(html.match(/runtime\.js/gu)).toHaveLength(1);
+      expect(html.match(/style\.css/gu)).toHaveLength(1);
+      expect(html).not.toMatch(/(?:post-map|overview-map)\.js/u);
+    },
+  );
   it.each([
     '<!-- unfinished',
     '<textarea>unfinished',
@@ -36,29 +56,29 @@ describe('selective asset injection', () => {
     '<noscript>unfinished',
     '<template>unfinished',
     '<svg>unfinished',
-  ])('inserts executable scripts before an unclosed tail: %s', (tail) => {
+  ])('inserts executable runtime before an unclosed tail: %s', (tail) => {
     const input = `<section data-hpm-detail></section>${tail}`;
-    const html = injectMarkedAssets(input, '/');
+    const html = injectBrowserRuntime(input, '/');
     expect(injectedScripts(html)).toHaveLength(1);
     expect(html.endsWith(tail)).toBe(true);
-    expect(injectMarkedAssets(html, '/')).toBe(html);
+    expect(injectBrowserRuntime(html, '/')).toBe(html);
   });
   it.each(['application/json', 'importmap', 'speculationrules', 'text/plain'])(
     'does not count a %s data block as an executable bundle',
     (type) => {
-      const input = `<section data-hpm-detail></section><script type="${type}" src="/hexo-post-map/assets/post-map.js"></script>`;
-      const html = injectMarkedAssets(input, '/');
+      const input = `<section data-hpm-detail></section><script type="${type}" src="/hexo-post-map/assets/runtime.js"></script>`;
+      const html = injectBrowserRuntime(input, '/');
       expect(injectedScripts(html)).toHaveLength(1);
-      expect(injectMarkedAssets(html, '/')).toBe(html);
+      expect(injectBrowserRuntime(html, '/')).toBe(html);
     },
   );
   it('does not count a foreign-namespace script as the HTML bundle', () => {
-    const html = injectMarkedAssets(
-      '<section data-hpm-detail></section><svg><script src="/hexo-post-map/assets/post-map.js"></script></svg>',
+    const html = injectBrowserRuntime(
+      '<section data-hpm-detail></section><svg><script src="/hexo-post-map/assets/runtime.js"></script></svg>',
       '/',
     );
     expect(injectedScripts(html)).toHaveLength(1);
-    expect(injectMarkedAssets(html, '/')).toBe(html);
+    expect(injectBrowserRuntime(html, '/')).toBe(html);
   });
   it.each([
     '',
@@ -70,14 +90,14 @@ describe('selective asset injection', () => {
     'text/ecmascript',
     'application/x-javascript',
   ])('recognizes executable script type %j', (type) => {
-    const input = `<link rel="stylesheet" href="/hexo-post-map/assets/style.css"><section data-hpm-detail></section><script type="${type}" src="/hexo-post-map/assets/post-map.js"></script>`;
-    expect(injectMarkedAssets(input, '/')).toBe(input);
+    const input = `<link rel="stylesheet" href="/hexo-post-map/assets/style.css"><section data-hpm-detail></section><script type="${type}" src="/hexo-post-map/assets/runtime.js"></script>`;
+    expect(injectBrowserRuntime(input, '/')).toBe(input);
   });
   it.each([
     '<link disabled rel="stylesheet" href="/hexo-post-map/assets/style.css">',
     '<svg><link rel="stylesheet" href="/hexo-post-map/assets/style.css"></link></svg>',
   ])('does not count an inactive stylesheet as loaded: %s', (link) => {
-    const html = injectMarkedAssets(`<section data-hpm-detail></section>${link}`, '/');
+    const html = injectBrowserRuntime(`<section data-hpm-detail></section>${link}`, '/');
     const styles = parsedElements(parse(html)).filter(
       (node) =>
         node.namespaceURI === 'http://www.w3.org/1999/xhtml' &&
@@ -86,42 +106,41 @@ describe('selective asset injection', () => {
         !node.attrs.some((attr) => attr.name === 'disabled'),
     );
     expect(styles).toHaveLength(1);
-    expect(injectMarkedAssets(html, '/')).toBe(html);
+    expect(injectBrowserRuntime(html, '/')).toBe(html);
   });
   it.each([
-    '<p>Ordinary</p>',
     '<!-- data-hpm-detail -->',
     '<script>"<section data-hpm-detail>"</script>',
     '<p>data-hpm-overview</p>',
     '<div data-note="data-hpm-detail"></div>',
-  ])('leaves non-map HTML unchanged: %s', (html) => {
-    expect(injectMarkedAssets(html, '/')).toBe(html);
+    '<svg data-hpm-detail></svg>',
+  ])('does not infer fallback style from non-map content: %s', (input) => {
+    const html = injectBrowserRuntime(input, '/');
+    expect(injectedScripts(html)).toHaveLength(1);
+    expect(html).not.toContain('style.css');
   });
-  it.each([
-    ['data-hpm-detail', 'post-map.js', 'overview-map.js'],
-    ['data-hpm-overview', 'overview-map.js', 'post-map.js'],
-  ])('loads only assets for %s', (marker, wanted, absent) => {
-    const html = injectMarkedAssets(
-      `<html><head><title>T</title></head><body><section ${marker}></section></body></html>`,
+  it('places assets at document boundaries', () => {
+    const html = injectBrowserRuntime(
+      '<html><head><title>T</title></head><body><section data-hpm-detail></section></body></html>',
       '/blog/',
     );
     expect(html).toContain(
       '<link rel="stylesheet" href="/blog/hexo-post-map/assets/style.css"></head>',
     );
     expect(html).toContain(
-      `<script defer src="/blog/hexo-post-map/assets/${wanted}"></script></body>`,
+      '<script defer src="/blog/hexo-post-map/assets/runtime.js"></script></body>',
     );
-    expect(html).not.toContain(absent);
-    expect(injectMarkedAssets(html, '/blog/')).toBe(html);
+    expect(html).not.toMatch(/(?:post-map|overview-map)\.js/u);
+    expect(injectBrowserRuntime(html, '/blog/')).toBe(html);
   });
-  it('injects each required asset once when both map types are present', () => {
-    const html = injectMarkedAssets(
+  it('injects runtime and fallback style once when both map types are present', () => {
+    const html = injectBrowserRuntime(
       '<section data-hpm-detail></section><section data-hpm-overview></section>',
       '/',
     );
     expect(html.match(/style\.css/g)).toHaveLength(1);
-    expect(html.match(/post-map\.js/g)).toHaveLength(1);
-    expect(html.match(/overview-map\.js/g)).toHaveLength(1);
+    expect(html.match(/runtime\.js/g)).toHaveLength(1);
+    expect(html).not.toMatch(/(?:post-map|overview-map)\.js/u);
   });
   it.each([
     '<SECTION DATA-HPM-DETAIL></SECTION>',
@@ -129,25 +148,25 @@ describe('selective asset injection', () => {
     '<html><body><section data-hpm-detail></section></html>',
     '<section data-hpm-detail></section>',
   ])('supports fragment, uppercase and omitted closing body: %s', (input) => {
-    const html = injectMarkedAssets(input, '/blog');
+    const html = injectBrowserRuntime(input, '/blog');
     expect(html).toContain('/blog/hexo-post-map/assets/style.css');
-    expect(html).toContain('/blog/hexo-post-map/assets/post-map.js');
-    expect(injectMarkedAssets(html, '/blog')).toBe(html);
+    expect(html).toContain('/blog/hexo-post-map/assets/runtime.js');
+    expect(injectBrowserRuntime(html, '/blog')).toBe(html);
   });
   it('recognizes preexisting assets regardless of quoting and attribute order', () => {
     const input =
-      "<link href='/hexo-post-map/assets/style.css' rel='stylesheet'><section data-hpm-detail></section><script src='/hexo-post-map/assets/post-map.js' defer></script>";
-    expect(injectMarkedAssets(input, '/')).toBe(input);
+      "<link href='/hexo-post-map/assets/style.css' rel='stylesheet'><section data-hpm-detail></section><script src='/hexo-post-map/assets/runtime.js' defer></script>";
+    expect(injectBrowserRuntime(input, '/')).toBe(input);
   });
   it('does not confuse asset names in article text with existing assets', () => {
-    const html = injectMarkedAssets(
-      '<p>/hexo-post-map/assets/post-map.js</p><section data-hpm-detail></section>',
+    const html = injectBrowserRuntime(
+      '<p>/hexo-post-map/assets/runtime.js</p><section data-hpm-detail></section>',
       '/',
     );
-    expect(html).toContain('<script defer src="/hexo-post-map/assets/post-map.js"></script>');
+    expect(html).toContain('<script defer src="/hexo-post-map/assets/runtime.js"></script>');
   });
   it('preserves a leading doctype when the document omits its head', () => {
-    const html = injectMarkedAssets(
+    const html = injectBrowserRuntime(
       '<!doctype html><html><body><section data-hpm-detail></section></body></html>',
       '/',
     );
@@ -157,7 +176,7 @@ describe('selective asset injection', () => {
   it.each(['/blog/?q=x', '/blog/#section', 'javascript:bad', '//evil.test/'])(
     'rejects unsafe asset roots %s',
     (root) => {
-      expect(() => injectMarkedAssets('<section data-hpm-detail></section>', root)).toThrow(/root/);
+      expect(() => injectBrowserRuntime('<p>Plain</p>', root)).toThrow(/root/);
     },
   );
 });

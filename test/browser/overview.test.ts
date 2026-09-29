@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { hydrateOverview, initializeOverviewMaps } from '../../src/browser/overview/index';
+import {
+  hydrateOverview as mountOverview,
+  initializeOverviewMaps,
+} from '../../src/browser/overview/index';
 import { renderPostPanel } from '../../src/browser/overview/panel';
 import { renderOverview, type OverviewPost } from '../../src/templates/overview';
 import { resolveConfig } from '../../src/config/resolve';
@@ -25,11 +28,11 @@ const b: OverviewPost = { ...a, title: 'B', url: '/blog/b/', date: '2026-01-01T0
 const flush = async () => {
   for (let i = 0; i < 16; i++) await Promise.resolve();
 };
-function pageTransition(type: 'pagehide' | 'pageshow', persisted: boolean) {
-  const event = new PageTransitionEvent(type, { persisted });
-  // happy-dom aliases PageTransitionEvent to Event and omits the persisted property.
-  Object.defineProperty(event, 'persisted', { value: persisted });
-  window.dispatchEvent(event);
+const activeControllers = new Set<ReturnType<typeof mountOverview>>();
+function hydrateOverview(...args: Parameters<typeof mountOverview>) {
+  const controller = mountOverview(...args);
+  activeControllers.add(controller);
+  return controller;
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -87,7 +90,8 @@ function setup(data: unknown = { version: 1, posts: [a, b] }) {
   return { root, fetcher, handle, mountOverview, load, controller };
 }
 afterEach(() => {
-  window.dispatchEvent(new Event('pagehide'));
+  activeControllers.forEach((controller) => controller.destroy());
+  activeControllers.clear();
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
 });
@@ -724,17 +728,38 @@ describe('article panels', () => {
 });
 
 describe('overview hydration', () => {
-  it('keeps one usable map and panel across repeated BFCache restores, then destroys on ordinary pagehide', async () => {
-    const { root, load, fetcher, handle, mountOverview } = setup();
+  it.each(['canvas', 'data'])('detects replacement of the captured %s node', (node) => {
+    const { root, controller } = setup();
+    expect(controller.isCurrent()).toBe(true);
+    const original = root.querySelector(`[data-hpm-${node}]`)!;
+    original.replaceWith(original.cloneNode(true));
+    expect(controller.isCurrent()).toBe(false);
+    controller.destroy();
+    expect(controller.isCurrent()).toBe(false);
+  });
+
+  it('stays current when a connected root moves, but not when disconnected or destroyed', () => {
+    const { root, controller } = setup();
+    const container = document.createElement('aside');
+    document.body.append(container);
+    container.append(root);
+    expect(controller.isCurrent()).toBe(true);
+    root.remove();
+    expect(controller.isCurrent()).toBe(false);
+    container.append(root);
+    expect(controller.isCurrent()).toBe(true);
+    controller.destroy();
+    expect(controller.isCurrent()).toBe(false);
+  });
+
+  it('keeps one usable map and panel until explicitly destroyed', async () => {
+    const { root, load, fetcher, handle, mountOverview, controller } = setup();
     await flush();
     const origin = document.createElement('button');
     root.querySelector('[data-hpm-canvas]')!.append(origin);
     for (let visit = 0; visit < 2; visit++) {
       mountOverview.mock.calls[0]![1].onPostSelect(a, origin);
       expect(root.querySelectorAll('.hpm-panel')).toHaveLength(1);
-      pageTransition('pagehide', true);
-      pageTransition('pageshow', true);
-      pageTransition('pageshow', true);
       await flush();
       expect(root.querySelectorAll('[data-hpm-activate]')).toHaveLength(0);
       expect(root.querySelectorAll('[data-hpm-show-list]')).toHaveLength(1);
@@ -752,8 +777,7 @@ describe('overview hydration', () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(mountOverview).toHaveBeenCalledTimes(1);
     expect(handle.destroy).not.toHaveBeenCalled();
-    pageTransition('pagehide', false);
-    pageTransition('pageshow', false);
+    controller.destroy();
     expect(handle.destroy).toHaveBeenCalledTimes(1);
     expect(
       root.querySelectorAll('[data-hpm-activate], [data-hpm-show-list], .hpm-panel'),
@@ -761,7 +785,7 @@ describe('overview hydration', () => {
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
     expect(load).toHaveBeenCalledTimes(1);
   });
-  it('allows pending overview data to finish after BFCache restore with one request owner', async () => {
+  it('allows pending overview data to finish with one request owner', async () => {
     const root = fixture();
     const response = deferred<Response>();
     let signal: AbortSignal | null | undefined;
@@ -772,8 +796,6 @@ describe('overview hydration', () => {
     const handle = { destroy: vi.fn(), setInteractive: vi.fn() };
     const mountOverview = vi.fn<MapProvider['mountOverview']>(async () => handle);
     hydrateOverview(root, async () => ({ mountOverview, mountDetail: vi.fn() }), fetcher);
-    pageTransition('pagehide', true);
-    pageTransition('pageshow', true);
     expect(signal?.aborted).toBe(false);
     response.resolve(new Response(JSON.stringify({ version: 1, posts: [a] })));
     await flush();
@@ -960,7 +982,7 @@ describe('overview hydration', () => {
       controller.destroy();
     },
   );
-  it('deduplicates across independent bundle modules and rebuilds after pagehide', async () => {
+  it('deduplicates across independent bundle modules and rebuilds after destroy', async () => {
     const { root, load, fetcher, controller } = setup();
     initializeOverviewMaps(document, load, fetcher);
     vi.resetModules();
@@ -968,10 +990,12 @@ describe('overview hydration', () => {
     expect(other.hydrateOverview(root, load, fetcher)).toBe(controller);
     await flush();
     expect(load).toHaveBeenCalledTimes(1);
-    window.dispatchEvent(new Event('pagehide'));
-    expect(other.hydrateOverview(root, load, fetcher)).not.toBe(controller);
+    controller.destroy();
+    const rebuilt = other.hydrateOverview(root, load, fetcher);
+    expect(rebuilt).not.toBe(controller);
     await flush();
     expect(load).toHaveBeenCalledTimes(2);
+    rebuilt.destroy();
   });
   it.each(['fetch', 'provider', 'mount'])(
     'ignores late %s completion after destroy and aborts requests',

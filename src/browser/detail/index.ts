@@ -1,16 +1,15 @@
 import type { MapHandle, ProviderLoader } from '../providers/types';
+import { registerRuntimeHydrator } from '../runtime/bridge';
+import { FEATURES, type RuntimeController } from '../runtime/types';
 import { readDetailConfig } from '../shared/config';
 import { setStatus, showFallback } from '../shared/dom';
 import { loadProvider } from '../shared/provider-loader';
 
-interface DetailController {
-  destroy(): void;
-}
 const controllersKey = Symbol.for('hexo-post-map.detail-controllers.v1');
-function controllers(): WeakMap<HTMLElement, DetailController> {
+function controllers(): WeakMap<HTMLElement, RuntimeController> {
   const page = window as unknown as Record<
     symbol,
-    WeakMap<HTMLElement, DetailController> | undefined
+    WeakMap<HTMLElement, RuntimeController> | undefined
   >;
   return (page[controllersKey] ??= new WeakMap());
 }
@@ -18,11 +17,11 @@ function controllers(): WeakMap<HTMLElement, DetailController> {
 export function hydrateDetail(
   root: HTMLElement,
   load: ProviderLoader = loadProvider,
-): DetailController {
+): RuntimeController {
   const registry = controllers();
   const existing = registry.get(root);
   if (existing) return existing;
-  const controller = { destroy };
+  const controller = { destroy, isCurrent };
   registry.set(root, controller);
   const abort = new AbortController();
   let handle: MapHandle | undefined;
@@ -31,6 +30,16 @@ export function hydrateDetail(
   let disposed = false;
   let failed = false;
   const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]');
+  const data = root.querySelector('[data-hpm-data]');
+
+  function isCurrent() {
+    return (
+      !disposed &&
+      root.isConnected &&
+      root.querySelector('[data-hpm-canvas]') === canvas &&
+      root.querySelector('[data-hpm-data]') === data
+    );
+  }
 
   function fail() {
     if (disposed) return;
@@ -41,10 +50,6 @@ export function hydrateDetail(
     setStatus(root, '地图暂时无法加载，请使用下方地点链接。');
     handle?.destroy();
   }
-  const onPageHide = (event: PageTransitionEvent) => {
-    // BFCache freezes this controller and its SDK ownership for the next pageshow.
-    if (!event.persisted) destroy();
-  };
   function destroy() {
     if (disposed) return;
     disposed = true;
@@ -53,12 +58,10 @@ export function hydrateDetail(
     observer?.disconnect();
     abort.abort();
     handle?.destroy();
-    window.removeEventListener('pagehide', onPageHide);
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
   }
   let config: ReturnType<typeof readDetailConfig>;
-  window.addEventListener('pagehide', onPageHide);
   try {
     config = readDetailConfig(root);
     if (!canvas) throw new Error('Missing map canvas');
@@ -122,6 +125,8 @@ export function initializeDetailMaps(
     .querySelectorAll<HTMLElement>('[data-hpm-detail]')
     .forEach((root) => hydrateDetail(root, load));
 }
-if (document.readyState === 'loading')
-  document.addEventListener('DOMContentLoaded', () => initializeDetailMaps(), { once: true });
-else initializeDetailMaps();
+registerRuntimeHydrator({
+  id: 'detail',
+  selector: FEATURES.detail.selector,
+  mount: hydrateDetail,
+});

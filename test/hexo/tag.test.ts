@@ -40,7 +40,7 @@ describe('tag and registration', () => {
       expect(hexo.extend.tag.env.hasExtension('post_map')).toBe(false);
     },
   );
-  it('registers functioning tag, post filter and marker-aware html filter with only post_map config', async () => {
+  it('registers functioning tag, post filter and universal runtime html filter with only post_map config', async () => {
     vi.stubEnv('HEXO_POST_MAP_AMAP_KEY', 'test-key');
     vi.stubEnv('HEXO_POST_MAP_AMAP_SERVICE_HOST', undefined);
     vi.stubEnv('HEXO_POST_MAP_AMAP_SECURITY_JS_CODE', 'test-code');
@@ -57,9 +57,12 @@ describe('tag and registration', () => {
     expect(post.content).toContain('data-hpm-detail');
     // Hexo maps the public registration name to this internal execution name.
     const html = hexo.extend.filter.execSync('_after_html_render', post.content);
-    expect(html).toContain('/blog/hexo-post-map/assets/post-map.js');
-    expect(hexo.extend.filter.execSync('_after_html_render', '<p>Ordinary</p>')).toBe(
-      '<p>Ordinary</p>',
-    );
+    expect(html).toContain('/blog/hexo-post-map/assets/runtime.js');
+    expect(html).toContain('/blog/hexo-post-map/assets/style.css');
+    expect(html).not.toMatch(/(?:post-map|overview-map)\.js/u);
+    const ordinary = hexo.extend.filter.execSync('_after_html_render', '<p>Ordinary</p>');
+    expect(ordinary).toContain('/blog/hexo-post-map/assets/runtime.js');
+    expect(ordinary).not.toContain('style.css');
+    expect(ordinary).not.toMatch(/(?:post-map|overview-map)\.js/u);
   });
 });

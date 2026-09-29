@@ -1,9 +1,21 @@
 import { execFile } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import {
+  appendFile,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
+import { runInNewContext } from 'node:vm';
 import Hexo from 'hexo';
 import { describe, expect, it } from 'vitest';
 
@@ -36,6 +48,44 @@ describe('registerPlugin', () => {
 });
 
 describe('package build', () => {
+  it('rejects forbidden runtime inputs when invoked outside the project directory', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'hpm-build-guard-'));
+    const script = join(fixture, 'scripts/build.mjs');
+    const outsideCwd = dirname(fixture);
+    try {
+      await cp(resolve('src'), join(fixture, 'src'), { recursive: true });
+      await mkdir(join(fixture, 'scripts'));
+      await cp(resolve('scripts/build.mjs'), script);
+      await symlink(
+        resolve('node_modules'),
+        join(fixture, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+
+      await execFileAsync(process.execPath, [script], { cwd: outsideCwd });
+      expect((await stat(join(fixture, 'dist/assets/runtime.js'))).size).toBeGreaterThan(0);
+
+      await writeFile(
+        join(fixture, 'src/browser/providers/build-guard-fixture.ts'),
+        "console.info('forbidden runtime dependency');\n",
+      );
+      await appendFile(
+        join(fixture, 'src/browser/runtime/index.ts'),
+        "\nimport '../providers/build-guard-fixture';\n",
+      );
+      const failure = await execFileAsync(process.execPath, [script], { cwd: outsideCwd }).then(
+        () => null,
+        (error: { stderr: string }) => error,
+      );
+      expect(failure).not.toBeNull();
+      expect(failure?.stderr).toContain(
+        'Runtime entry imports forbidden source: src/browser/providers/build-guard-fixture.ts',
+      );
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+
   it('produces the CommonJS entry and readable routes for every browser asset', async () => {
     await execFileAsync(process.execPath, ['scripts/build.mjs']);
 
@@ -46,9 +96,18 @@ describe('package build', () => {
       'overview-map.js',
       'placeholder.svg',
       'post-map.js',
+      'runtime.js',
       'style.css',
     ]);
-    for (const file of ['post-map.js', 'overview-map.js', 'style.css']) {
+    expect((await stat('dist/assets/runtime.js')).size).toBeLessThanOrEqual(8192);
+    const warnings: string[] = [];
+    runInNewContext(await readFile('dist/assets/runtime.js', 'utf8'), {
+      document: { currentScript: { src: 'https://example.test/private?config=secret' } },
+      HTMLScriptElement: class {},
+      console: { warn: (message: string) => warnings.push(message) },
+    });
+    expect(warnings).toEqual(['HexoPostMap: runtime script element is unavailable.']);
+    for (const file of ['post-map.js', 'overview-map.js', 'runtime.js', 'style.css']) {
       const content = await readFile(join('dist/assets', file), 'utf8');
       expect(content.length).toBeGreaterThan(0);
       expect(content).not.toContain('sourceMappingURL');
@@ -78,7 +137,7 @@ describe('package build', () => {
         hexo,
         hexo.locals.toObject() as Parameters<typeof generator>[0],
       );
-      expect(routes).toHaveLength(4);
+      expect(routes).toHaveLength(5);
       for (const route of routes) {
         let previous: Buffer | undefined;
         for (let read = 0; read < 2; read++) {

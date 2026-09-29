@@ -6,24 +6,23 @@ import type {
   MapHandle,
   ProviderLoader,
 } from '../providers/types';
+import { registerRuntimeHydrator } from '../runtime/bridge';
+import { FEATURES, type RuntimeController } from '../runtime/types';
 import { setStatus, showFallback } from '../shared/dom';
 import { loadProvider } from '../shared/provider-loader';
 import { installImageFallback } from './markers';
 import { renderPostPanel, type PanelHandle } from './panel';
 
-interface OverviewController {
-  destroy(): void;
-}
 interface OverviewConfig extends BrowserProviderConfig {
   dataUrl: string;
   placeholderUrl: string;
   cluster: { gridSize: number; maxZoom: number };
 }
 const controllersKey = Symbol.for('hexo-post-map.overview-controllers.v1');
-function controllers(): WeakMap<HTMLElement, OverviewController> {
+function controllers(): WeakMap<HTMLElement, RuntimeController> {
   const page = window as unknown as Record<
     symbol,
-    WeakMap<HTMLElement, OverviewController> | undefined
+    WeakMap<HTMLElement, RuntimeController> | undefined
   >;
   return (page[controllersKey] ??= new WeakMap());
 }
@@ -56,11 +55,11 @@ export function hydrateOverview(
   root: HTMLElement,
   load: ProviderLoader = loadProvider,
   fetcher: typeof fetch = fetch,
-): OverviewController {
+): RuntimeController {
   const registry = controllers();
   const existing = registry.get(root);
   if (existing) return existing;
-  const controller = { destroy };
+  const controller = { destroy, isCurrent };
   registry.set(root, controller);
   const abort = new AbortController();
   let handle: MapHandle | undefined;
@@ -70,6 +69,7 @@ export function hydrateOverview(
   let failed = false;
   const cleanups: (() => void)[] = [];
   const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]');
+  const data = root.querySelector('[data-hpm-data]');
   const showList = document.createElement('button');
   showList.type = 'button';
   showList.className = 'hpm-overview__list-toggle';
@@ -77,6 +77,14 @@ export function hydrateOverview(
   showList.textContent = '全部文章 0';
   showList.hidden = true;
   showList.setAttribute('aria-expanded', 'false');
+  function isCurrent() {
+    return (
+      !disposed &&
+      root.isConnected &&
+      root.querySelector('[data-hpm-canvas]') === canvas &&
+      root.querySelector('[data-hpm-data]') === data
+    );
+  }
   function fail() {
     if (disposed || failed) return;
     failed = true;
@@ -88,10 +96,6 @@ export function hydrateOverview(
     showFallback(root, true);
     setStatus(root, '地图暂时无法加载，请使用下方文章列表。');
   }
-  const onPageHide = (event: PageTransitionEvent) => {
-    // BFCache freezes this controller and its SDK ownership for the next pageshow.
-    if (!event.persisted) destroy();
-  };
   const onList = () => {
     if (showList.getAttribute('aria-expanded') === 'true') panel?.destroy();
     else select(posts, showList, () => showList);
@@ -105,15 +109,13 @@ export function hydrateOverview(
     handle?.destroy();
     cleanups.forEach((cleanup) => cleanup());
     showList.removeEventListener('click', onList);
-    window.removeEventListener('pagehide', onPageHide);
     showList.remove();
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
   }
-  window.addEventListener('pagehide', onPageHide);
   let config: OverviewConfig;
   try {
-    config = JSON.parse(root.querySelector('[data-hpm-data]')?.textContent ?? '') as OverviewConfig;
+    config = JSON.parse(data?.textContent ?? '') as OverviewConfig;
     if (
       !canvas ||
       config.provider !== 'amap' ||
@@ -226,6 +228,8 @@ export function initializeOverviewMaps(
     .querySelectorAll<HTMLElement>('[data-hpm-overview]')
     .forEach((root) => hydrateOverview(root, load, fetcher));
 }
-if (document.readyState === 'loading')
-  document.addEventListener('DOMContentLoaded', () => initializeOverviewMaps(), { once: true });
-else initializeOverviewMaps();
+registerRuntimeHydrator({
+  id: 'overview',
+  selector: FEATURES.overview.selector,
+  mount: hydrateOverview,
+});
