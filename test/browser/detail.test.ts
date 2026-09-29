@@ -43,6 +43,82 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
+describe('tracked detail server rendering', () => {
+  it('renders semantic visible statistics and fallback with initially hidden labelled playback controls', () => {
+    const track = {
+      url: `/blog/hexo-post-map/tracks/${'a'.repeat(64)}.json`,
+      stats: { distanceMeters: 1234, elevationGainMeters: 125, durationSeconds: 5400 },
+      playback: true,
+      source: '_posts/private-track.gpx',
+      name: 'PRIVATE_NAME',
+      timestamp: 'PRIVATE_TIMESTAMP',
+    };
+    document.body.innerHTML = renderDetailMap({ map, config, track });
+    const stats = document.querySelector<HTMLElement>('[data-hpm-track-stats]')!;
+    expect(stats?.tagName).toBe('DL');
+    expect(stats.hidden).toBe(false);
+    expect([...stats.querySelectorAll('dt')].map((node) => node.textContent)).toEqual([
+      '距离',
+      '累计爬升',
+      '时长',
+    ]);
+    expect([...stats.querySelectorAll('dd')].map((node) => node.textContent)).toEqual([
+      '1.23 公里',
+      '125 米',
+      '1 小时 30 分钟',
+    ]);
+    expect(document.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(document.querySelector('[data-hpm-fallback] a')!.textContent).toBe('上海');
+    expect(document.querySelector('[data-hpm-status]')!.getAttribute('aria-live')).toBe('polite');
+    const controls = document.querySelector<HTMLElement>('[data-hpm-playback]')!;
+    expect(controls?.hidden).toBe(true);
+    expect(controls.querySelector('[data-hpm-play]')?.textContent).toBe('播放');
+    expect(controls.querySelector('[data-hpm-play]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(controls.querySelector('[data-hpm-restart]')?.textContent).toBe('重新开始');
+    const range = controls.querySelector<HTMLInputElement>('[data-hpm-progress]')!;
+    expect(range.type).toBe('range');
+    expect(range.getAttribute('aria-label')).toBe('轨迹播放进度');
+    expect([range.min, range.max, range.step, range.value]).toEqual(['0', '1', '0.001', '0']);
+    const embedded = JSON.parse(document.querySelector('[data-hpm-data]')!.textContent!);
+    expect(embedded.track).toEqual({ url: track.url, stats: track.stats, playback: true });
+    expect(document.body.innerHTML).not.toMatch(/private-track|PRIVATE_NAME|PRIVATE_TIMESTAMP/);
+  });
+
+  it('omits optional statistics and controls when playback is disabled while safely serializing data', () => {
+    const name = '</script><img src=x onerror=alert(1)>';
+    const unsafeMap = normalizePostMap(
+      { points: [{ id: 'a', name, longitude: 121, latitude: 31 }] },
+      'a.md',
+    )!;
+    document.body.innerHTML = renderDetailMap({
+      map: unsafeMap,
+      config,
+      track: {
+        url: `/hexo-post-map/tracks/${'b'.repeat(64)}.json`,
+        stats: { distanceMeters: 10 },
+        playback: false,
+      },
+    });
+    expect(document.querySelectorAll('[data-hpm-track-stats] dd')).toHaveLength(1);
+    expect(document.querySelector('[data-hpm-playback]')).toBeNull();
+    expect(document.querySelectorAll('script')).toHaveLength(1);
+    expect(document.querySelector('img')).toBeNull();
+    expect(
+      JSON.parse(document.querySelector('[data-hpm-data]')!.textContent!).map.points[0].name,
+    ).toBe(name);
+  });
+
+  it('leaves point-only markup and browser data free of track additions', () => {
+    const root = fixture();
+    expect(root.querySelector('[data-hpm-track-stats], [data-hpm-playback]')).toBeNull();
+    expect(JSON.parse(root.querySelector('[data-hpm-data]')!.textContent!)).not.toHaveProperty(
+      'track',
+    );
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(root.querySelector('[data-hpm-canvas]')).not.toBeNull();
+  });
+});
+
 describe('detail hydration', () => {
   it.each(['canvas', 'data'])('detects replacement of the captured %s node', (node) => {
     const root = fixture();

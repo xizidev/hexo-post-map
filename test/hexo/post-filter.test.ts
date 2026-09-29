@@ -1,15 +1,45 @@
 import { Window } from 'happy-dom';
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { resolveConfig } from '../../src/config/resolve';
 import { PostMapValidationError } from '../../src/domain/errors';
 import { createPostFilter } from '../../src/hexo/post-filter';
 import { postMapTag } from '../../src/hexo/tag';
+import { createTrackCompiler } from '../../src/tracks/compiler';
 
 const onePoint = {
   points: [{ id: 'shanghai', name: '上海', longitude: 121.4737, latitude: 31.2304 }],
 };
 const source = 'source/_posts/a.md';
 const body = '<p>Body</p>';
+const temporaryDirectories: string[] = [];
+afterEach(() =>
+  temporaryDirectories
+    .splice(0)
+    .forEach((directory) => rmSync(directory, { recursive: true, force: true })),
+);
+function compiler() {
+  const sourceDir = mkdtempSync(join(tmpdir(), 'hpm-filter-track-'));
+  temporaryDirectories.push(sourceDir);
+  mkdirSync(join(sourceDir, '_posts/nested'), { recursive: true });
+  writeFileSync(
+    join(sourceDir, '_posts/nested/private-track.geojson'),
+    JSON.stringify({
+      type: 'Feature',
+      properties: { name: 'PRIVATE_NAME', timestamp: 'PRIVATE_TIMESTAMP' },
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [0, 0, 10],
+          [0.001, 0, 20],
+        ],
+      },
+    }),
+  );
+  return createTrackCompiler(sourceDir);
+}
 function config(post: Record<string, unknown> = {}) {
   return resolveConfig(
     { enabled: true, post, amap: { key: 'key', security: { security_js_code: 'code' } } },
@@ -18,6 +48,78 @@ function config(post: Record<string, unknown> = {}) {
 }
 
 describe('post filter', () => {
+  it.each(['/', '/blog/'])(
+    'embeds only a root-aware digest URL and sanitized stats under %s',
+    (root) => {
+      const result = createPostFilter(
+        config(),
+        compiler(),
+        root,
+      )({
+        source: '_posts/nested/trip.md',
+        content: body,
+        map: { ...onePoint, track: { source: 'private-track.geojson' } },
+      });
+      const window = new Window();
+      window.document.body.innerHTML = result.content;
+      const embedded = JSON.parse(window.document.querySelector('[data-hpm-data]')!.textContent!);
+      expect(embedded.track?.url).toMatch(
+        new RegExp(`^${root}hexo-post-map/tracks/[a-f0-9]{64}\\.json$`),
+      );
+      expect(embedded.track).toEqual({
+        url: embedded.track.url,
+        stats: { distanceMeters: 111.195, elevationGainMeters: 10 },
+        playback: true,
+      });
+      expect(embedded.map.points[0].coordinate).toEqual([121.4737, 31.2304]);
+      expect(result.content).not.toMatch(
+        /private-track|PRIVATE_NAME|PRIVATE_TIMESTAMP|_posts|source/,
+      );
+    },
+  );
+
+  it('does not read tracks when detail maps are disabled or manual placement is absent', () => {
+    const map = { ...onePoint, track: { source: 'missing.gpx' } };
+    for (const options of [{ enabled: false }, { position: 'manual' }]) {
+      expect(
+        createPostFilter(config(options), compiler())({ source: '_posts/a.md', content: body, map })
+          .content,
+      ).toBe(body);
+    }
+  });
+
+  it('fails invalid track sources before rendering a partial tracked section', () => {
+    expect(() =>
+      createPostFilter(
+        config(),
+        compiler(),
+      )({
+        source: '_posts/nested/trip.md',
+        content: body,
+        map: { ...onePoint, track: { source: 'missing.gpx' } },
+      }),
+    ).toThrowError(
+      expect.objectContaining({ name: 'TrackBuildError', sourcePath: '_posts/nested/trip.md' }),
+    );
+  });
+
+  it.each(['//evil.example/', '/blog/?query=', '/blog/#hash'])(
+    'rejects an unsafe root %s for track URLs',
+    (root) => {
+      expect(() =>
+        createPostFilter(
+          config(),
+          compiler(),
+          root,
+        )({
+          source: '_posts/nested/trip.md',
+          content: body,
+          map: { ...onePoint, track: { source: 'private-track.geojson' } },
+        }),
+      ).toThrow(/root/);
+    },
+  );
+
   it('leaves content and invalid metadata untouched without plugin config', () => {
     const post = { source, content: body, map: null };
     expect(createPostFilter(null)(post)).toBe(post);

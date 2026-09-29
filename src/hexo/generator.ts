@@ -3,12 +3,13 @@ import { join } from 'node:path';
 import type Hexo from 'hexo';
 import { parseFragment, serialize, type DefaultTreeAdapterMap } from 'parse5';
 import type { ResolvedPluginConfig } from '../config/types';
-import { normalizePostMap } from '../domain/normalize';
+import { normalizePostMapDocument } from '../domain/normalize';
 import { resolveRepresentativeImage } from '../presentation/image';
 import { safeUrl } from '../presentation/safe-html';
 import { serializeForHtmlScript } from '../presentation/serialize';
 import { renderOverview, type OverviewPost } from '../templates/overview';
 import { renderStandalone } from '../templates/standalone';
+import { createTrackCompiler } from '../tracks/compiler';
 import { injectBrowserRuntime } from './injector';
 
 export type { OverviewPost } from '../templates/overview';
@@ -150,19 +151,34 @@ export function createOverviewRoutes(
   locals: OverviewLocals,
   config: ResolvedPluginConfig | null,
   hexo: Hexo,
+  compiler = createTrackCompiler(hexo.source_dir),
 ): HexoRoute[] {
   if (config === null) return [];
   const assets = assetRoutes();
-  if (!config.overview.enabled) return assets;
-
-  const placeholderUrl = publicUrl('/hexo-post-map/assets/placeholder.svg', hexo, 'image');
+  const placeholderUrl = config.overview.enabled
+    ? publicUrl('/hexo-post-map/assets/placeholder.svg', hexo, 'image')
+    : '';
   const posts: OverviewPost[] = [];
+  const tracks = new Map<string, string>();
   for (const document of locals.posts.toArray()) {
     // Warehouse's Document type omits the schema properties exposed by Hexo at runtime.
     const post = document as OverviewSourcePost;
-    if (!post.published) continue;
-    const map = normalizePostMap(post.map, post.source);
-    if (map === null) continue;
+    const includeInOverview = config.overview.enabled && post.published;
+    const needsTrack =
+      config.post.enabled &&
+      post.map !== null &&
+      typeof post.map === 'object' &&
+      'track' in post.map;
+    // Preserve point-only publication filtering while scanning track references in all locals.
+    if (!includeInOverview && !needsTrack) continue;
+    const normalized = normalizePostMapDocument(post.map, post.source);
+    if (normalized === null) continue;
+    if (config.post.enabled && normalized.track) {
+      const compiled = compiler.compile(post.source, normalized.track);
+      tracks.set(compiled.routePath, compiled.serialized);
+    }
+    if (!includeInOverview) continue;
+    const map = normalized.map;
     const date = post.date.toISOString();
     if (date === null) throw new Error(`[hexo-post-map] Invalid post date: ${post.source}`);
     const representative = map.representative;
@@ -178,6 +194,8 @@ export function createOverviewRoutes(
       },
     });
   }
+  const trackRoutes: HexoRoute[] = [...tracks].map(([path, data]) => ({ path, data }));
+  if (!config.overview.enabled) return [...assets, ...trackRoutes];
   posts.sort((a, b) => b.date.localeCompare(a.date));
   const dataPath = `${config.overview.path}posts.json`;
   const content = renderOverview({
@@ -197,5 +215,10 @@ export function createOverviewRoutes(
       hexo.config.root,
     );
   }
-  return [page, { path: dataPath, data: serializeForHtmlScript({ version: 1, posts }) }, ...assets];
+  return [
+    page,
+    { path: dataPath, data: serializeForHtmlScript({ version: 1, posts }) },
+    ...assets,
+    ...trackRoutes,
+  ];
 }
