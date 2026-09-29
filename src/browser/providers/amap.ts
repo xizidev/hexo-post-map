@@ -4,8 +4,14 @@ import type { OverviewPost } from '../../templates/overview';
 import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
 import { createClusterMarker, createImageMarker, overviewFitPadding } from '../overview/markers';
 import { createDetailMarker, type DetailMarkerElement } from '../detail/marker';
+import {
+  convertTrackFromGps,
+  createTrackProgressGeometry,
+  type AMapTrackConversionApi,
+} from './amap-track';
 import type {
   BrowserProviderConfig,
+  DetailMapHandle,
   DetailMapModel,
   MapHandle,
   MapProvider,
@@ -17,6 +23,7 @@ interface AMapMap {
   on(event: string, callback: () => void): void;
   off(event: string, callback: () => void): void;
   add(overlays: unknown[]): void;
+  remove?(overlays: unknown[]): void;
   setFitView(overlays: unknown[], immediately: boolean, padding: number[]): void;
   setStatus(status: Record<string, boolean>): void;
   destroy(): void;
@@ -26,14 +33,23 @@ interface AMapMap {
 }
 interface AMapMarker {
   setTop(top: boolean): void;
+  setPosition(position: Coordinate): void;
+  setMap?(map: AMapMap | null): void;
+}
+interface AMapPolyline {
+  setPath(path: readonly Coordinate[]): void;
+  hide(): void;
+  show(): void;
+  setMap?(map: AMapMap | null): void;
 }
 interface AMapApi {
   Map: new (container: HTMLElement, options: Record<string, unknown>) => AMapMap;
   Marker: new (options: Record<string, unknown>) => AMapMarker;
-  Polyline: new (options: Record<string, unknown>) => unknown;
+  Polyline: new (options: Record<string, unknown>) => AMapPolyline;
   Bounds: new (southwest: Coordinate, northeast: Coordinate) => unknown;
   Pixel: new (x: number, y: number) => unknown;
   plugin(names: string[], ready: () => void): void;
+  convertFrom?: AMapTrackConversionApi['convertFrom'];
   MarkerCluster?: new (
     map: AMapMap,
     data: ClusterPoint[],
@@ -209,7 +225,7 @@ function mountDetail(
   mapStyle: string,
   container: HTMLElement,
   model: DetailMapModel,
-): Promise<MapHandle> {
+): Promise<DetailMapHandle> {
   return new Promise((resolve, reject) => {
     if (model.signal?.aborted) {
       reject(new Error('Map initialization cancelled'));
@@ -228,8 +244,19 @@ function mountDetail(
       animateEnable: !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     });
     let complete = false;
+    let mapReady = false;
+    let trackReady = model.track === undefined;
+    let trackMounted = false;
+    let trackErrorReported = false;
     let destroyed = false;
     const markers: AMapMarker[] = [];
+    const fullTrackLines: AMapPolyline[] = [];
+    const progressTrackLines: AMapPolyline[] = [];
+    const trackOverlays: Array<AMapPolyline | AMapMarker> = [];
+    let movingTrackMarker: AMapMarker | undefined;
+    let updateTrackProgress: ((progress: number) => void) | undefined;
+    let schematicRoute: AMapPolyline | undefined;
+    const trackAbort = model.track ? new AbortController() : undefined;
     const markerViews: Array<
       DetailMarkerElement & {
         sdkMarker: AMapMarker;
@@ -243,7 +270,68 @@ function mountDetail(
       }
     > = [];
     let activeMarker: (typeof markerViews)[number] | undefined;
-    const timeout = window.setTimeout(fail, LOAD_TIMEOUT_MS);
+    const timeout = window.setTimeout(onDeadline, LOAD_TIMEOUT_MS);
+
+    function routeColor(): string {
+      return getComputedStyle(container).getPropertyValue('--hpm-route-color').trim() || '#0f766e';
+    }
+
+    function addSchematicRoute(): void {
+      if (schematicRoute || model.map.route.length <= 1) return;
+      schematicRoute = new api.Polyline({
+        path: model.map.route.map((routePoint) => routePoint.coordinate),
+        strokeColor: routeColor(),
+        strokeWeight: 3,
+      });
+      map.add([schematicRoute]);
+    }
+
+    function removeTrackOverlays(): void {
+      if (!trackOverlays.length) return;
+      const overlays = [...trackOverlays];
+      try {
+        map.remove?.(overlays);
+      } catch {
+        // Every owned overlay is also detached below; map destruction remains the final boundary.
+      }
+      for (const overlay of overlays) {
+        try {
+          overlay.setMap?.(null);
+        } catch {
+          // A vendor cleanup failure must not turn track-only degradation into provider failure.
+        }
+      }
+      trackOverlays.length = 0;
+      fullTrackLines.length = 0;
+      progressTrackLines.length = 0;
+      movingTrackMarker = undefined;
+      updateTrackProgress = undefined;
+      trackMounted = false;
+    }
+
+    function reportTrackError(): void {
+      if (trackErrorReported || destroyed) return;
+      trackErrorReported = true;
+      try {
+        model.onTrackError?.();
+      } catch {
+        // The detail status callback is advisory and cannot make the provider unavailable.
+      }
+    }
+
+    function degradeTrack(): void {
+      if (destroyed) return;
+      removeTrackOverlays();
+      try {
+        addSchematicRoute();
+      } catch {
+        fail();
+        return;
+      }
+      trackReady = true;
+      reportTrackError();
+      finishIfReady();
+    }
 
     function closeActive() {
       activeMarker?.setExpanded(false);
@@ -282,6 +370,7 @@ function mountDetail(
       if (destroyed) return;
       destroyed = true;
       clearTimeout(timeout);
+      trackAbort?.abort();
       map.off('complete', ready);
       map.off('error', fail);
       map.off('click', onMapClick);
@@ -303,6 +392,7 @@ function mountDetail(
         marker.scrollViewport.removeEventListener('touchend', marker.onTooltipTouchEnd);
         marker.scrollViewport.removeEventListener('touchcancel', marker.onTooltipTouchEnd);
       });
+      removeTrackOverlays();
       model.signal?.removeEventListener('abort', cancel);
       map.destroy();
     }
@@ -316,15 +406,33 @@ function mountDetail(
       destroy();
       if (!complete) reject(new Error('Map initialization cancelled'));
     }
-    function ready() {
+
+    function onDeadline(): void {
       if (destroyed || complete) return;
+      if (!mapReady) {
+        fail();
+        return;
+      }
+      if (!trackReady) {
+        trackAbort?.abort();
+        degradeTrack();
+      }
+    }
+
+    function finishIfReady() {
+      if (destroyed || complete || !mapReady || !trackReady) return;
       try {
         // AMap's avoid order is top, bottom, left, right. Reserve room for
         // the 44px bottom-anchored control plus a wrapped place tooltip.
-        if (markers.length > 1) map.setFitView(markers, true, [112, 24, 24, 24]);
+        const fitOverlays = trackMounted ? [...markers, ...fullTrackLines] : markers;
+        if (markers.length > 1 || fullTrackLines.length)
+          map.setFitView(fitOverlays, true, [112, 24, 24, 24]);
         clearTimeout(timeout);
         complete = true;
-        resolve({
+        const handle: DetailMapHandle = {
+          get hasTrack() {
+            return trackMounted;
+          },
           destroy,
           setInteractive(active) {
             if (destroyed) return;
@@ -334,10 +442,29 @@ function mountDetail(
               fail();
             }
           },
-        });
+          ...(updateTrackProgress
+            ? {
+                setTrackProgress(progress: number) {
+                  if (destroyed || !trackMounted) return;
+                  try {
+                    updateTrackProgress?.(progress);
+                  } catch {
+                    degradeTrack();
+                  }
+                },
+              }
+            : {}),
+        };
+        resolve(handle);
       } catch {
         fail();
       }
+    }
+
+    function ready() {
+      if (destroyed || complete) return;
+      mapReady = true;
+      finishIfReady();
     }
     map.on('complete', ready);
     map.on('error', fail);
@@ -349,6 +476,10 @@ function mountDetail(
     window.addEventListener('resize', closeActive);
     window.addEventListener('pagehide', closeActive);
     model.signal?.addEventListener('abort', cancel, { once: true });
+    if (model.signal?.aborted) {
+      cancel();
+      return;
+    }
 
     try {
       const routeIds = new Set(model.map.route.map((point) => point.id));
@@ -426,17 +557,104 @@ function mountDetail(
         markerViews.push(markerView);
         markers.push(sdkMarker);
       }
-      const overlays: unknown[] = [...markers];
-      if (model.map.route.length > 1)
-        overlays.push(
-          new api.Polyline({
-            path: model.map.route.map((point) => point.coordinate),
-            strokeColor:
-              getComputedStyle(container).getPropertyValue('--hpm-route-color').trim() || '#0f766e',
-            strokeWeight: 3,
-          }),
-        );
-      map.add(overlays);
+      map.add(markers);
+      if (destroyed) return;
+      if (!model.track) {
+        addSchematicRoute();
+        return;
+      }
+      if (typeof api.convertFrom !== 'function') {
+        degradeTrack();
+        return;
+      }
+      void convertTrackFromGps(
+        api as AMapApi & AMapTrackConversionApi,
+        model.track,
+        trackAbort!.signal,
+        {
+          timeoutMilliseconds: false,
+        },
+      ).then(
+        (track) => {
+          if (destroyed || trackReady) return;
+          const styles = getComputedStyle(container);
+          const fullColor =
+            styles.getPropertyValue('--hpm-track-color').trim() ||
+            styles.getPropertyValue('--hpm-route-color').trim() ||
+            '#64748b';
+          const progressColor =
+            styles.getPropertyValue('--hpm-track-progress-color').trim() ||
+            styles.getPropertyValue('--hpm-accent').trim() ||
+            '#2563eb';
+          try {
+            for (const segment of track.segments) {
+              const line = new api.Polyline({
+                path: segment,
+                strokeColor: fullColor,
+                strokeOpacity: 0.55,
+                strokeWeight: 5,
+                lineCap: 'round',
+                lineJoin: 'round',
+              });
+              fullTrackLines.push(line);
+              trackOverlays.push(line);
+            }
+            if (model.trackPlayback === true) {
+              const geometry = createTrackProgressGeometry(track);
+              const initial = geometry.at(0);
+              for (let index = 0; index < track.segments.length; index += 1) {
+                const line = new api.Polyline({
+                  // Keep a vendor-valid path while hiding all progress at the initial state.
+                  path: track.segments[index]!,
+                  strokeColor: progressColor,
+                  strokeWeight: 5,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                  zIndex: 41,
+                });
+                progressTrackLines.push(line);
+                trackOverlays.push(line);
+              }
+              const markerContent = document.createElement('span');
+              markerContent.className = 'hpm-track-marker';
+              markerContent.setAttribute('aria-hidden', 'true');
+              movingTrackMarker = new api.Marker({
+                position: initial.coordinate,
+                content: markerContent,
+                anchor: 'center',
+                clickable: false,
+                bubble: false,
+                keyboardEnable: false,
+                zIndex: 42,
+              });
+              trackOverlays.push(movingTrackMarker);
+              updateTrackProgress = (progress) => {
+                const state = geometry.at(progress);
+                for (let index = 0; index < progressTrackLines.length; index += 1) {
+                  const line = progressTrackLines[index]!;
+                  const path = state.paths[index]!;
+                  if (path.length > 1) {
+                    line.setPath(path);
+                    line.show();
+                  } else line.hide();
+                }
+                movingTrackMarker?.setPosition(state.coordinate);
+              };
+            }
+            map.add(trackOverlays);
+            if (destroyed) return;
+            progressTrackLines.forEach((line) => line.hide());
+            trackMounted = true;
+            trackReady = true;
+            finishIfReady();
+          } catch {
+            degradeTrack();
+          }
+        },
+        () => {
+          if (!destroyed && !trackReady) degradeTrack();
+        },
+      );
     } catch {
       fail();
     }

@@ -21,6 +21,7 @@ const api = {
   Map: class {},
   Marker: class {},
   Polyline: class {},
+  convertFrom() {},
 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
