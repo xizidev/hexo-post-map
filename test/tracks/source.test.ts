@@ -2,11 +2,16 @@ import { execFileSync } from 'node:child_process';
 import {
   closeSync,
   ftruncateSync,
+  fstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
+  readFileSync,
+  readSync,
   realpathSync,
+  renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -15,7 +20,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { TrackBuildError } from '../../src/tracks/errors';
-import { readTrackSource } from '../../src/tracks/source';
+import { createTrackSourceReader, readTrackSource } from '../../src/tracks/source';
 
 describe('readTrackSource', () => {
   let temporary: string;
@@ -128,5 +133,99 @@ describe('readTrackSource', () => {
     } finally {
       closeSync(descriptor);
     }
+  });
+
+  it.each(['realpath', 'stat', 'open', 'read'])(
+    'rejects a parent replaced at %s without returning outside bytes or leaking descriptors',
+    (phase) => {
+      const parent = join(sourceDir, '_posts/tracks');
+      const target = join(parent, 'trip.gpx');
+      const outside = join(temporary, 'outside');
+      mkdirSync(outside);
+      writeFileSync(target, 'INSIDE');
+      writeFileSync(join(outside, 'trip.gpx'), 'PRIVATE_OUTSIDE');
+      const canonicalTarget = realpathSync(target);
+      let replaced = false;
+      let readBytes = 0;
+      const descriptors = new Set<number>();
+      const replace = () => {
+        if (replaced) return;
+        replaced = true;
+        renameSync(parent, join(sourceDir, '_posts/original-tracks'));
+        symlinkSync(outside, parent);
+      };
+      const read = createTrackSourceReader({
+        realpathSync: ((...args: Parameters<typeof realpathSync>) => {
+          const result = realpathSync(...args);
+          if (phase === 'realpath' && String(args[0]) === target) replace();
+          return result;
+        }) as typeof realpathSync,
+        statSync: ((...args: Parameters<typeof statSync>) => {
+          if (phase === 'stat' && String(args[0]) === canonicalTarget) replace();
+          return statSync(...args);
+        }) as typeof statSync,
+        openSync: (...args: Parameters<typeof openSync>) => {
+          const descriptor = openSync(...args);
+          descriptors.add(descriptor);
+          if (phase === 'open' && String(args[0]) === canonicalTarget) replace();
+          return descriptor;
+        },
+        closeSync: (descriptor) => {
+          closeSync(descriptor);
+          descriptors.delete(descriptor);
+        },
+        readFileSync: ((...args: Parameters<typeof readFileSync>) => {
+          const result = readFileSync(...args);
+          readBytes += result.length;
+          return result;
+        }) as typeof readFileSync,
+        readSync: ((...args: Parameters<typeof readSync>) => {
+          const count = readSync(...args);
+          readBytes += count;
+          if (phase === 'read') replace();
+          return count;
+        }) as typeof readSync,
+      });
+      expect(() => read(sourceDir, postSource, 'tracks/trip.gpx')).toThrow(TrackBuildError);
+      expect(replaced).toBe(true);
+      expect(readBytes).toBe(phase === 'read' ? 6 : 0);
+      expect(descriptors.size).toBe(0);
+    },
+  );
+
+  it('physically bounds reads to MAX+1 when the opened file grows before reading', () => {
+    const maximum = 8 * 1024 * 1024;
+    const target = join(sourceDir, '_posts/tracks/growing.gpx');
+    writeFileSync(target, 'small initial file');
+    let grown = false;
+    let readBytes = 0;
+    const read = createTrackSourceReader({
+      fstatSync: ((...args: Parameters<typeof fstatSync>) => {
+        const result = fstatSync(...args);
+        if (result.isFile() && !grown) {
+          grown = true;
+          const writer = openSync(target, 'r+');
+          try {
+            ftruncateSync(writer, maximum * 8);
+          } finally {
+            closeSync(writer);
+          }
+        }
+        return result;
+      }) as typeof fstatSync,
+      readFileSync: ((...args: Parameters<typeof readFileSync>) => {
+        const result = readFileSync(...args);
+        readBytes += result.length;
+        return result;
+      }) as typeof readFileSync,
+      readSync: ((...args: Parameters<typeof readSync>) => {
+        const count = readSync(...args);
+        readBytes += count;
+        return count;
+      }) as typeof readSync,
+    });
+    expect(() => read(sourceDir, postSource, 'tracks/growing.gpx')).toThrow(/8 MiB/);
+    expect(grown).toBe(true);
+    expect(readBytes).toBe(maximum + 1);
   });
 });
