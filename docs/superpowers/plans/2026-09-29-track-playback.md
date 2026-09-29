@@ -349,7 +349,7 @@
 
 - [ ] **Step 5: Write failing detail-hydration integration tests**
 
-  Assert no fetch before the existing intersection, provider and track load share one abort boundary, successful track reaches `mountDetail`, `playback: false` exposes no controls and sets complete progress, fetch/validation failure mounts without track and keeps the schematic fallback model, provider failure still shows the place-list fallback, duplicate hydration makes one fetch, `isCurrent` notices replaced track controls, and destroy blocks late fetch/provider resolution.
+  Assert no fetch before the existing intersection, provider and track load share one abort boundary, successful track reaches `mountDetail`, `playback: false` exposes no controls and requests display-only track rendering, fetch/validation failure mounts without track and keeps the schematic fallback model, provider failure still shows the place-list fallback, duplicate hydration makes one fetch, `isCurrent` notices replaced track controls, and destroy blocks late fetch/provider resolution.
 
 - [ ] **Step 6: Integrate loading and playback into `hydrateDetail`**
 
@@ -408,7 +408,7 @@
 
 - [ ] **Step 5: Write failing AMap adapter tests**
 
-  Assert successful conversion omits the schematic route, creates muted full and accent progress polylines per segment, keeps numbered point pins, includes track overlays in fit view, updates existing polylines/marker without map recreation, starts at zero for playback and complete for display-only, and destroys cleanly. Assert any conversion failure invokes `onTrackError` once and mounts the original schematic route with no WGS84 overlay.
+  Assert successful conversion omits the schematic route, creates muted full polylines per segment, adds accent progress polylines and a moving marker only when playback is enabled, keeps numbered point pins, includes track overlays in fit view, updates existing polylines/marker without map recreation, starts at zero for playback, leaves only the full muted line for display-only mode, and destroys cleanly. Assert any conversion failure invokes `onTrackError` once and mounts the original schematic route with no WGS84 overlay.
 
 - [ ] **Step 6: Integrate track rendering with the existing detail adapter**
 
