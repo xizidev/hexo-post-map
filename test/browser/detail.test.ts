@@ -205,6 +205,7 @@ describe('detail hydration', () => {
     }
     expect(load).toHaveBeenCalledTimes(1);
     expect(mountDetail).toHaveBeenCalledTimes(1);
+    expect(mountDetail.mock.calls[0]?.[1]).not.toHaveProperty('trackPlayback');
     expect(handle.destroy).not.toHaveBeenCalled();
     controller.destroy();
     expect(canvas.tabIndex).toBe(-1);
@@ -485,6 +486,7 @@ describe('detail hydration', () => {
 
     const model = mount.mock.calls[0]?.[1];
     expect(model?.track).toEqual(trackAsset);
+    expect(model?.trackPlayback).toBe(true);
     expect(model?.signal).toBe(fetchSignal);
     expect(root.querySelector<HTMLElement>('[data-hpm-playback]')!.hidden).toBe(false);
     expect(handle.setTrackProgress).toHaveBeenLastCalledWith(0);
@@ -506,6 +508,7 @@ describe('detail hydration', () => {
     await flush();
 
     expect(mount.mock.calls[0]?.[1].track).toEqual(trackAsset);
+    expect(mount.mock.calls[0]?.[1].trackPlayback).toBe(false);
     expect(root.querySelector('[data-hpm-playback]')).toBeNull();
     expect(root.dataset.hpmActive).toBe('true');
   });
@@ -523,7 +526,9 @@ describe('detail hydration', () => {
     hydrateDetail(root, async () => ({ mountDetail: mount, mountOverview: vi.fn() }), fetcher);
     await flush();
 
-    expect(mount.mock.calls[0]?.[1]).toMatchObject({ map, track: undefined });
+    expect(mount.mock.calls[0]?.[1]).toMatchObject({ map });
+    expect(mount.mock.calls[0]?.[1]).not.toHaveProperty('track');
+    expect(mount.mock.calls[0]?.[1]).not.toHaveProperty('trackPlayback');
     expect(root.dataset.hpmActive).toBe('true');
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
     expect(root.querySelector<HTMLElement>('[data-hpm-playback]')!.hidden).toBe(true);
@@ -613,6 +618,82 @@ describe('detail hydration', () => {
     expect(root.querySelector<HTMLElement>('[data-hpm-playback]')!.hidden).toBe(true);
   });
 
+  it('fully disables visible playback when the current provider fails after a successful mount', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    let lateFrame!: FrameRequestCallback;
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      lateFrame = callback;
+      return 41;
+    });
+    const cancelFrame = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', requestFrame);
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+    const removeMotionListener = vi.fn();
+    vi.stubGlobal('matchMedia', () => ({
+      matches: false,
+      media: '(prefers-reduced-motion: reduce)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: removeMotionListener,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(() => true),
+    }));
+    const root = trackedFixture();
+    let model!: DetailMapModel;
+    const handle = {
+      hasTrack: true,
+      destroy: vi.fn(),
+      setInteractive: vi.fn(),
+      setTrackProgress: vi.fn(),
+    };
+    hydrateDetail(
+      root,
+      async () => ({
+        mountDetail: async (_container, current) => {
+          model = current;
+          return handle;
+        },
+        mountOverview: vi.fn(),
+      }),
+      async () => trackResponse(),
+    );
+    await flush();
+    const controls = root.querySelector<HTMLElement>('[data-hpm-playback]')!;
+    const play = root.querySelector<HTMLButtonElement>('[data-hpm-play]')!;
+    const restart = root.querySelector<HTMLButtonElement>('[data-hpm-restart]')!;
+    const range = root.querySelector<HTMLInputElement>('[data-hpm-progress]')!;
+    play.click();
+    expect(play.getAttribute('aria-pressed')).toBe('true');
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    const progressCalls = handle.setTrackProgress.mock.calls.length;
+
+    model.onError?.();
+
+    expect(controls.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe(
+      '地图暂时无法加载，请使用下方地点链接。',
+    );
+    expect(root.dataset.hpmActive).toBe('false');
+    expect(root.querySelector<HTMLElement>('[data-hpm-canvas]')!.tabIndex).toBe(-1);
+    expect(cancelFrame).toHaveBeenCalledWith(41);
+    expect(removeMotionListener).toHaveBeenCalledTimes(1);
+    expect(handle.destroy).toHaveBeenCalledTimes(1);
+    expect(cancelFrame.mock.invocationCallOrder[0]).toBeLessThan(
+      handle.destroy.mock.invocationCallOrder[0]!,
+    );
+
+    play.click();
+    restart.click();
+    range.value = '0.5';
+    range.dispatchEvent(new Event('input'));
+    lateFrame(15_000);
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    expect(handle.setTrackProgress).toHaveBeenCalledTimes(progressCalls);
+    expect(controls.hidden).toBe(true);
+  });
+
   it('does not mutate replacement-root DOM when a provider callback arrives after staleness', async () => {
     vi.stubGlobal('IntersectionObserver', undefined);
     const root = trackedFixture();
@@ -639,13 +720,12 @@ describe('detail hydration', () => {
     const status = root.querySelector<HTMLElement>('[data-hpm-status]')!;
     const fallback = root.querySelector<HTMLElement>('[data-hpm-fallback]')!;
     expect(controls.hidden).toBe(false);
-    root
-      .querySelector('[data-hpm-canvas]')!
-      .replaceWith(root.querySelector('[data-hpm-canvas]')!.cloneNode(true));
+    const replacement = controls.cloneNode(true) as HTMLElement;
+    controls.replaceWith(replacement);
 
     model.onError?.();
 
-    expect(controls.hidden).toBe(false);
+    expect(replacement.hidden).toBe(false);
     expect(status.textContent).toBe('');
     expect(fallback.hidden).toBe(true);
     expect(root.dataset.hpmActive).toBe('true');

@@ -16,6 +16,7 @@ export interface DetailMapModel {
   readonly map: NormalizedPostMap;
   readonly defaultZoom: number;
   readonly track?: PublishedTrackAsset;
+  readonly trackPlayback?: boolean;
   readonly signal?: AbortSignal;
   readonly onError?: () => void;
   readonly onTrackError?: () => void;

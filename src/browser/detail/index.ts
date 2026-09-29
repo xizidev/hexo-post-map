@@ -69,6 +69,7 @@ export function hydrateDetail(
     setStatus(root, '地图暂时无法加载，请使用下方地点链接。');
     playback?.destroy();
     playback = undefined;
+    if (playbackRoot) playbackRoot.hidden = true;
     handle?.destroy();
   }
   function teardown(updateDom: boolean) {
@@ -142,7 +143,7 @@ export function hydrateDetail(
       const mounted = await provider.mountDetail(canvas!, {
         map: config.map,
         defaultZoom: config.defaultZoom,
-        track,
+        ...(track === undefined ? {} : { track, trackPlayback: config.track!.playback }),
         signal: abort.signal,
         onError: fail,
         onTrackError: showTrackFallback,
