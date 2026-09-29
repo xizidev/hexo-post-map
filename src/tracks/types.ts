@@ -18,6 +18,33 @@ export interface RawTrackPoint {
 
 export type RawTrack = readonly (readonly RawTrackPoint[])[];
 
+export interface TrackStats {
+  readonly distanceMeters: number;
+  readonly elevationGainMeters?: number;
+  readonly durationSeconds?: number;
+}
+
+export type PublishedTrackCoordinate =
+  | readonly [longitude: number, latitude: number]
+  | readonly [longitude: number, latitude: number, elevationMeters: number];
+
+export type PublishedTrackSegments = readonly (readonly PublishedTrackCoordinate[])[];
+
+export interface PublishedTrackAsset {
+  readonly version: 1;
+  readonly coordinateSystem: 'wgs84';
+  readonly segments: PublishedTrackSegments;
+  readonly stats: TrackStats;
+}
+
+export interface CompiledTrack {
+  readonly routePath: `hexo-post-map/tracks/${string}.json`;
+  readonly serialized: string;
+  readonly asset: PublishedTrackAsset;
+  readonly stats: TrackStats;
+  readonly playback: boolean;
+}
+
 /** Server-only source identity and bytes. */
 export interface TrackSourceFile {
   readonly format: 'gpx' | 'geojson';
