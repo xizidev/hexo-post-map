@@ -1,6 +1,14 @@
 # Maintainer release guide
 
-The automated path is a Conventional Commit on `main` → Release Please version/changelog PR → reviewed merge → published GitHub Release → `.github/workflows/publish.yml`. The initial version is `0.1.0`; the empty manifest tells Release Please that this package has not been released yet. Do not edit the manifest to `0.1.0` before the first release: that would mark it as an already released version.
+## v0.5 recorded-track boundary
+
+The v0.5 feature is additive: required GCJ-02 `points`, point-only pages, overview `posts.json` version 1, configuration, and lifecycle API remain compatible. Optional WGS84 GPX/GeoJSON input is compiled at build time into privacy-trimmed, bounded, content-addressed JSON under `hexo-post-map/tracks/`. No source file, filename/path, absolute timestamp, GPX metadata, or arbitrary GeoJSON property belongs in the npm package or generated output.
+
+A v0.5 release candidate must pass documentation examples, complete unit/build checks, Chromium, every declared Node/Hexo/theme/root packed cell, the temporary-copy real-blog smoke, and a dry-run tarball inventory. The tracked fixtures must include GPX, GeoJSON, point-only compatibility, and `post_asset_folder` raw-source suppression at both `/` and `/blog/`. The optional credential-gated AMap smoke may skip when credentials are absent; do not report it as executed.
+
+Do not publish by changing `package.json` on a feature branch. Merge reviewed implementation and documentation through the normal Conventional Commit path, then let Release Please prepare the version/changelog boundary. npm publication remains authorized only by a published GitHub Release and the protected `npm` environment.
+
+The automated path is a Conventional Commit on `main` → Release Please version/changelog PR → reviewed merge → published GitHub Release → `.github/workflows/publish.yml`. `.release-please-manifest.json` records the latest released version (`0.4.0` before this work); Release Please, not a feature branch, advances that release state. The `initial-version: 0.1.0` setting in `release-please-config.json` is only the historical bootstrap default and must not be mistaken for the current package version.
 
 ## One-time administrator setup
 

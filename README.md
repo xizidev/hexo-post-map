@@ -4,7 +4,7 @@
 
 Add a compact location card to Hexo posts and a site-wide map of your writing. Describe one place, several places, or a schematic itinerary in Front Matter. Nearby posts cluster as readers zoom; repeated visits to the same place open an article list.
 
-Requires Node.js **20 or newer** and Hexo **7 or 8**. The plugin uses AMap JS API 2.0 and **GCJ-02** coordinates. Controls and fallback messages currently use Chinese.
+Requires Node.js **20 or newer** and Hexo **7 or 8**. The plugin uses AMap JS API 2.0. Authored place points use **GCJ-02**; optional recorded-track files use **WGS84**. Controls and fallback messages currently use Chinese.
 
 ## Install and enable
 
@@ -195,6 +195,56 @@ map:
 
 Unknown fields under `map` and each point are rejected. See the [Front Matter reference](https://github.com/xizidev/hexo-post-map/blob/main/docs/front-matter.md) for validation and diagnostic examples.
 
+### Add a recorded GPX track
+
+Within `map`, `points` remains required and uses GCJ-02 coordinates; `track` is optional and its GPX or GeoJSON coordinates are WGS84. The place points keep the detail card and overview useful even when the recorded track cannot load.
+
+```yaml test=post-map-track
+title: Nanjing by train
+map:
+  representative: station
+  points:
+    - id: station
+      name: 南京站
+      longitude: 118.7977
+      latitude: 32.0872
+  track:
+    source: ./tracks/nanjing.gpx
+    privacy:
+      trim_start_meters: 300
+      trim_end_meters: 300
+    simplify_tolerance_meters: 5
+    playback: true
+```
+
+`source` is a local path relative to the article source file. For `source/_posts/nanjing.md`, the example resolves to `source/_posts/tracks/nanjing.gpx`. The file must remain inside Hexo's `source_dir`; remote URLs, absolute paths, traversal, and escaping symlinks fail the build.
+
+### Add a display-only GeoJSON track
+
+```yaml test=post-map-track
+title: Walking through Nanjing
+map:
+  representative: old-city
+  points:
+    - id: old-city
+      name: 南京老城
+      longitude: 118.7872
+      latitude: 32.0415
+  track:
+    source: ./tracks/nanjing.geojson
+    playback: false
+```
+
+Supported suffixes are `.gpx`, `.geojson`, and GeoJSON `.json`. `privacy.trim_start_meters` and `privacy.trim_end_meters` both default to `0`; `simplify_tolerance_meters` defaults to `5`; `playback` defaults to `true`. Each source is limited to 8 MiB and 200,000 raw points, and the published asset is limited to 2,000 points.
+
+The build order is privacy trim → statistics → simplification → SHA-256 hash. Trimming therefore affects every published coordinate and statistic, but distance trimming does not anonymize a route: nearby landmarks and route shape may still reveal sensitive places. Choose an intentionally approximate public point and enough trimming for your own risk model.
+
+Available distance, cumulative elevation gain, and recorded duration are server-rendered, so readers can see them without JavaScript. Playback never starts automatically. With reduced motion enabled, continuous play and restart stay unavailable while the native range control still supports manual seeking. `playback: false` shows only the muted full track and no playback controls.
+
+The processed track is published as `hexo-post-map/tracks/<sha256>.json`; the raw GPX/GeoJSON file, filename, path, timestamps, metadata, and arbitrary properties are not published by the plugin. Content-addressed files can use a long immutable CDN cache, while HTML should keep the site's normal revalidation policy. When deploying a new build, retain old hashes until updated HTML and CDN caches have rolled out.
+
+Track JSON is fetched only by a nearby article detail map. The overview never requests or exposes tracks, and `map/posts.json` remains the point-only version-1 format. A fetch, validation, or WGS84-to-GCJ-02 conversion failure keeps the place pins and falls back to the schematic `route`. Hash URLs respect Hexo `root`, including `/blog/` deployments.
+
 ## Placement and appearance
 
 The default card is 220px high (180px on small screens), before the article. Use `post.position: after` to place it after the article, or `manual` to insert it at a tag in the Markdown body:
@@ -241,29 +291,34 @@ After correcting a local bundle or stylesheet load failure, call `refresh(contai
 
 Themes customize the map only through the variables below, scoped on `.hpm-detail`, `.hpm-overview`, or both. Do not depend on the plugin's internal component selectors. Safe light, dark, forced-colors, and reduced-motion defaults are built in.
 
-| Variable                | Purpose                                                 |
-| ----------------------- | ------------------------------------------------------- |
-| `--hpm-accent`          | Pins, anchors, links, and focus rings                   |
-| `--hpm-accent-contrast` | Text and borders placed on the accent                   |
-| `--hpm-cluster-surface` | Cluster circle surface                                  |
-| `--hpm-cluster-border`  | Cluster and thumbnail border                            |
-| `--hpm-panel-surface`   | Glass panel surface when backdrop filters are supported |
-| `--hpm-panel-border`    | Article panel border                                    |
-| `--hpm-card-surface`    | Article cards, controls, and the opaque panel fallback  |
-| `--hpm-text`            | Primary text                                            |
-| `--hpm-muted`           | Dates, locations, and subdued borders                   |
-| `--hpm-route-color`     | Straight detail route segments                          |
-| `--hpm-tooltip-surface` | Detail place-name tooltip surface                       |
-| `--hpm-tooltip-border`  | Detail place-name tooltip border                        |
-| `--hpm-tooltip-shadow`  | Detail place-name tooltip shadow                        |
-| `--hpm-tooltip-text`    | Detail place-name tooltip text                          |
-| `--hpm-panel-radius`    | Desktop panel and mobile drawer radius                  |
-| `--hpm-card-radius`     | Article card radius                                     |
+| Variable                      | Purpose                                                 |
+| ----------------------------- | ------------------------------------------------------- |
+| `--hpm-accent`                | Pins, anchors, links, and focus rings                   |
+| `--hpm-accent-contrast`       | Text and borders placed on the accent                   |
+| `--hpm-cluster-surface`       | Cluster circle surface                                  |
+| `--hpm-cluster-border`        | Cluster and thumbnail border                            |
+| `--hpm-panel-surface`         | Glass panel surface when backdrop filters are supported |
+| `--hpm-panel-border`          | Article panel border                                    |
+| `--hpm-card-surface`          | Article cards, controls, and the opaque panel fallback  |
+| `--hpm-text`                  | Primary text                                            |
+| `--hpm-muted`                 | Dates, locations, and subdued borders                   |
+| `--hpm-route-color`           | Straight detail route segments                          |
+| `--hpm-track-color`           | Full recorded-track line                                |
+| `--hpm-track-progress-color`  | Playback progress line and moving marker                |
+| `--hpm-track-control-surface` | Statistics and playback-control surface                 |
+| `--hpm-track-control-border`  | Statistics and playback-control border                  |
+| `--hpm-tooltip-surface`       | Detail place-name tooltip surface                       |
+| `--hpm-tooltip-border`        | Detail place-name tooltip border                        |
+| `--hpm-tooltip-shadow`        | Detail place-name tooltip shadow                        |
+| `--hpm-tooltip-text`          | Detail place-name tooltip text                          |
+| `--hpm-panel-radius`          | Desktop panel and mobile drawer radius                  |
+| `--hpm-card-radius`           | Article card radius                                     |
 
 ## Troubleshooting and privacy
 
 - No map: check `post_map.enabled: true`, valid `map.points`, the tag in manual mode, and whether the theme renders article content.
 - Build fails: read the source path and field in the plugin error. Enabled invalid configuration is a build error; missing configuration is a no-op.
+- Track build fails: verify the article-relative local suffix, source-tree containment, 8 MiB/200,000-point limits, and that privacy trimming leaves usable geometry.
 - Blank or failed map: check Web key type, allowed deployment domain, exactly one security mode, proxy availability, browser console/CSP reports, and network access. Reload after correcting configuration or an SDK timeout.
 - Broken image: use a safe HTTP(S) or site-relative image URL and verify it is publicly accessible.
 - Sensitive location: publish a city or an intentionally approximate point. All generated detail coordinates and overview locations are public. The plugin does not request the visitor's geolocation; loading AMap still contacts a third-party service as the map approaches the viewport.

@@ -9,6 +9,7 @@ import { normalizeNpmPackJson } from '../../scripts/npm-pack-json.mjs';
 import { withTemporaryWorkspace } from './runner-lifecycle.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const trackFixture = join(repository, 'test/integration/fixtures/track/source');
 const args = process.argv.slice(2);
 const option = (name, fallback) =>
   args.find((arg) => arg.startsWith(`--${name}=`))?.split('=')[1] ?? fallback;
@@ -80,6 +81,9 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
         assert.ok(theme === 'cactus-minimal' || theme in themePackages, 'Unknown theme');
         const site = join(temporary, `hexo-${version}-${theme}`);
         await cp(join(repository, 'fixtures/sites/base'), site, { recursive: true });
+        // The packed compatibility matrix owns recorded-track publication checks.
+        // The --serve fixture remains the stable four-post deterministic E2E corpus.
+        if (!serve) await cp(trackFixture, join(site, 'source'), { recursive: true });
         await writeFile(
           join(site, 'package.json'),
           JSON.stringify({
@@ -133,7 +137,13 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
         );
         for (const root of roots) {
           assert.ok(root === '/' || root === '/blog/');
-          const config = { ...base, theme, root, url: `https://example.test${root}` };
+          const config = {
+            ...base,
+            theme,
+            root,
+            url: `https://example.test${root}`,
+            ...(serve ? {} : { post_asset_folder: true }),
+          };
           const publicDirectory = join(site, 'public');
           const generate = async (settings, env = {}) => {
             await writeFile(join(site, '_config.yml'), stringify(settings));
@@ -229,6 +239,7 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
                 HPM_INTEGRATION_SITE: publicDirectory,
                 HPM_INTEGRATION_ROOT: root,
                 HPM_INTEGRATION_THEME: theme,
+                HPM_INTEGRATION_TRACKS: serve ? '0' : '1',
               },
             ),
             'generated output',
@@ -238,7 +249,7 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
             server = createServer(async (request, response) => {
               try {
                 const pathname = decodeURIComponent(
-                  new URL(request.url, 'http://localhost').pathname,
+                  new URL(request.url, 'http://127.0.0.1').pathname,
                 );
                 if (!pathname.startsWith(root)) {
                   response.writeHead(404).end();

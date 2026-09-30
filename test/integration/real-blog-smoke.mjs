@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { cp, lstat, readFile, writeFile, readdir, realpath, stat } from 'node:fs/promises';
+import { cp, lstat, mkdir, readFile, writeFile, readdir, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,10 @@ const smokeKey = 'build-smoke-' + 'key';
 const smokeCode = 'build-smoke-' + 'code';
 const imageUrl = 'https://oss.qiuchang.cc/img_p/shanghai/DSCF9176.JPG';
 const articleRoute = 'archives/shanghai-230304/';
+const trackArticleRoute = 'archives/hpm-track-smoke/';
+const privateTrackName = 'private-smoke.gpx';
+const privateTrackMarker = 'DO_NOT_PUBLISH_REAL_BLOG_TRACK';
+const privateTrackTimestamp = '2024-01-02T03:04:05Z';
 const excluded = new Set([
   '.git',
   'public',
@@ -168,6 +172,7 @@ export async function configureCopy(site, root) {
   config.public_dir = 'public';
   config.url = `https://lifeifan.com${root}`;
   config.root = root;
+  config.post_asset_folder = true;
   config.post_map = {
     enabled: true,
     provider: 'amap',
@@ -205,6 +210,47 @@ export async function configureCopy(site, root) {
     points: [{ id: 'shanghai', name: '上海', longitude: 121.4737, latitude: 31.2304 }],
   };
   await writeFile(postPath, `---\n${stringify(metadata)}---\n${post.slice(match[0].length)}`);
+
+  const trackDirectory = join(site, 'source/_posts/hpm-track-smoke');
+  await mkdir(trackDirectory, { recursive: true });
+  await writeFile(
+    join(site, 'source/_posts/hpm-track-smoke.md'),
+    `---
+title: 临时真实轨迹验证
+urlname: hpm-track-smoke
+date: 2026-01-02 12:00:00
+map:
+  representative: station
+  points:
+    - id: station
+      name: 南京站
+      longitude: 118.7977
+      latitude: 32.0872
+  track:
+    source: ./hpm-track-smoke/${privateTrackName}
+    privacy:
+      trim_start_meters: 5
+      trim_end_meters: 5
+    simplify_tolerance_meters: 0
+    playback: true
+---
+
+This article exists only inside the disposable smoke workspace.
+`,
+  );
+  await writeFile(
+    join(trackDirectory, privateTrackName),
+    `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="hexo-post-map-smoke" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata><name>${privateTrackMarker}</name><time>${privateTrackTimestamp}</time></metadata>
+  <trk><trkseg>
+    <trkpt lat="32.0800" lon="118.7900"><ele>10</ele><time>${privateTrackTimestamp}</time></trkpt>
+    <trkpt lat="32.0810" lon="118.7910"><ele>14</ele><time>2024-01-02T03:05:05Z</time></trkpt>
+    <trkpt lat="32.0820" lon="118.7920"><ele>12</ele><time>2024-01-02T03:06:05Z</time></trkpt>
+  </trkseg></trk>
+</gpx>
+`,
+  );
 }
 
 function success(result, label) {
@@ -256,6 +302,16 @@ async function filesWithExtension(directory, extension) {
   return found;
 }
 
+async function allFiles(directory) {
+  const found = [];
+  for (const entry of await readdir(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) found.push(...(await allFiles(path)));
+    else if (entry.isFile()) found.push(path);
+  }
+  return found;
+}
+
 async function verifyGenerated(site, root) {
   const output = join(site, 'public');
   const detail = await readFile(join(output, articleRoute, 'index.html'), 'utf8');
@@ -269,23 +325,67 @@ async function verifyGenerated(site, root) {
   assert.ok(overview.includes(`${root}map/posts.json`));
   assert.ok(overview.includes(`href="${root}${articleRoute}"`));
   assert.ok(detail.includes(`href="${root}map/"`), 'Cactus map navigation does not respect root');
+  const trackedDetail = await readFile(join(output, trackArticleRoute, 'index.html'), 'utf8');
+  const trackedWindow = new Window({
+    settings: {
+      disableJavaScriptEvaluation: true,
+      disableJavaScriptFileLoading: true,
+      disableCSSFileLoading: true,
+    },
+  });
+  trackedWindow.document.write(trackedDetail);
+  const trackedRoot = trackedWindow.document.querySelector('[data-hpm-detail]');
+  assert.ok(trackedRoot, 'Temporary recorded-track detail card missing');
+  const trackedData = JSON.parse(trackedRoot.querySelector('[data-hpm-data]').textContent);
+  assert.match(
+    trackedData.track.url,
+    new RegExp(`^${root}hexo-post-map/tracks/[a-f0-9]{64}\\.json$`),
+  );
+  assert.equal(trackedData.track.playback, true);
+  assert.ok(trackedData.track.stats.distanceMeters > 0);
+  assert.ok(trackedRoot.querySelector('[data-hpm-track-stats]'));
+  const assetRelativePath = trackedData.track.url.slice(root.length);
+  const serializedTrack = await readFile(join(output, assetRelativePath), 'utf8');
+  assert.equal(
+    createHash('sha256').update(serializedTrack).digest('hex'),
+    assetRelativePath.match(/([a-f0-9]{64})\.json$/u)[1],
+  );
+  const trackAsset = JSON.parse(serializedTrack);
+  assert.equal(trackAsset.version, 1);
+  assert.equal(trackAsset.coordinateSystem, 'wgs84');
+  assert.ok(trackAsset.segments.flat().length > 1);
+  assert.ok(trackAsset.segments.flat().length <= 2_000);
+  assert.deepEqual(Object.keys(trackAsset).sort(), [
+    'coordinateSystem',
+    'segments',
+    'stats',
+    'version',
+  ]);
+  await trackedWindow.happyDOM.close();
   const data = JSON.parse(await readFile(join(output, 'map/posts.json'), 'utf8'));
   assert.equal(data.version, 1);
-  assert.equal(data.posts.length, 1, 'Only the copied Shanghai article should be mapped');
-  assert.deepEqual(Object.keys(data.posts[0]).sort(), [
-    'date',
-    'image',
-    'location',
-    'title',
-    'url',
-  ]);
-  assert.deepEqual(data.posts[0].location, {
+  assert.equal(data.posts.length, 2, 'Only Shanghai and the temporary track should be mapped');
+  assert.ok(!Object.hasOwn(data, 'track'), 'Overview envelope must stay track-free');
+  assert.ok(
+    data.posts.every((post) => !Object.hasOwn(post, 'track')),
+    'Overview posts must stay track-free',
+  );
+  for (const post of data.posts)
+    assert.deepEqual(Object.keys(post).sort(), ['date', 'image', 'location', 'title', 'url']);
+  const shanghai = data.posts.find((post) => post.url === `${root}${articleRoute}`);
+  assert.ok(shanghai, 'Shanghai overview entry missing');
+  assert.deepEqual(shanghai.location, {
     name: '上海',
     longitude: 121.4737,
     latitude: 31.2304,
   });
-  assert.equal(data.posts[0].url, `${root}${articleRoute}`);
-  assert.equal(data.posts[0].image, imageUrl);
+  assert.equal(shanghai.image, imageUrl);
+  const trackedPost = data.posts.find((post) => post.url === `${root}${trackArticleRoute}`);
+  assert.deepEqual(trackedPost?.location, {
+    name: '南京站',
+    longitude: 118.7977,
+    latitude: 32.0872,
+  });
   for (const asset of [
     'runtime.js',
     'style.css',
@@ -298,6 +398,7 @@ async function verifyGenerated(site, root) {
   // independently ordinary, even if a regression accidentally inserts a map root.
   const expectedFeatures = new Map([
     [`${articleRoute}index.html`, 'detail'],
+    [`${trackArticleRoute}index.html`, 'detail'],
     ['map/index.html', 'overview'],
   ]);
   const htmlPaths = await filesWithExtension(output, '.html');
@@ -356,11 +457,30 @@ async function verifyGenerated(site, root) {
       await window.happyDOM.close();
     }
   }
+  const generatedFiles = await allFiles(output);
+  assert.ok(
+    generatedFiles.every((path) => !path.endsWith(privateTrackName)),
+    'Raw post-asset track escaped into public output',
+  );
+  const generatedText = (
+    await Promise.all(
+      generatedFiles
+        .filter((path) => /\.(?:html|json|js|css|svg|xml|txt)$/u.test(path))
+        .map((path) => readFile(path, 'utf8')),
+    )
+  ).join('\n');
+  for (const privateValue of [
+    privateTrackName,
+    privateTrackMarker,
+    privateTrackTimestamp,
+    'source/_posts/hpm-track-smoke',
+  ])
+    assert.ok(!generatedText.includes(privateValue), `Generated output leaked ${privateValue}`);
   assert.ok(ordinaryRoutes.size > 0, 'Expected ordinary articles in the real blog');
-  return { ordinary: ordinaryRoutes.size, ordinaryRoute };
+  return { ordinary: ordinaryRoutes.size, ordinaryRoute, trackUrl: trackedData.track.url };
 }
 
-async function browserSmoke(site, root, ordinaryRoute) {
+async function browserSmoke(site, root, ordinaryRoute, trackUrl) {
   const { chromium } = await import('playwright');
   const { expect } = await import('playwright/test');
   const { transform } = await import('esbuild');
@@ -472,23 +592,35 @@ async function browserSmoke(site, root, ordinaryRoute) {
     await detail.getByRole('button', { name: '显示地点：上海', exact: true }).click();
     await expect(detail.getByRole('tooltip')).toBeVisible();
     await expect(detail.getByRole('tooltip')).toHaveText('上海');
+
+    await page.goto(`${origin}${root}${trackArticleRoute}`, { waitUntil: 'domcontentloaded' });
+    const trackedDetail = page.locator('[data-hpm-detail]');
+    await expect(trackedDetail).toBeVisible();
+    await expect(trackedDetail).toHaveAttribute('data-hpm-active', 'true');
+    await expect(trackedDetail.locator('[data-hpm-track-stats]')).toBeVisible();
+    await expect(trackedDetail.locator('[data-hpm-playback]')).toBeVisible();
+    await expect.poll(() => local[trackUrl] ?? 0).toBe(1);
+    assert.equal(
+      Object.keys(local).some((path) => path.endsWith(privateTrackName)),
+      false,
+      'Browser requested a raw recorded-track source',
+    );
+
     await page.goto(`${origin}${root}map/`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-hpm-overview]')).toHaveAttribute('data-hpm-active', 'true');
-    await page.getByRole('button', { name: '预览文章：魔都' }).click();
-    const preview = page.getByRole('dialog', { name: '1 篇文章' });
-    await expect(preview.locator('img')).toHaveAttribute('src', imageUrl);
+    await page.getByRole('button', { name: '全部文章 2', exact: true }).click();
+    const preview = page.getByRole('dialog', { name: '2 篇文章' });
+    const shanghaiCard = preview.locator('a').filter({ hasText: '魔都' });
+    await expect(shanghaiCard.locator('img')).toHaveAttribute('src', imageUrl);
     await expect
       .poll(() =>
-        preview.locator('img').evaluate((image) => image.complete && image.naturalWidth > 0),
+        shanghaiCard.locator('img').evaluate((image) => image.complete && image.naturalWidth > 0),
       )
       .toBe(true);
-    await preview
-      .locator('a')
-      .filter({ has: page.locator('img') })
-      .click();
+    await shanghaiCard.click();
     await expect(page).toHaveURL(`${origin}${root}${articleRoute}`);
     await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true');
-    assert.equal(sdkRequests, 4, 'One SDK request per full document, shared by PJAX roots');
+    assert.equal(sdkRequests, 5, 'One SDK request per full document, shared by PJAX roots');
   } finally {
     if (browser) await browser.close();
     server.closeAllConnections();
@@ -560,13 +692,17 @@ export async function runRealBlogSmoke(blog = defaultBlog) {
       };
       success(await run('npm', ['run', 'clean'], site, smokeEnv), 'real blog clean');
       success(await run('npm', ['run', 'build'], site, smokeEnv), 'real blog build');
-      const { ordinary, ordinaryRoute } = await verifyGenerated(site, root);
+      const { ordinary, ordinaryRoute, trackUrl } = await verifyGenerated(site, root);
       success(
-        await run(process.execPath, [filename, '--browser', site, root, ordinaryRoute], repository),
+        await run(
+          process.execPath,
+          [filename, '--browser', site, root, ordinaryRoute, trackUrl],
+          repository,
+        ),
         'real blog browser',
       );
       console.log(
-        `PASS real Cactus / Hexo ${installed.version} / ${root}: ordinary-to-map PJAX, Shanghai tooltip, overview image navigation, ${ordinary} ordinary pages`,
+        `PASS real Cactus / Hexo ${installed.version} / ${root}: temporary recorded track, ordinary-to-map PJAX, Shanghai tooltip, overview image navigation, ${ordinary} ordinary pages`,
       );
     }
   });
@@ -574,6 +710,6 @@ export async function runRealBlogSmoke(blog = defaultBlog) {
 
 if (process.argv[1] && resolve(process.argv[1]) === filename) {
   if (process.argv[2] === '--browser')
-    await browserSmoke(process.argv[3], process.argv[4], process.argv[5]);
+    await browserSmoke(process.argv[3], process.argv[4], process.argv[5], process.argv[6]);
   else await runRealBlogSmoke();
 }

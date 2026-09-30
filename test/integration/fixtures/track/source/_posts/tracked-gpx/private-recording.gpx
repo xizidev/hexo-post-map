@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="hexo-post-map-integration" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>DO_NOT_PUBLISH_GPX_NAME</name>
+    <time>2024-01-02T03:04:05Z</time>
+  </metadata>
+  <trk>
+    <name>DO_NOT_PUBLISH_GPX_TRACK</name>
+    <trkseg>
+      <trkpt lat="32.0800" lon="118.7900"><ele>10</ele><time>2024-01-02T03:04:05Z</time></trkpt>
+      <trkpt lat="32.0810" lon="118.7910"><ele>14</ele><time>2024-01-02T03:05:05Z</time></trkpt>
+      <trkpt lat="32.0820" lon="118.7920"><ele>12</ele><time>2024-01-02T03:06:05Z</time></trkpt>
+      <trkpt lat="32.0830" lon="118.7930"><ele>18</ele><time>2024-01-02T03:07:05Z</time></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

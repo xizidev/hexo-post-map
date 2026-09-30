@@ -8,6 +8,12 @@ When `post_map.enabled: true`, every generated HTML page includes the provider-f
 
 The detail and overview feature IIFEs (`post-map.js` and `overview-map.js`) load only when their map roots are present. AMap remains lazy; detail maps wait until near the viewport. On an ordinary page that later receives map content through PJAX, the runtime loads the required same-origin feature script and stylesheet. Successful resource loads are shared across map roots and navigation within that document. Disabling JavaScript or failing to load resources preserves the readable fallback.
 
+For a tracked detail, the hashed same-origin JSON is fetched only after the same near-viewport trigger. Its WGS84 coordinates are validated and then converted by the AMap detail adapter. If fetch, JSON validation, coordinate conversion, or track overlay creation fails, the card preserves its GCJ-02 place pins and schematic route; a full provider failure preserves the server-rendered place-link fallback. Playback never starts automatically. A reduced-motion preference disables continuous playback and restart but leaves native manual seeking available.
+
+The overview never fetches, converts, embeds, or renders a recorded track. Its `posts.json` contract stays at version 1 and contains only each article's representative point plus the existing article fields. `overview-map.js` does not include track playback or conversion code. Point-only articles therefore retain the v0.4 detail and overview behavior.
+
+Track statistics and place links are server-rendered and remain readable without JavaScript. Playback controls are hidden until a valid asset and provider map mount successfully. A display-only `playback: false` track exposes no playback controls. Track asset URLs follow the configured Hexo root, so both `/hexo-post-map/tracks/<hash>.json` and `/blog/hexo-post-map/tracks/<hash>.json` are supported by the packed matrix.
+
 ## Automatic navigation support
 
 Conventional light-DOM PJAX replacement works automatically: the runtime observes content insertion and removal in the current document, initializes newly connected map roots, and cleans up removed maps. Destination scripts do not need to execute again. Keep the generated map root and its embedded JSON together when replacing content.

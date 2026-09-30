@@ -8,6 +8,16 @@ The AMap Web key is public. In client mode, `security_js_code` is public too. Su
 
 Map loading contacts AMap and may reveal ordinary request metadata such as the visitor's IP address to the provider. Detail loading is lazy near the viewport, **not consent-gated by the activation button**. That button controls interaction only. This plugin does not call browser geolocation or add its own analytics. Site owners remain responsible for the third-party services, images, disclosures, and consent behavior appropriate to their site.
 
+## Recorded-track source boundary
+
+A track reference is a build-time local input, not a browser URL. It resolves relative to its article and must remain inside canonical Hexo `source_dir`. The resolver rejects remote/absolute/traversing paths, unsupported suffixes, non-regular files, files over 8 MiB, and a symlink whose target escapes the source tree. GPX entity declarations are rejected, and neither parser performs network access. Parsing stops above 200,000 raw points; publication stops above 2,000 points while preserving segment endpoints.
+
+Only the privacy-trimmed, simplified, canonical JSON is published at a SHA-256 content-addressed route. The detail HTML receives that route, sanitized statistics, and the playback choice. The raw source file, source filename/path, GPX metadata, absolute timestamps, GeoJSON properties, and pre-trim coordinates are excluded. When Hexo `post_asset_folder` or ordinary asset generation sees a referenced source file, the plugin filters that exact raw route before it can enter the public router. Unreferenced ordinary assets keep Hexo's normal behavior.
+
+Start/end distance trimming happens before statistics, simplification, and hashing, but it is risk reduction, not anonymization. The remaining route shape, timing-independent context, or nearby landmarks can still identify a home or other sensitive location. Use an intentionally approximate public GCJ-02 representative point, inspect the generated track, and choose trimming distances appropriate to the itinerary. Do not publish a track when the residual disclosure is unacceptable.
+
+Processed track JSON and its statistics are public static files. A content-addressed asset is suitable for a long immutable cache, so deletion from a later build does not retract copies already cached by a CDN, browser, archive, or reader. Treat the first publication as permanent disclosure and use a new source/trim configuration to create a new hash. Removing old hashes from storage is an operational cleanup, not a privacy guarantee.
+
 ## AMap setup
 
 Obtain a Web/JS API key and configure the allowed deployment domains in your provider account. Production deployments should use a security proxy. AMap's [security guide](https://lbs.amap.com/api/javascript-api-v2/guide/abc/jscode) documents `serviceHost`, the fixed `/_AMapService` prefix, and proxying to `restapi.amap.com` (plus `webapi.amap.com` for custom styles). This plugin requires the browser-facing proxy URL to be HTTPS and does not operate the proxy for you. Restrict your proxy to the intended service paths and add suitable access and rate controls.
@@ -43,4 +53,4 @@ The plugin can reuse an already initialized compatible AMap 2.x SDK. It will not
 
 Follow [SECURITY.md](../SECURITY.md) for vulnerability disclosure. General rendering problems belong in a sanitized issue, including versions and a minimal reproduction without credentials or private coordinates.
 
-中文要点：环境变量不等于客户端保密；精确坐标、Web Key、客户端安全码会公开。生产环境建议 HTTPS 代理，交互激活按钮不是第三方加载同意开关。CSP 必须在真实部署上先以 Report-Only 验证；上述官方端点不是完整来源清单。SDK 加载超时后需要刷新页面。
+中文要点：环境变量不等于客户端保密；精确坐标、处理后的轨迹、Web Key、客户端安全码都会公开。轨迹源必须位于 `source_dir`，逃逸符号链接和超限输入会失败，引用的原始轨迹不会作为文章资源发布。首尾距离裁剪先于统计和哈希，但不是匿名化，CDN 缓存也可能长期保留已发布哈希。生产环境建议 HTTPS 代理，交互激活按钮不是第三方加载同意开关。CSP 必须在真实部署上先以 Report-Only 验证；上述官方端点不是完整来源清单。SDK 加载超时后需要刷新页面。

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Window } from 'happy-dom';
@@ -6,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 const directory = process.env.HPM_INTEGRATION_SITE;
 const root = process.env.HPM_INTEGRATION_ROOT ?? '/';
 const theme = process.env.HPM_INTEGRATION_THEME ?? 'cactus-minimal';
+const recordedTracks = process.env.HPM_INTEGRATION_TRACKS === '1';
 const html = async (path: string) => {
   const window = new Window({
     settings: {
@@ -30,12 +32,23 @@ async function htmlPaths(path = ''): Promise<string[]> {
   return paths;
 }
 
+async function filePaths(path = ''): Promise<string[]> {
+  const paths: string[] = [];
+  for (const entry of await readdir(join(directory!, path), { withFileTypes: true })) {
+    const child = join(path, entry.name);
+    if (entry.isDirectory()) paths.push(...(await filePaths(child)));
+    else paths.push(child.replaceAll('\\', '/'));
+  }
+  return paths;
+}
+
 describe.skipIf(!directory)('installed tarball generated output', () => {
   it('projects only public fields and sorts the complete mapped-post fallback', async () => {
     const envelope = JSON.parse(await readFile(join(directory!, 'map/posts.json'), 'utf8'));
     expect(envelope.version).toBe(1);
-    expect(envelope.posts).toHaveLength(4);
+    expect(envelope.posts).toHaveLength(recordedTracks ? 6 : 4);
     expect(envelope.posts.map((post: { url: string }) => post.url)).toEqual([
+      ...(recordedTracks ? [`${root}posts/tracked-gpx/`, `${root}posts/tracked-geojson/`] : []),
       `${root}posts/overlap/`,
       `${root}posts/route/`,
       `${root}posts/multi/`,
@@ -81,9 +94,18 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
       ['posts/multi/index.html', { detail: 1, overview: 0 }],
       ['posts/route/index.html', { detail: 1, overview: 0 }],
       ['posts/overlap/index.html', { detail: 1, overview: 0 }],
+      ...(recordedTracks
+        ? ([
+            ['posts/tracked-gpx/index.html', { detail: 1, overview: 0 }],
+            ['posts/tracked-geojson/index.html', { detail: 1, overview: 0 }],
+          ] as const)
+        : []),
       ['map/index.html', { detail: 0, overview: 1 }],
-      // Landscape/NexT render the four mapped posts; Cactus lists titles only.
-      ['index.html', { detail: theme === 'cactus-minimal' ? 0 : 4, overview: 0 }],
+      // Landscape/NexT render every mapped post; Cactus lists titles only.
+      [
+        'index.html',
+        { detail: theme === 'cactus-minimal' ? 0 : recordedTracks ? 6 : 4, overview: 0 },
+      ],
     ]);
     for (const path of paths) {
       const document = await html(path);
@@ -118,7 +140,13 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
         );
       }
     }
-    for (const slug of ['single', 'multi', 'route', 'overlap']) {
+    for (const slug of [
+      'single',
+      'multi',
+      'route',
+      'overlap',
+      ...(recordedTracks ? ['tracked-gpx', 'tracked-geojson'] : []),
+    ]) {
       const document = await html(`posts/${slug}`);
       expect(document.querySelectorAll('[data-hpm-detail]')).toHaveLength(1);
       expect(
@@ -141,4 +169,79 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
         (await readFile(join(directory!, 'hexo-post-map/assets', name))).length,
       ).toBeGreaterThan(0);
   });
+
+  it.skipIf(!recordedTracks)(
+    'publishes content-addressed track JSON without raw authoring data or overview fields',
+    async () => {
+      const posts = JSON.parse(await readFile(join(directory!, 'map/posts.json'), 'utf8'));
+      expect(posts).not.toHaveProperty('track');
+      expect(posts.posts.every((post: object) => !Object.hasOwn(post, 'track'))).toBe(true);
+
+      const descriptors = [];
+      for (const [slug, playback] of [
+        ['tracked-gpx', true],
+        ['tracked-geojson', false],
+      ] as const) {
+        const document = await html(`posts/${slug}`);
+        const detail = document.querySelector('[data-hpm-detail]')!;
+        const descriptor = JSON.parse(detail.querySelector('[data-hpm-data]')!.textContent!).track;
+        expect(descriptor).toEqual({
+          url: descriptor.url,
+          stats: descriptor.stats,
+          playback,
+        });
+        expect(descriptor.url).toMatch(
+          new RegExp(`^${root}hexo-post-map/tracks/[a-f0-9]{64}\\.json$`),
+        );
+        expect(detail.querySelector('[data-hpm-track-stats]')).not.toBeNull();
+        expect(detail.querySelector('[data-hpm-playback]') === null).toBe(!playback);
+        descriptors.push(descriptor);
+      }
+
+      const pointOnly = JSON.parse(
+        (await html('posts/single')).querySelector('[data-hpm-data]')!.textContent!,
+      );
+      expect(pointOnly).not.toHaveProperty('track');
+
+      const trackFiles = (await readdir(join(directory!, 'hexo-post-map/tracks'))).sort();
+      expect(trackFiles).toHaveLength(2);
+      expect(trackFiles).toEqual(descriptors.map(({ url }) => url.split('/').at(-1)).sort());
+      for (const filename of trackFiles) {
+        expect(filename).toMatch(/^[a-f0-9]{64}\.json$/u);
+        const serialized = await readFile(
+          join(directory!, 'hexo-post-map/tracks', filename),
+          'utf8',
+        );
+        expect(createHash('sha256').update(serialized).digest('hex')).toBe(
+          filename.replace(/\.json$/u, ''),
+        );
+        const asset = JSON.parse(serialized);
+        expect(asset.version).toBe(1);
+        expect(asset.coordinateSystem).toBe('wgs84');
+        expect(asset.segments.length).toBeGreaterThan(0);
+        expect(asset.segments.flat()).not.toHaveLength(0);
+        expect(asset.segments.flat().length).toBeLessThanOrEqual(2_000);
+        expect(Object.keys(asset).sort()).toEqual([
+          'coordinateSystem',
+          'segments',
+          'stats',
+          'version',
+        ]);
+      }
+
+      const paths = await filePaths();
+      expect(paths.some((path) => path.endsWith('/kept.svg'))).toBe(true);
+      expect(paths.some((path) => /private-recording\.(?:gpx|geojson)$/u.test(path))).toBe(false);
+      const publicText = (
+        await Promise.all(
+          paths
+            .filter((path) => /\.(?:html|json|js|css|svg|xml|txt)$/u.test(path))
+            .map((path) => readFile(join(directory!, path), 'utf8')),
+        )
+      ).join('\n');
+      expect(publicText).not.toMatch(
+        /private-recording|DO_NOT_PUBLISH_(?:GPX|GEOJSON)|2024-01-02T03:04:05Z|source\/_posts/u,
+      );
+    },
+  );
 });
