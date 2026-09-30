@@ -72,9 +72,34 @@ export function createTrackAssetGuard(
     return result;
   }
 
+  function quarantineSources(posts: CachedPost[]): void {
+    let discoveryError: unknown;
+    for (const post of posts) {
+      const track = (post.map as { track: unknown }).track;
+      if (
+        track === null ||
+        typeof track !== 'object' ||
+        !('source' in track) ||
+        typeof track.source !== 'string'
+      )
+        continue;
+      try {
+        compiler.discoverSource(post.source, track.source);
+      } catch (error) {
+        discoveryError ??= error;
+      }
+    }
+    // Quarantine every discovered input before normalization, rendering or compilation can throw.
+    blockRawRoutes(false);
+    if (discoveryError) throw discoveryError;
+  }
+
   return {
     async invalidateTrackedPosts(): Promise<void> {
-      for (const post of trackedPosts()) {
+      blocked.clear();
+      const posts = trackedPosts();
+      quarantineSources(posts);
+      for (const post of posts) {
         if (normalizePostMapDocument(post.map, post.source)?.track) {
           // Hexo's priority-10 render_post rebuilds this from _content through the usual pipeline.
           // Track-only file changes do not otherwise invalidate the parent Warehouse document.
@@ -86,8 +111,10 @@ export function createTrackAssetGuard(
       hexo.locals.invalidate();
     },
     prepare(): void {
-      blocked.clear();
-      for (const post of trackedPosts()) {
+      const posts = trackedPosts();
+      // A later before_generate hook may change a reference or its symlink target.
+      quarantineSources(posts);
+      for (const post of posts) {
         const document = normalizePostMapDocument(post.map, post.source);
         if (document?.track) compiler.compile(post.source, document.track);
       }

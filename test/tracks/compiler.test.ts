@@ -43,6 +43,27 @@ const gpx = (points: string) =>
   `<gpx xmlns="http://www.topografix.com/GPX/1/1"><metadata><name>PRIVATE_NAME</name></metadata><trk><trkseg>${points}</trkseg></trk></gpx>`;
 
 describe('privacy-first track compiler', () => {
+  it('freezes each request for one generation and securely reloads on the next generation', () => {
+    writeLine([
+      [0, 0],
+      [0.001, 0],
+    ]);
+    const compiler = createTrackCompiler(sourceDir);
+    const first = compiler.compile('_posts/trip.md', reference());
+    writeLine([
+      [0, 0],
+      [0.002, 0],
+    ]);
+    expect(compiler.compile('_posts/trip.md', reference())).toBe(first);
+    compiler.beginGeneration();
+    const next = compiler.compile('_posts/trip.md', reference());
+    expect(next.stats.distanceMeters).toBe(222.39);
+    expect(next.routePath).not.toBe(first.routePath);
+    rmSync(join(sourceDir, '_posts/private-route.geojson'));
+    expect(compiler.compile('_posts/trip.md', reference())).toBe(next);
+    compiler.beginGeneration();
+    expect(() => compiler.compile('_posts/trip.md', reference())).toThrow(TrackBuildError);
+  });
   it('emits the exact version-1 canonical key order and content-addressed SHA-256 route', () => {
     writeLine([
       [0, 0, 10],
@@ -190,7 +211,7 @@ describe('privacy-first track compiler', () => {
     expect(trimmed.routePath).not.toBe(original.routePath);
   });
 
-  it('invalidates on size changes, mtime changes, and same-size rewrites with restored mtime', () => {
+  it('revalidates new generations on size changes, mtime changes, and same-size rewrites with restored mtime', () => {
     writeLine([
       [0, 0],
       [0.001, 0],
@@ -203,11 +224,13 @@ describe('privacy-first track compiler', () => {
       [0.002, 0],
       [0.003, 0],
     ]);
+    compiler.beginGeneration();
     const sized = compiler.compile('_posts/trip.md', reference());
     expect(sized.stats.distanceMeters).toBe(333.585);
     expect(sized.routePath).not.toBe(first.routePath);
     const before = statSync(path);
     utimesSync(path, before.atime, new Date(before.mtimeMs + 2000));
+    compiler.beginGeneration();
     const touched = compiler.compile('_posts/trip.md', reference());
     expect(touched).not.toBe(sized);
     expect(touched.routePath).toBe(sized.routePath);
@@ -219,6 +242,7 @@ describe('privacy-first track compiler', () => {
     ]);
     utimesSync(path, touchedMetadata.atime, touchedMetadata.mtime);
     expect(statSync(path).size).toBe(touchedMetadata.size);
+    compiler.beginGeneration();
     expect(compiler.compile('_posts/trip.md', reference()).stats.distanceMeters).toBe(444.78);
   });
 

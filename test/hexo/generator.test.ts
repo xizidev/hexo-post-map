@@ -13,6 +13,8 @@ import {
   type OverviewSourcePost,
 } from '../../src/hexo/generator';
 import { registerPlugin } from '../../src/hexo/register';
+import { createTrackCompiler } from '../../src/tracks/compiler';
+import { createPostFilter } from '../../src/hexo/post-filter';
 
 const rawConfig = {
   enabled: true,
@@ -97,6 +99,41 @@ function trackedPost(overrides: Partial<OverviewSourcePost> = {}) {
 }
 
 describe('track route publication', () => {
+  it('publishes every snapshot already embedded by SSR even if later locals change track options', () => {
+    const hexo = trackedInstance();
+    const options = config({ enabled: false });
+    const compiler = createTrackCompiler(hexo.source_dir);
+    const rendered = createPostFilter(options, compiler)(trackedPost());
+    const window = new Window();
+    window.document.body.innerHTML = rendered.content;
+    const first = JSON.parse(window.document.querySelector('[data-hpm-data]')!.textContent!).track;
+    const changed = trackedPost({
+      map: {
+        ...onePoint,
+        track: {
+          source: 'private-track.geojson',
+          privacy: { trim_start_meters: 50 },
+        },
+      },
+    });
+    const routes = createOverviewRoutes(
+      { posts: { toArray: () => [changed] } },
+      options,
+      hexo,
+      compiler,
+    );
+    expect(routes.find((route) => `/${route.path}` === first.url)).toBeDefined();
+    expect(routes.filter((route) => route.path.includes('/tracks/'))).toHaveLength(2);
+    compiler.beginGeneration();
+    const next = createOverviewRoutes(
+      { posts: { toArray: () => [changed] } },
+      options,
+      hexo,
+      compiler,
+    );
+    expect(next.find((route) => `/${route.path}` === first.url)).toBeUndefined();
+    expect(next.filter((route) => route.path.includes('/tracks/'))).toHaveLength(1);
+  });
   it.each([true, false])(
     'publishes unique sanitized string assets independently of overview enabled=%s',
     (enabled) => {
@@ -167,6 +204,8 @@ describe('track route publication', () => {
       const hexo = trackedInstance(root);
       hexo.config.post_map = rawConfig;
       registerPlugin(hexo);
+      hexo.extend.generator.register('asset', () => []);
+      hexo.locals.set('posts', () => ({ toArray: () => [] }));
       const render = async () => {
         const result = await hexo.extend.filter.exec('after_post_render', trackedPost(), {
           context: hexo,
@@ -194,6 +233,7 @@ describe('track route publication', () => {
           ],
         }),
       );
+      await hexo.execFilter('before_generate', null, { context: hexo });
       const second = await render();
       const routes = await publish();
       expect(second.url).not.toBe(first.url);

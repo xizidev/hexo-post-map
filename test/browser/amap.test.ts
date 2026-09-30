@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAMapDetailProvider as createAMapProvider } from '../../src/browser/providers/amap';
 import { normalizePostMap } from '../../src/domain/normalize';
 import type { DetailMapModel } from '../../src/browser/providers/types';
+import { hydrateDetail } from '../../src/browser/detail';
+import { renderDetailMap } from '../../src/templates/detail';
+import { resolveConfig } from '../../src/config/resolve';
 
 const sdk = vi.hoisted(() => ({ load: vi.fn(), reset: vi.fn() }));
 vi.mock('@amap/amap-jsapi-loader', () => ({ default: sdk }));
@@ -13,6 +16,7 @@ const config = {
 let instance: FakeMap;
 let convertFrom: ReturnType<typeof vi.fn>;
 let rejectedTrackStroke: string | undefined;
+let onTrackPosition: (() => void) | undefined;
 class FakeMap {
   listeners = new Map<string, () => void>();
   overlays: unknown[] = [];
@@ -51,7 +55,7 @@ class FakeMarker {
   setTop = vi.fn((top: boolean) => {
     this.isTop = top;
   });
-  setPosition = vi.fn();
+  setPosition = vi.fn(() => onTrackPosition?.());
   setMap = vi.fn();
   constructor(
     readonly options: {
@@ -119,6 +123,7 @@ function trackedModel(playback: boolean, onTrackError = vi.fn()): DetailMapModel
 }
 beforeEach(() => {
   rejectedTrackStroke = undefined;
+  onTrackPosition = undefined;
   convertFrom = vi.fn(
     (
       batch: Array<readonly [number, number]>,
@@ -144,6 +149,100 @@ afterEach(() => {
 });
 
 describe('AMap adapter', () => {
+  it.each([false, true])(
+    'cleans up synchronous initial playback degradation (replacement=%s)',
+    async (replacement) => {
+      vi.stubGlobal('IntersectionObserver', undefined);
+      const frames = new Map<number, FrameRequestCallback>();
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frames.set(1, callback);
+        return 1;
+      });
+      vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+      const motionListeners = new Set<EventListener>();
+      vi.stubGlobal('matchMedia', () => ({
+        matches: false,
+        addEventListener: (_type: string, callback: EventListener) => motionListeners.add(callback),
+        removeEventListener: (_type: string, callback: EventListener) =>
+          motionListeners.delete(callback),
+      }));
+      document.body.innerHTML = renderDetailMap({
+        map: trackedModel(true).map,
+        config: resolveConfig(
+          {
+            enabled: true,
+            amap: { key: 'key', security: { service_host: 'https://example.com/proxy' } },
+          },
+          {},
+        )!,
+        track: {
+          url: `/hexo-post-map/tracks/${'a'.repeat(64)}.json`,
+          stats: recordedTrack.stats,
+          playback: true,
+        },
+      });
+      const root = document.querySelector<HTMLElement>('[data-hpm-detail]')!;
+      const controls = root.querySelector<HTMLElement>('[data-hpm-playback]')!;
+      const play = root.querySelector<HTMLButtonElement>('[data-hpm-play]')!;
+      const range = root.querySelector<HTMLInputElement>('[data-hpm-progress]')!;
+      const removedDocumentListener = vi.spyOn(document, 'removeEventListener');
+      const status = root.querySelector<HTMLElement>('[data-hpm-status]')!;
+      let replacementControls: HTMLElement | undefined;
+      onTrackPosition = () => {
+        // A synchronous SDK callback can reenter controls or a host navigation hook.
+        play.click();
+        if (replacement) {
+          replacementControls = controls.cloneNode(true) as HTMLElement;
+          replacementControls.hidden = false;
+          controls.replaceWith(replacementControls);
+          status.textContent = 'Replacement status';
+        }
+        throw new Error('initial SDK position update failed');
+      };
+      const provider = await createAMapProvider(config);
+      const controller = hydrateDetail(
+        root,
+        async () => provider,
+        async () =>
+          new Response(JSON.stringify(recordedTrack), {
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      try {
+        for (let i = 0; i < 30; i++) await Promise.resolve();
+        instance.emit('complete');
+        for (let i = 0; i < 30; i++) await Promise.resolve();
+        expect(motionListeners.size).toBe(0);
+        expect(
+          removedDocumentListener.mock.calls.some(([type]) => type === 'visibilitychange'),
+        ).toBe(true);
+        expect(frames.size).toBe(0);
+        play.click();
+        controls.querySelector<HTMLButtonElement>('[data-hpm-restart]')!.click();
+        range.value = '0.5';
+        range.dispatchEvent(new Event('input'));
+        expect(range.getAttribute('aria-valuetext')).toBe('行程进度 0%');
+        expect(frames.size).toBe(0);
+        if (replacement) {
+          expect(replacementControls?.hidden).toBe(false);
+          expect(status.textContent).toBe('Replacement status');
+        } else {
+          expect(status.textContent).toBe('轨迹暂时无法加载，已显示地点路线。');
+          expect(controls.hidden).toBe(true);
+          expect(root.dataset.hpmActive).toBe('true');
+          expect(
+            instance.overlays.some(
+              (overlay) => overlay instanceof FakePolyline && overlay.options.strokeWeight === 3,
+            ),
+          ).toBe(true);
+        }
+      } finally {
+        controller.destroy();
+        removedDocumentListener.mockRestore();
+        document.body.innerHTML = '';
+      }
+    },
+  );
   it('applies the configured style to a detail map', async () => {
     const provider = await createAMapProvider(config);
     const pending = provider.mountDetail(document.createElement('div'), model());

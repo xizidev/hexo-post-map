@@ -46,6 +46,29 @@ function sameIdentity(left: BigIntStats, right: BigIntStats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+/** Resolve an author entry without opening or reading its contents. */
+export function resolveTrackSourceEntry(
+  sourceDir: string,
+  postSource: string,
+  source: string,
+): string {
+  if (
+    !source.trim() ||
+    source.includes('\0') ||
+    source.includes('\\') ||
+    isAbsolute(source) ||
+    win32.isAbsolute(source) ||
+    /^[a-z][a-z\d+.-]*:/i.test(source) ||
+    source.split('/').includes('..')
+  )
+    throw new TrackBuildError(postSource, 'expected a relative local path without traversal');
+  if (!formatOf(source)) throw new TrackBuildError(postSource, 'unsupported track file extension');
+  const entry = resolve(dirname(resolve(sourceDir, postSource)), source);
+  if (!isDescendant(resolve(sourceDir), entry))
+    throw new TrackBuildError(postSource, 'track must stay inside the source directory');
+  return entry;
+}
+
 /** Internal filesystem injection for deterministic real-filesystem race tests. */
 export function createTrackSourceReader(operations: Partial<typeof fileSystem> = {}) {
   const { closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, statSync } = {
@@ -60,18 +83,8 @@ export function createTrackSourceReader(operations: Partial<typeof fileSystem> =
     const fail = (reason: string): never => {
       throw new TrackBuildError(postSource, reason);
     };
-    if (
-      !source.trim() ||
-      source.includes('\0') ||
-      source.includes('\\') ||
-      isAbsolute(source) ||
-      win32.isAbsolute(source) ||
-      /^[a-z][a-z\d+.-]*:/i.test(source) ||
-      source.split('/').includes('..')
-    )
-      fail('expected a relative local path without traversal');
-    const format = formatOf(source);
-    if (!format) return fail('unsupported track file extension');
+    const target = resolveTrackSourceEntry(sourceDir, postSource, source);
+    const format = formatOf(source)!;
 
     const directories: { path: string; descriptor: number; metadata: BigIntStats }[] = [];
     const pinDirectory = (path: string) => {
@@ -111,9 +124,6 @@ export function createTrackSourceReader(operations: Partial<typeof fileSystem> =
     try {
       const root = realpathSync(sourceDir);
       pinDirectory(root);
-      const target = resolve(dirname(resolve(sourceDir, postSource)), source);
-      if (!isDescendant(resolve(sourceDir), target))
-        fail('track must stay inside the source directory');
       const entry = lstatSync(target);
       if (!entry.isFile() && !entry.isSymbolicLink()) fail('track must be a regular file');
       const canonicalPath = realpathSync(target);

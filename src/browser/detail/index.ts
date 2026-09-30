@@ -33,6 +33,7 @@ export function hydrateDetail(
   let started = false;
   let disposed = false;
   let failed = false;
+  let trackFailed = false;
   const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]');
   const data = root.querySelector('[data-hpm-data]');
   const playbackRoot = root.querySelector<HTMLElement>('[data-hpm-playback]');
@@ -110,6 +111,7 @@ export function hydrateDetail(
 
   function showTrackFallback() {
     if (disposed || failed) return;
+    trackFailed = true;
     if (!isCurrent()) {
       teardown(false);
       return;
@@ -127,7 +129,6 @@ export function hydrateDetail(
     setStatus(root, '');
     try {
       const providerPromise = load(config);
-      let trackFailed = false;
       const trackPromise = config.track
         ? loadTrackAsset(config.track.url, abort.signal, fetcher).catch(() => {
             if (!abort.signal.aborted) trackFailed = true;
@@ -162,13 +163,24 @@ export function hydrateDetail(
       if (config.track && track && mounted.hasTrack === true) {
         if (config.track.playback) {
           try {
-            playback = createPlaybackController(root, mounted, { isCurrent });
+            const candidate = createPlaybackController(root, mounted, { isCurrent });
+            // Initial progress can synchronously degrade the provider or replace this root.
+            if (!mounted.hasTrack) trackFailed = true;
+            if (disposed || failed || trackFailed || !isCurrent()) {
+              candidate.destroy();
+              if (!disposed && !failed && !isCurrent()) teardown(false);
+            } else playback = candidate;
           } catch {
             trackFailed = true;
           }
         }
       } else if (config.track) {
         trackFailed = true;
+      }
+      if (disposed || failed) return;
+      if (!isCurrent()) {
+        teardown(false);
+        return;
       }
       if (trackFailed) showTrackFallback();
       else setStatus(root, '');

@@ -159,7 +159,6 @@ export function createOverviewRoutes(
     ? publicUrl('/hexo-post-map/assets/placeholder.svg', hexo, 'image')
     : '';
   const posts: OverviewPost[] = [];
-  const tracks = new Map<string, string>();
   for (const document of locals.posts.toArray()) {
     // Warehouse's Document type omits the schema properties exposed by Hexo at runtime.
     const post = document as OverviewSourcePost;
@@ -174,8 +173,7 @@ export function createOverviewRoutes(
     const normalized = normalizePostMapDocument(post.map, post.source);
     if (normalized === null) continue;
     if (config.post.enabled && normalized.track) {
-      const compiled = compiler.compile(post.source, normalized.track);
-      tracks.set(compiled.routePath, compiled.serialized);
+      compiler.compile(post.source, normalized.track);
     }
     if (!includeInOverview) continue;
     const map = normalized.map;
@@ -194,7 +192,7 @@ export function createOverviewRoutes(
       },
     });
   }
-  const trackRoutes: HexoRoute[] = [...tracks].map(([path, data]) => ({ path, data }));
+  const trackRoutes: HexoRoute[] = compiler.assetEntries().map(([path, data]) => ({ path, data }));
   if (!config.overview.enabled) return [...assets, ...trackRoutes];
   posts.sort((a, b) => b.date.localeCompare(a.date));
   const dataPath = `${config.overview.path}posts.json`;

@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { unlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import Hexo from 'hexo';
@@ -77,6 +78,107 @@ async function fixture(overview = false, postOptions: Record<string, unknown> = 
 }
 
 describe('raw track route privacy across Hexo generation', () => {
+  it.each(['trim', 'parse', 'invalid-map'])(
+    'quarantines newly private raw routes before a failed %s generation',
+    async (failure) => {
+      const { hexo, post, postAsset, asset } = await fixture();
+      const raw = await postAsset('private.gpx', rawGpx);
+      const alias = await asset('public-alias.gpx', raw.source);
+      const image = await postAsset('photo.jpg', 'IMAGE_BYTES');
+      const unused = await postAsset('unreferenced.gpx', rawGpx);
+      post.map = { points };
+      await post.save();
+      await hexo._generate();
+      expect(hexo.route.get(raw.path)).toBeDefined();
+      expect(hexo.route.get(alias.path)).toBeDefined();
+      const rawUpdates: string[] = [];
+      hexo.route.on('update', (path: string) => {
+        if (path === raw.path || path === alias.path) rawUpdates.push(path);
+      });
+      post.map = {
+        points: failure === 'invalid-map' ? [] : points,
+        track: {
+          source: 'trip/private.gpx',
+          ...(failure === 'trim' ? { privacy: { trim_start_meters: 999999 } } : {}),
+        },
+      };
+      if (failure === 'parse') await writeFile(raw.source, '<gpx>PRIVATE_BROKEN');
+      await post.save();
+      await expect(hexo._generate({ cache: true })).rejects.toThrow();
+      expect(hexo.route.get(raw.path)).toBeUndefined();
+      expect(hexo.route.get(alias.path)).toBeUndefined();
+      expect(rawUpdates).toEqual([]);
+      const read = async (path: string) => {
+        const chunks: string[] = [];
+        for await (const chunk of hexo.route.get(path)!) chunks.push(String(chunk));
+        return chunks.join('');
+      };
+      expect(await read(image.path)).toBe('IMAGE_BYTES');
+      expect(await read(unused.path)).toBe(rawGpx);
+    },
+  );
+
+  it('publishes the rendered snapshot when a source changes between rendering and preparation', async () => {
+    const { hexo, post, postAsset } = await fixture();
+    const raw = await postAsset('private.gpx', rawGpx);
+    hexo.extend.filter.register(
+      'before_generate',
+      async () => {
+        await writeFile(raw.source, rawGpx.replace('lon="0.001"', 'lon="0.002"'));
+      },
+      50,
+    );
+    const inspect = async (distance: string, meters: number) => {
+      const window = new Window();
+      window.document.body.innerHTML = hexo.model('Post').findById(post._id).content;
+      const descriptor = JSON.parse(
+        window.document.querySelector('[data-hpm-data]')!.textContent!,
+      ).track;
+      expect(window.document.querySelector('[data-hpm-track-stats] dd')!.textContent).toBe(
+        distance,
+      );
+      const path = descriptor.url.slice(1);
+      const stream = hexo.route.get(path);
+      expect(stream).toBeDefined();
+      const chunks: string[] = [];
+      for await (const chunk of stream!) chunks.push(String(chunk));
+      const bytes = chunks.join('');
+      expect(path).toBe(
+        `hexo-post-map/tracks/${createHash('sha256').update(bytes).digest('hex')}.json`,
+      );
+      expect(JSON.parse(bytes).stats).toEqual(descriptor.stats);
+      expect(descriptor.stats.distanceMeters).toBe(meters);
+      return path;
+    };
+    await hexo._generate();
+    const first = await inspect('111 米', 111.195);
+    await hexo._generate({ cache: true });
+    expect(await inspect('222 米', 222.39)).not.toBe(first);
+  });
+
+  it('quarantines a reference introduced by a later hook before preparation can fail', async () => {
+    const { hexo, post, postAsset } = await fixture();
+    const raw = await postAsset('private.gpx', rawGpx);
+    post.map = { points };
+    await post.save();
+    await hexo._generate();
+    expect(hexo.route.get(raw.path)).toBeDefined();
+    hexo.extend.filter.register(
+      'before_generate',
+      async () => {
+        post.map = {
+          points,
+          track: { source: 'trip/private.gpx', privacy: { trim_start_meters: 999999 } },
+        };
+        await post.save();
+        hexo.locals.invalidate();
+      },
+      50,
+    );
+    await expect(hexo._generate({ cache: true })).rejects.toThrow(/privacy/);
+    expect(hexo.route.get(raw.path)).toBeUndefined();
+  });
+
   it.each(['after', 'manual'])(
     'refreshes cached track HTML and statistics after only the GPX changes (%s)',
     async (position) => {
