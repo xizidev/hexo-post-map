@@ -8,7 +8,7 @@ import { renderPostPanel } from '../../src/browser/overview/panel';
 import { renderOverview, type OverviewPost } from '../../src/templates/overview';
 import { resolveConfig } from '../../src/config/resolve';
 import type { MapHandle, MapProvider, OverviewMapOptions } from '../../src/browser/providers/types';
-import { createAMapProvider } from '../../src/browser/providers/amap';
+import { createAMapOverviewProvider } from '../../src/browser/providers/amap-overview';
 
 const sdk = vi.hoisted(() => ({ load: vi.fn(), reset: vi.fn() }));
 vi.mock('@amap/amap-jsapi-loader', () => ({ default: sdk }));
@@ -184,7 +184,7 @@ async function adapter(plugin?: (names: string[], ready: () => void) => void) {
   };
   if (plugin) Reflect.deleteProperty(api, 'MarkerCluster');
   sdk.load.mockResolvedValue(api);
-  return createAMapProvider({
+  return createAMapOverviewProvider({
     provider: 'amap',
     amap: { key: 'key', mapStyle: 'amap://styles/dark', serviceHost: '/proxy' },
   });

@@ -177,6 +177,14 @@ describe('AMap recorded-track conversion', () => {
           ],
         }),
     },
+    {
+      name: 'a sparse locations array',
+      invoke: (callback: (status: string, result?: { readonly locations?: unknown }) => void) => {
+        const locations = new Array<unknown>(2);
+        locations[0] = [120, 30];
+        callback('complete', { locations });
+      },
+    },
   ])('rejects $name without returning mixed coordinates', async ({ invoke }) => {
     const api: AMapTrackConversionApi = {
       convertFrom(_batch, _source, callback) {
@@ -337,4 +345,34 @@ describe('recorded-track progress geometry', () => {
       coordinate: [0.005, 0],
     });
   });
+
+  it.each([
+    {
+      name: 'eastward',
+      start: [179.9, 0] as const,
+      end: [-179.9, 0] as const,
+      midpointLongitude: 180,
+    },
+    {
+      name: 'westward',
+      start: [-179.9, 0] as const,
+      end: [179.9, 0] as const,
+      midpointLongitude: -180,
+    },
+  ])(
+    'interpolates $name across the antimeridian on the shortest path',
+    ({ start, end, midpointLongitude }) => {
+      const geometry = createTrackProgressGeometry(converted([[start, end]]));
+
+      const state = geometry.at(0.5);
+
+      expect(state.coordinate[0]).toBeCloseTo(midpointLongitude, 12);
+      expect(state.coordinate[1]).toBe(0);
+      expect(state.paths).toHaveLength(1);
+      expect(state.paths[0]).toHaveLength(2);
+      expect(state.paths[0]?.[0]).toEqual(start);
+      expect(state.paths[0]?.[1]?.[0]).toBeCloseTo(midpointLongitude, 12);
+      expect(state.paths[0]?.[1]?.[1]).toBe(0);
+    },
+  );
 });

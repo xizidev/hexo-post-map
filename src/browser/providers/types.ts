@@ -54,9 +54,18 @@ export interface DetailMapHandle extends MapHandle {
   setTrackProgress?(progress: number): void;
 }
 
-export interface MapProvider {
+export interface DetailMapProvider {
   mountDetail(container: HTMLElement, model: DetailMapModel): Promise<DetailMapHandle>;
+}
+
+export interface OverviewMapProvider {
   mountOverview(container: HTMLElement, options: OverviewMapOptions): Promise<MapHandle>;
 }
 
+export interface MapProvider extends DetailMapProvider, OverviewMapProvider {}
+
 export type ProviderLoader = (config: BrowserProviderConfig) => Promise<MapProvider>;
+export type DetailProviderLoader = (config: BrowserProviderConfig) => Promise<DetailMapProvider>;
+export type OverviewProviderLoader = (
+  config: BrowserProviderConfig,
+) => Promise<OverviewMapProvider>;

@@ -141,7 +141,10 @@ export function convertTrackFromGps(
           try {
             if (status !== 'complete' || !Array.isArray(result?.locations)) throw failed();
             if (result.locations.length !== batch.length) throw failed();
-            converted.push(...result.locations.map(convertedCoordinate));
+            for (let index = 0; index < batch.length; index += 1) {
+              if (!Object.prototype.hasOwnProperty.call(result.locations, index)) throw failed();
+              converted.push(convertedCoordinate(result.locations[index]));
+            }
             next(offset + batch.length);
           } catch {
             finish(() => reject(failed()));
@@ -159,10 +162,21 @@ export function convertTrackFromGps(
 }
 
 function interpolateCoordinate(start: Coordinate, end: Coordinate, fraction: number): Coordinate {
-  return Object.freeze([
-    start[0] + (end[0] - start[0]) * fraction,
-    start[1] + (end[1] - start[1]) * fraction,
-  ]);
+  const directLongitudeDelta = end[0] - start[0];
+  const shortestLongitudeDelta =
+    directLongitudeDelta > 180
+      ? directLongitudeDelta - 360
+      : directLongitudeDelta < -180
+        ? directLongitudeDelta + 360
+        : directLongitudeDelta;
+  const unwrappedLongitude = start[0] + shortestLongitudeDelta * fraction;
+  const longitude =
+    unwrappedLongitude > 180
+      ? unwrappedLongitude - 360
+      : unwrappedLongitude < -180
+        ? unwrappedLongitude + 360
+        : unwrappedLongitude;
+  return Object.freeze([longitude, start[1] + (end[1] - start[1]) * fraction]);
 }
 
 function safeProgress(value: number): number {

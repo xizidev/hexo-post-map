@@ -1,10 +1,10 @@
-import type { DetailMapHandle, ProviderLoader } from '../providers/types';
+import type { DetailMapHandle, DetailProviderLoader } from '../providers/types';
 import { registerRuntimeHydrator } from '../runtime/bridge';
 import { FEATURES, type RuntimeController } from '../runtime/types';
 import { readDetailConfig } from '../shared/config';
 import { setStatus, showFallback } from '../shared/dom';
-import { loadProvider } from '../shared/provider-loader';
 import { createPlaybackController, type PlaybackController } from './playback';
+import { loadDetailProvider } from './provider-loader';
 import { loadTrackAsset } from './track-data';
 
 const controllersKey = Symbol.for('hexo-post-map.detail-controllers.v1');
@@ -18,7 +18,7 @@ function controllers(): WeakMap<HTMLElement, RuntimeController> {
 
 export function hydrateDetail(
   root: HTMLElement,
-  load: ProviderLoader = loadProvider,
+  load: DetailProviderLoader = loadDetailProvider,
   fetcher: typeof fetch = fetch,
 ): RuntimeController {
   const registry = controllers();
@@ -192,7 +192,7 @@ export function hydrateDetail(
 
 export function initializeDetailMaps(
   scope: ParentNode = document,
-  load: ProviderLoader = loadProvider,
+  load: DetailProviderLoader = loadDetailProvider,
 ): void {
   scope
     .querySelectorAll<HTMLElement>('[data-hpm-detail]')

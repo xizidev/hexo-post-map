@@ -1,4 +1,3 @@
-import AMapLoader from '@amap/amap-jsapi-loader';
 import type { Coordinate } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
 import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
@@ -9,6 +8,12 @@ import {
   createTrackProgressGeometry,
   type AMapTrackConversionApi,
 } from './amap-track';
+import {
+  AMAP_LOAD_TIMEOUT_MS as LOAD_TIMEOUT_MS,
+  amapInteraction as interaction,
+  loadAMapApi,
+  type AMapSdkApi,
+} from './amap-sdk';
 import type {
   BrowserProviderConfig,
   DetailMapHandle,
@@ -42,7 +47,7 @@ interface AMapPolyline {
   show(): void;
   setMap?(map: AMapMap | null): void;
 }
-interface AMapApi {
+interface AMapApi extends AMapSdkApi {
   Map: new (container: HTMLElement, options: Record<string, unknown>) => AMapMap;
   Marker: new (options: Record<string, unknown>) => AMapMarker;
   Polyline: new (options: Record<string, unknown>) => AMapPolyline;
@@ -76,150 +81,6 @@ interface ClusterOptions {
   renderClusterMarker(context: ClusterContext): void;
   renderMarker(context: ClusterContext): void;
 }
-const loader = AMapLoader as unknown as {
-  load(options: { key: string; version: string }): Promise<AMapApi>;
-  reset(): void;
-};
-const LOAD_TIMEOUT_MS = 20_000;
-const attemptKey = Symbol.for('hexo-post-map.amap-attempt.v1');
-const terminalKey = Symbol.for('hexo-post-map.amap-terminal.v1');
-
-// A timed-out JSONP response may still execute. Keep one inert callback, without attempt state.
-function ignoreLateApiResponse(): void {}
-
-function existingApi(value: unknown): value is AMapApi {
-  if (value === null || typeof value !== 'object') return false;
-  const api = value as Record<string, unknown>;
-  return (
-    typeof api.version === 'string' &&
-    /^2(?:\.|$)/u.test(api.version) &&
-    ['Map', 'Marker', 'Polyline'].every((name) => typeof api[name] === 'function')
-  );
-}
-
-function isSdkScript(script: HTMLScriptElement): boolean {
-  return /^https:\/\/webapi\.amap\.com\/maps(?:\?|$)/u.test(script.src);
-}
-
-/** Own only the request started here, never an SDK or configuration belonging to the theme. */
-function loadApi(config: BrowserProviderConfig): Promise<AMapApi> {
-  if (Reflect.get(window, terminalKey)) {
-    return Promise.reject(new Error('Map SDK loading timed out; reload page to retry'));
-  }
-  const currentApi: unknown = Reflect.get(window, 'AMap');
-  if (currentApi !== undefined) {
-    return existingApi(currentApi)
-      ? Promise.resolve(currentApi)
-      : Promise.reject(new Error('Cannot reuse existing map SDK'));
-  }
-  if (
-    Reflect.get(window, attemptKey) ||
-    ['AMapUI', 'Loca', '___onAPILoaded'].some((key) => Reflect.get(window, key) !== undefined) ||
-    Array.from(document.scripts).some(isSdkScript)
-  ) {
-    return Promise.reject(new Error('Cannot take ownership of existing map SDK loading state'));
-  }
-  const previousSecurity = Object.getOwnPropertyDescriptor(window, '_AMapSecurityConfig');
-  const security =
-    config.amap.serviceHost !== undefined
-      ? { serviceHost: config.amap.serviceHost }
-      : { securityJsCode: config.amap.securityJsCode };
-  const attempt = {};
-  const scriptsBefore = new Set(document.scripts);
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let ownedScripts: HTMLScriptElement[] = [];
-    let ownedCallback: unknown;
-    const timer = window.setTimeout(
-      () => fail(new Error('Map SDK loading timed out; reload page to retry'), true),
-      LOAD_TIMEOUT_MS,
-    );
-    const ownsAttempt = () => Reflect.get(window, attemptKey) === attempt;
-    function release() {
-      clearTimeout(timer);
-      if (ownsAttempt()) Reflect.deleteProperty(window, attemptKey);
-    }
-    function fail(error: unknown, terminal = false) {
-      if (settled) return;
-      settled = true;
-      if (terminal) Reflect.set(window, terminalKey, true);
-      if (ownsAttempt()) {
-        const ownsSecurity = Reflect.get(window, '_AMapSecurityConfig') === security;
-        const currentCallback: unknown = Reflect.get(window, '___onAPILoaded');
-        const ownsCallback = currentCallback === undefined || currentCallback === ownedCallback;
-        ownedScripts.forEach((script) => script.remove());
-        if (currentCallback === ownedCallback && ownedCallback !== undefined) {
-          if (terminal) Reflect.set(window, '___onAPILoaded', ignoreLateApiResponse);
-          else Reflect.deleteProperty(window, '___onAPILoaded');
-        }
-        // reset() deletes all three SDK globals. Only use it while none has been supplied by another owner.
-        if (
-          !terminal &&
-          ownsSecurity &&
-          ownsCallback &&
-          ['AMap', 'AMapUI', 'Loca'].every((key) => Reflect.get(window, key) === undefined)
-        )
-          loader.reset();
-        if (ownsSecurity) {
-          if (previousSecurity)
-            Object.defineProperty(window, '_AMapSecurityConfig', previousSecurity);
-          else Reflect.deleteProperty(window, '_AMapSecurityConfig');
-        }
-      }
-      release();
-      reject(error);
-    }
-    try {
-      if (
-        !Reflect.defineProperty(window, '_AMapSecurityConfig', {
-          configurable: previousSecurity?.configurable ?? true,
-          enumerable: previousSecurity?.enumerable ?? true,
-          writable: true,
-          value: security,
-        })
-      )
-        throw new Error('Cannot configure map SDK');
-      Reflect.set(window, attemptKey, attempt);
-      const pending = loader.load({ key: config.amap.key, version: '2.0' });
-      ownedScripts = Array.from(document.scripts).filter(
-        (script) => !scriptsBefore.has(script) && isSdkScript(script),
-      );
-      const callback: unknown = Reflect.get(window, '___onAPILoaded');
-      if (typeof callback === 'function') {
-        ownedCallback = (...args: unknown[]) => {
-          if (!settled && ownsAttempt()) Reflect.apply(callback, window, args);
-        };
-        Reflect.set(window, '___onAPILoaded', ownedCallback);
-      }
-      pending.then((api) => {
-        if (settled) return;
-        const installed: unknown = Reflect.get(window, 'AMap');
-        if (!ownsAttempt() || (installed !== undefined && installed !== api)) {
-          fail(new Error('Map SDK ownership changed during loading'));
-          return;
-        }
-        settled = true;
-        release();
-        resolve(api);
-      }, fail);
-    } catch (error) {
-      fail(error);
-    }
-  });
-}
-
-function interaction(active: boolean): Record<string, boolean> {
-  return {
-    scrollWheel: active,
-    touchZoom: active,
-    dragEnable: active,
-    keyboardEnable: active,
-    doubleClickZoom: active,
-    zoomEnable: active,
-    rotateEnable: false,
-  };
-}
-
 function mountDetail(
   api: AMapApi,
   mapStyle: string,
@@ -966,10 +827,19 @@ async function mountOverview(
 }
 
 export async function createAMapProvider(config: BrowserProviderConfig): Promise<MapProvider> {
-  const api = await loadApi(config);
+  const api = await loadAMapApi<AMapApi>(config);
   return {
     mountDetail: (container, model) => mountDetail(api, config.amap.mapStyle, container, model),
     mountOverview: (container, options) =>
       mountOverview(api, config.amap.mapStyle, container, options),
+  };
+}
+
+export async function createAMapDetailProvider(
+  config: BrowserProviderConfig,
+): Promise<Pick<MapProvider, 'mountDetail'>> {
+  const api = await loadAMapApi<AMapApi>(config);
+  return {
+    mountDetail: (container, model) => mountDetail(api, config.amap.mapStyle, container, model),
   };
 }

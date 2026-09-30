@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAMapProvider } from '../../src/browser/providers/amap';
+import { createAMapDetailProvider as createAMapProvider } from '../../src/browser/providers/amap';
 import { normalizePostMap } from '../../src/domain/normalize';
 import type { DetailMapModel } from '../../src/browser/providers/types';
 
@@ -612,6 +612,40 @@ describe('AMap adapter', () => {
       [121, 31],
       [122, 32],
     ]);
+    expect(handle.hasTrack).not.toBe(true);
+    expect(handle.setTrackProgress).toBeUndefined();
+    handle.destroy();
+  });
+
+  it('degrades a sparse conversion result once to the schematic route', async () => {
+    convertFrom.mockImplementation((batch, _source, callback) => {
+      const locations = new Array<unknown>(batch.length);
+      locations[0] = [110.1, 20.2];
+      callback('complete', { locations });
+    });
+    const provider = await createAMapProvider(config);
+    const onTrackError = vi.fn();
+    const pending = provider.mountDetail(
+      document.createElement('div'),
+      trackedModel(true, onTrackError),
+    );
+
+    await vi.waitFor(() => expect(onTrackError).toHaveBeenCalledTimes(1));
+    instance.emit('complete');
+    const handle = await pending;
+    const lines = instance.overlays.filter(
+      (overlay): overlay is FakePolyline => overlay instanceof FakePolyline,
+    );
+
+    expect(onTrackError).toHaveBeenCalledTimes(1);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.options.path).toEqual([
+      [121, 31],
+      [122, 32],
+    ]);
+    expect(
+      lines.some((line) => line.options.path.some((coordinate) => coordinate === undefined)),
+    ).toBe(false);
     expect(handle.hasTrack).not.toBe(true);
     expect(handle.setTrackProgress).toBeUndefined();
     handle.destroy();
