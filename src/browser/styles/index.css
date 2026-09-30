@@ -11,6 +11,10 @@
   --hpm-text: #172033;
   --hpm-muted: #5b667a;
   --hpm-route-color: #0f766e;
+  --hpm-track-color: #475569;
+  --hpm-track-progress-color: #1d4ed8;
+  --hpm-track-control-surface: #ffffff;
+  --hpm-track-control-border: #94a3b8;
   --hpm-tooltip-surface: rgb(255 255 255 / 96%);
   --hpm-tooltip-border: rgb(100 116 139 / 48%);
   --hpm-tooltip-shadow: 0 6px 18px rgb(15 23 42 / 22%);
@@ -46,6 +50,83 @@
 
 .hpm-place-list {
   padding-inline-start: 1.5rem;
+}
+
+.hpm-detail .hpm-track-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  margin-block: 0.75rem 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--hpm-track-control-border);
+  border-radius: 0.75rem;
+  background: var(--hpm-track-control-surface);
+}
+
+.hpm-detail .hpm-track-stats dt {
+  color: var(--hpm-muted);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.hpm-detail .hpm-track-stats dd {
+  margin: 0 0.75rem 0 0;
+  font-size: 0.9375rem;
+  font-weight: 700;
+}
+
+.hpm-detail .hpm-track-controls,
+.hpm-detail .hpm-playback {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-block: 0.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--hpm-track-control-border);
+  border-radius: 0.75rem;
+  background: var(--hpm-track-control-surface);
+}
+
+.hpm-detail .hpm-track-controls button,
+.hpm-detail .hpm-playback button {
+  box-sizing: border-box;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--hpm-track-control-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--hpm-text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hpm-detail .hpm-track-controls input[type='range'],
+.hpm-detail .hpm-playback input[type='range'] {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 44px;
+  flex: 1 1 10rem;
+  margin: 0;
+  accent-color: var(--hpm-track-progress-color);
+  cursor: pointer;
+}
+
+.hpm-detail .hpm-track-marker {
+  box-sizing: border-box;
+  display: block;
+  width: 16px;
+  height: 16px;
+  border: 3px solid var(--hpm-track-control-surface);
+  border-radius: 50%;
+  background: var(--hpm-track-progress-color);
+  box-shadow: 0 2px 6px rgb(15 23 42 / 35%);
+  pointer-events: none;
 }
 
 .hpm-detail-marker-content {
@@ -505,6 +586,10 @@
 
 .hpm-detail [data-hpm-canvas]:focus-visible,
 .hpm-detail .hpm-detail-marker:focus-visible,
+.hpm-detail .hpm-track-controls button:focus-visible,
+.hpm-detail .hpm-track-controls input:focus-visible,
+.hpm-detail .hpm-playback button:focus-visible,
+.hpm-detail .hpm-playback input:focus-visible,
 .hpm-overview [data-hpm-canvas]:focus-visible,
 .hpm-overview button:focus-visible,
 .hpm-overview a:focus-visible,
@@ -522,6 +607,10 @@
     --hpm-text: #e2e8f0;
     --hpm-muted: #94a3b8;
     --hpm-route-color: #5eead4;
+    --hpm-track-color: #cbd5e1;
+    --hpm-track-progress-color: #67e8f9;
+    --hpm-track-control-surface: #1e293b;
+    --hpm-track-control-border: #64748b;
     --hpm-tooltip-surface: rgb(15 23 42 / 96%);
     --hpm-tooltip-border: rgb(148 163 184 / 58%);
     --hpm-tooltip-shadow: 0 6px 18px rgb(0 0 0 / 38%);
@@ -555,6 +644,10 @@
 
   .hpm-detail {
     --hpm-route-color: CanvasText;
+    --hpm-track-color: CanvasText;
+    --hpm-track-progress-color: Highlight;
+    --hpm-track-control-surface: Canvas;
+    --hpm-track-control-border: CanvasText;
     --hpm-tooltip-surface: Canvas;
     --hpm-tooltip-border: CanvasText;
     --hpm-tooltip-shadow: none;
@@ -574,6 +667,7 @@
   }
 
   .hpm-detail-marker,
+  .hpm-detail .hpm-track-marker,
   .hpm-image-marker__card,
   .hpm-cluster__surface,
   .hpm-panel {
