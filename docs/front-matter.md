@@ -55,18 +55,22 @@ map:
     playback: true
 ```
 
-GPX input must use the GPX 1.1 namespace `http://www.topografix.com/GPX/1/1`. Track segments and points are read only from the `trk` > `trkseg` > `trkpt` hierarchy in that namespace. Route-only (`rte`/`rtept`), waypoint-only (`wpt`), and files using the GPX 1.0 namespace are not supported track inputs; because they yield no supported track segment, they fail with no usable track.
+GPX input must use the GPX 1.1 namespace `http://www.topografix.com/GPX/1/1`. Track segments and points are read only from the `trk` > `trkseg` > `trkpt` hierarchy in that namespace. Files using the GPX 1.0 namespace are rejected immediately because their root namespace is not the required GPX 1.1 namespace. In an otherwise valid GPX 1.1 document, route-only (`rte`/`rtept`) and waypoint-only (`wpt`) content is ignored rather than extracted as a track; if no supported track segment remains, validation fails with no usable track.
 
 ```xml test=track-source-gpx
 <gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">
   <trk>
     <trkseg>
       <trkpt lon="118.7900" lat="32.0800" />
-      <trkpt lon="118.7910" lat="32.0810" />
+      <trkpt lon="118.8000" lat="32.0800" />
+      <trkpt lon="118.8100" lat="32.0800" />
+      <trkpt lon="118.8200" lat="32.0800" />
     </trkseg>
   </trk>
 </gpx>
 ```
+
+This four-point sample spans about 2.8 km, so the documented 300 m trim from each end still leaves a usable line.
 
 ### Display-only GeoJSON
 

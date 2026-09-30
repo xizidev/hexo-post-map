@@ -219,18 +219,22 @@ map:
 
 `source` 是相对于文章源文件的本地路径。对于 `source/_posts/nanjing.md`，示例会解析到 `source/_posts/tracks/nanjing.gpx`。文件必须位于 Hexo 的 `source_dir` 内；远程 URL、绝对路径、目录穿越和逃逸到目录外的符号链接都会使构建失败。
 
-GPX 输入必须使用 GPX 1.1 namespace `http://www.topografix.com/GPX/1/1`。解析器只从该 namespace 内的 `trk` > `trkseg` > `trkpt` 层级读取轨迹段和轨迹点。仅含路线（`rte`/`rtept`）、仅含航点（`wpt`）或使用 GPX 1.0 namespace 的文件不支持作为轨迹输入；由于没有受支持的轨迹段，它们会因无可用轨迹而构建失败。
+GPX 输入必须使用 GPX 1.1 namespace `http://www.topografix.com/GPX/1/1`。解析器只从该 namespace 内的 `trk` > `trkseg` > `trkpt` 层级读取轨迹段和轨迹点。使用 GPX 1.0 namespace 的文件会被立即拒绝，因为它的根 namespace 不是要求的 GPX 1.1 namespace。在其他方面有效的 GPX 1.1 文档中，仅含路线（`rte`/`rtept`）和仅含航点（`wpt`）的内容会被忽略，不提取为轨迹；如果最终没有受支持的轨迹段，校验会因无可用轨迹而失败。
 
 ```xml test=track-source-gpx
 <gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">
   <trk>
     <trkseg>
       <trkpt lon="118.7900" lat="32.0800" />
-      <trkpt lon="118.7910" lat="32.0810" />
+      <trkpt lon="118.8000" lat="32.0800" />
+      <trkpt lon="118.8100" lat="32.0800" />
+      <trkpt lon="118.8200" lat="32.0800" />
     </trkseg>
   </trk>
 </gpx>
 ```
+
+这段四点示例约长 2.8 千米，因此按上方配置从首尾各裁剪 300 米后仍保留可用线段。
 
 ### 添加仅展示的 GeoJSON 轨迹
 

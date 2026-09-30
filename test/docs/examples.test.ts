@@ -5,6 +5,8 @@ import { resolveConfig } from '../../src/config/resolve';
 import { normalizePostMap, normalizePostMapDocument } from '../../src/domain/normalize';
 import { parseGeoJson } from '../../src/tracks/geojson';
 import { parseGpx } from '../../src/tracks/gpx';
+import { trimTrack } from '../../src/tracks/privacy';
+import { calculateTrackStats } from '../../src/tracks/statistics';
 
 const visualThemeVariables = [
   '--hpm-accent',
@@ -199,29 +201,33 @@ describe('recorded-track documentation contract', () => {
   it.each([
     [
       'README.md',
-      /route-only[\s\S]*waypoint-only[\s\S]*GPX 1\.0[\s\S]*(?:not supported|fail)/iu,
+      /GPX 1\.0 namespace[\s\S]{0,180}rejected immediately[\s\S]{0,180}not (?:the )?(?:required )?GPX 1\.1 namespace/iu,
+      /route-only[\s\S]*waypoint-only[\s\S]*(?:ignored|not extracted)[\s\S]*(?:no usable track|fail)/iu,
       /other (?:supported )?standard geometr(?:y|ies)[\s\S]*(?:ignored|not treated as tracks)[\s\S]*(?:no usable line|fail)/iu,
       /two distinct usable points[\s\S]*same segment/iu,
     ],
     [
       'README.zh-CN.md',
-      /仅含[^。\n]*(?:路线|rte)[\s\S]*仅含[^。\n]*(?:航点|wpt)[\s\S]*GPX 1\.0[\s\S]*(?:不支持|失败)/u,
+      /GPX 1\.0 namespace[\s\S]{0,180}(?:立即拒绝|立即失败)[\s\S]{0,180}不是[^。\n]*GPX 1\.1 namespace/u,
+      /仅含[^。\n]*(?:路线|rte)[\s\S]*仅含[^。\n]*(?:航点|wpt)[\s\S]*(?:忽略|不提取)[\s\S]*(?:无可用轨迹|失败)/u,
       /其他[^。\n]*(?:geometry|几何)[\s\S]*(?:忽略|不作为轨迹)[\s\S]*(?:没有可用线|失败)/iu,
       /同一(?:轨迹)?段[\s\S]*两个[^。\n]*不同[^。\n]*可用点/u,
     ],
     [
       'docs/front-matter.md',
-      /route-only[\s\S]*waypoint-only[\s\S]*GPX 1\.0[\s\S]*(?:not supported|fail)/iu,
+      /GPX 1\.0 namespace[\s\S]{0,180}rejected immediately[\s\S]{0,180}not (?:the )?(?:required )?GPX 1\.1 namespace/iu,
+      /route-only[\s\S]*waypoint-only[\s\S]*(?:ignored|not extracted)[\s\S]*(?:no usable track|fail)/iu,
       /other (?:supported )?standard geometr(?:y|ies)[\s\S]*(?:ignored|not treated as tracks)[\s\S]*(?:no usable line|fail)/iu,
       /two distinct usable points[\s\S]*same segment/iu,
     ],
   ])(
     '%s states the exact GPX and GeoJSON parser boundary',
-    (file, unsupportedGpx, ignoredGeoJson, usableSegment) => {
+    (file, rejectedGpxTen, ignoredRouteAndWaypoint, ignoredGeoJson, usableSegment) => {
       const markdown = markdownFile(file);
       expect(markdown).toContain('http://www.topografix.com/GPX/1/1');
       expect(markdown).toMatch(/GPX 1\.1[\s\S]*`trk`[\s\S]*`trkseg`[\s\S]*`trkpt`/iu);
-      expect(markdown).toMatch(unsupportedGpx);
+      expect(markdown).toMatch(rejectedGpxTen);
+      expect(markdown).toMatch(ignoredRouteAndWaypoint);
       expect(markdown).toMatch(
         /`LineString`[\s\S]*`MultiLineString`[\s\S]*`Feature`[\s\S]*`FeatureCollection`[\s\S]*`GeometryCollection`/u,
       );
@@ -240,7 +246,12 @@ describe('recorded-track documentation contract', () => {
       expect(geoJson).toHaveLength(1);
       if (gpx.length !== 1 || geoJson.length !== 1) return;
       expect(parseGpx(Buffer.from(gpx[0]!))).toEqual([
-        [{ coordinate: [118.79, 32.08] }, { coordinate: [118.791, 32.081] }],
+        [
+          { coordinate: [118.79, 32.08] },
+          { coordinate: [118.8, 32.08] },
+          { coordinate: [118.81, 32.08] },
+          { coordinate: [118.82, 32.08] },
+        ],
       ]);
       expect(parseGeoJson(Buffer.from(geoJson[0]!))).toEqual([
         [
@@ -248,6 +259,32 @@ describe('recorded-track documentation contract', () => {
           { coordinate: [118.791, 32.081], elevationMeters: 14 },
         ],
       ]);
+    },
+  );
+
+  it.each(['README.md', 'README.zh-CN.md', 'docs/front-matter.md'])(
+    '%s keeps its GPX source executable with the documented privacy trim',
+    (file) => {
+      const [post] = examples(file, 'post-map-track');
+      const [gpx] = sourceExamples(file, 'xml', 'track-source-gpx');
+      expect(post).toBeDefined();
+      expect(gpx).toBeDefined();
+      if (!post || !gpx) return;
+      const reference = normalizePostMapDocument(post.map, file)?.track;
+      expect(reference).toMatchObject({
+        source: './tracks/nanjing.gpx',
+        privacy: { trimStartMeters: 300, trimEndMeters: 300 },
+      });
+      if (!reference) return;
+      const parsed = parseGpx(Buffer.from(gpx));
+      expect(calculateTrackStats(parsed).distanceMeters).toBeGreaterThan(600);
+      const trimmed = trimTrack(
+        parsed,
+        reference.privacy.trimStartMeters,
+        reference.privacy.trimEndMeters,
+      );
+      expect(trimmed.some((segment) => segment.length >= 2)).toBe(true);
+      expect(calculateTrackStats(trimmed).distanceMeters).toBeGreaterThan(0);
     },
   );
 });
