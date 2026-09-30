@@ -1,3 +1,5 @@
+import type { NormalizedTrackReference } from '../tracks/types';
+
 /**
  * A GCJ-02 coordinate in `[longitude, latitude]` order.
  *
@@ -17,4 +19,10 @@ export interface NormalizedPostMap {
   readonly representative: NormalizedPoint;
   readonly route: readonly NormalizedPoint[];
   readonly zoom?: number;
+}
+
+/** Server-side Front Matter result; callers must only serialize `map` to browser payloads. */
+export interface NormalizedPostMapDocument {
+  readonly map: NormalizedPostMap;
+  readonly track?: NormalizedTrackReference;
 }

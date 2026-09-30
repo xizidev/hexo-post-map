@@ -6,7 +6,7 @@ Put `post_map` in the Hexo site's `_config.yml`. Only the boolean `enabled: true
 
 All credential strings are placeholders. Use one security field, not both, and omit unused fields rather than leaving empty YAML values (`null`).
 
-```yaml
+```yaml test=config
 post_map:
   enabled: true
   provider: amap
@@ -76,9 +76,27 @@ Use `{% post_map %}` at most once in a mapped article to select its exact locati
 
 The overview uses one representative location per published mapped post. A detail-disabled post can still appear there. Invalid map data remains a build error even when detail cards are disabled. An empty site generates an empty-state overview.
 
-The route belongs to the site root: `root: /blog/` with `overview.path: travel/` produces `/blog/travel/` and `/blog/travel/posts.json`. Add that URL to your theme's menu yourself. Do not create a separate source page at the same route; use an unused `overview.path` if it would collide. Rebuild with `hexo clean` after changing routes to remove stale generated files.
+The route belongs to the site root. Keep `overview.path` relative and do not repeat the Hexo root. These two configurations produce `/map/` and `/blog/map/` respectively:
+
+```yaml test=root-config
+root: /
+post_map:
+  overview:
+    path: map/
+```
+
+```yaml test=root-config
+root: /blog/
+post_map:
+  overview:
+    path: map/
+```
+
+Similarly, `root: /blog/` with `overview.path: travel/` produces `/blog/travel/` and `/blog/travel/posts.json`. Add that URL to your theme's menu yourself. Do not create a separate source page at the same route; use an unused `overview.path` if it would collide. Rebuild with `hexo clean` after changing routes to remove stale generated files.
 
 Assets are emitted under `hexo-post-map/assets/` relative to the site root: `runtime.js`, `post-map.js`, `overview-map.js`, `style.css`, and `placeholder.svg`. Enabled sites inject the provider-free runtime into every rendered HTML page. Only HTML initially containing a plugin map marker also includes the static stylesheet, preserving the no-JavaScript fallback. An index or archive showing full mapped post content can therefore also contain a card and static CSS.
+
+Processed recorded tracks are emitted separately at `hexo-post-map/tracks/<sha256>.json`, also relative to the site root. The digest addresses the public JSON bytes, so a CDN may cache these files as immutable for a long time. Keep HTML and overview JSON on the site's normal revalidation policy, and retain old track hashes while new HTML/CDN caches roll out. The raw authoring file is not a deployment artifact from this plugin. No separate track option belongs in `_config.yml`; track source, privacy, simplification, and playback are article Front Matter fields.
 
 Detail and overview feature scripts are loaded dynamically when needed; AMap remains lazy. Ordinary pages load no map UI or provider resources until map content is inserted. The runtime handles conventional light-DOM PJAX replacement automatically and loads missing feature scripts/styles using the runtime's asset base, respecting roots such as `/blog/`. See [compatibility](compatibility.md) for the versioned manual lifecycle API and retry boundaries.
 

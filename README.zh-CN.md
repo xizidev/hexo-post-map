@@ -4,7 +4,7 @@
 
 为 Hexo 文章添加矮地图卡片，并生成汇集全站文章的地图页面。通过 Front Matter 描述单个地点、多个地点或行程示意线；全国地图根据缩放自动聚合文章，同一地点的多次访问可展开为文章列表。
 
-需要 **Node.js 20 及以上**、**Hexo 7 或 8**。插件使用高德 JS API 2.0，坐标统一为 **GCJ-02**。当前控件及降级提示使用中文。
+需要 **Node.js 20 及以上**、**Hexo 7 或 8**。插件使用高德 JS API 2.0；文章手写地点使用 **GCJ-02**，可选的真实轨迹文件使用 **WGS84**。当前控件及降级提示使用中文。
 
 ## 安装与启用
 
@@ -195,6 +195,87 @@ map:
 
 `map` 和地点对象中的未知字段都会报错。完整规则和错误示例见 [Front Matter 参考](https://github.com/xizidev/hexo-post-map/blob/main/docs/front-matter.md)。
 
+### 添加 GPX 真实轨迹
+
+在 `map` 内，`points` 仍然必填并使用 GCJ-02 坐标；`track` 是可选项，其中 GPX 或 GeoJSON 坐标使用 WGS84。即使真实轨迹加载失败，地点仍能支撑详情卡片和全国地图。
+
+```yaml test=post-map-track
+title: 坐火车去南京
+map:
+  representative: station
+  points:
+    - id: station
+      name: 南京站
+      longitude: 118.7977
+      latitude: 32.0872
+  track:
+    source: ./tracks/nanjing.gpx
+    privacy:
+      trim_start_meters: 300
+      trim_end_meters: 300
+    simplify_tolerance_meters: 5
+    playback: true
+```
+
+`source` 是相对于文章源文件的本地路径。对于 `source/_posts/nanjing.md`，示例会解析到 `source/_posts/tracks/nanjing.gpx`。文件必须位于 Hexo 的 `source_dir` 内；远程 URL、绝对路径、目录穿越和逃逸到目录外的符号链接都会使构建失败。
+
+GPX 输入必须使用 GPX 1.1 namespace `http://www.topografix.com/GPX/1/1`。解析器只从该 namespace 内的 `trk` > `trkseg` > `trkpt` 层级读取轨迹段和轨迹点。使用 GPX 1.0 namespace 的文件会被立即拒绝，因为它的根 namespace 不是要求的 GPX 1.1 namespace。在其他方面有效的 GPX 1.1 文档中，仅含路线（`rte`/`rtept`）和仅含航点（`wpt`）的内容会被忽略，不提取为轨迹；如果最终没有受支持的轨迹段，校验会因无可用轨迹而失败。
+
+```xml test=track-source-gpx
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">
+  <trk>
+    <trkseg>
+      <trkpt lon="118.7900" lat="32.0800" />
+      <trkpt lon="118.8000" lat="32.0800" />
+      <trkpt lon="118.8100" lat="32.0800" />
+      <trkpt lon="118.8200" lat="32.0800" />
+    </trkseg>
+  </trk>
+</gpx>
+```
+
+这段四点示例约长 2.8 千米，因此按上方配置从首尾各裁剪 300 米后仍保留可用线段。
+
+### 添加仅展示的 GeoJSON 轨迹
+
+```yaml test=post-map-track
+title: 漫步南京
+map:
+  representative: old-city
+  points:
+    - id: old-city
+      name: 南京老城
+      longitude: 118.7872
+      latitude: 32.0415
+  track:
+    source: ./tracks/nanjing.geojson
+    playback: false
+```
+
+GeoJSON 源可以直接是 `LineString` 或 `MultiLineString` Geometry，也可以把这些线型 geometry 放在受支持的 `Feature`、`FeatureCollection` 或 `GeometryCollection` 容器中。其他标准 geometry（`Point`、`MultiPoint`、`Polygon`、`MultiPolygon`）会被忽略，不作为轨迹；如果最终没有可用线，构建失败。WGS84 坐标顺序为 `[longitude, latitude, optional elevation]`；更后面的坐标维度和外部属性会被忽略。
+
+```json test=track-source-geojson
+{
+  "type": "LineString",
+  "coordinates": [
+    [118.79, 32.08, 10],
+    [118.791, 32.081, 14]
+  ]
+}
+```
+
+无论哪种格式，最终都必须至少有一个轨迹段，在同一轨迹段中包含两个空间位置不同的可用点。多个相互分离的单点段、空轨迹或只重复同一坐标的线都会校验失败。
+
+支持 `.gpx`、`.geojson` 和 GeoJSON `.json`。`privacy.trim_start_meters`、`privacy.trim_end_meters` 默认都是 `0`，`simplify_tolerance_meters` 默认 `5`，`playback` 默认 `true`。每个源文件最大 8 MiB、最多 200,000 个原始点，发布资源最多 2,000 个点。
+
+构建顺序固定为：隐私裁剪 → 统计 → 简化 → SHA-256 哈希。因此裁剪会影响所有公开坐标和统计值，但按距离裁剪不能匿名化轨迹：附近地标和路线形状仍可能暴露敏感地点。请根据自己的风险判断使用有意模糊的公开地点，并设置足够的裁剪距离。
+
+距离、累计爬升和记录时长会在数据完整时由服务端渲染，禁用 JavaScript 也能阅读。轨迹不会自动播放；开启“减少动态效果”时，连续播放与重新播放不可用，但仍可手动拖动原生进度条。`playback: false` 只显示低调的完整轨迹线，不显示播放控件。
+
+处理后的轨迹发布为 `hexo-post-map/tracks/<sha256>.json`；插件不会发布原始 GPX/GeoJSON 文件、文件名、路径、绝对时间戳、元数据或任意属性。内容哈希文件适合配置长期不可变 CDN 缓存，HTML 则继续使用站点通常的重新验证策略。发布新构建时，应保留旧哈希，直到新 HTML 和 CDN 缓存完成切换。
+
+轨迹 JSON 只会由接近视口的文章详情地图请求。全国地图完全不会请求或暴露轨迹，`map/posts.json` 仍是只含代表点的版本 1 格式。获取、校验或 WGS84 到 GCJ-02 转换失败时，会保留地点图钉并退回 `route` 示意线。哈希资源地址会遵循 Hexo `root`，包括 `/blog/` 子路径部署。
+
 ## 位置与外观
 
 默认卡片位于正文前，高 220px，小屏幕高 180px。`post.position: after` 放到正文后；`manual` 模式在正文中用标签指定位置：
@@ -241,29 +322,34 @@ if (window.HexoPostMap?.apiVersion === 1) {
 
 主题只能通过下列变量定制地图，并将覆盖限定在 `.hpm-detail`、`.hpm-overview` 或两者；不要依赖插件内部组件选择器。插件内置安全的浅色、深色、强制颜色和减少动态效果默认值。
 
-| 变量                    | 用途                                 |
-| ----------------------- | ------------------------------------ |
-| `--hpm-accent`          | 图钉、锚点、链接和焦点环             |
-| `--hpm-accent-contrast` | 强调色上的文字和边框                 |
-| `--hpm-cluster-surface` | 聚合圆表面                           |
-| `--hpm-cluster-border`  | 聚合圆和缩略图边框                   |
-| `--hpm-panel-surface`   | 支持背景滤镜时的玻璃面板表面         |
-| `--hpm-panel-border`    | 文章面板边框                         |
-| `--hpm-card-surface`    | 文章卡片、控件及面板的不透明降级背景 |
-| `--hpm-text`            | 主要文字                             |
-| `--hpm-muted`           | 日期、地点和次要边框                 |
-| `--hpm-route-color`     | 详情地图的直线行程示意段             |
-| `--hpm-tooltip-surface` | 详情地点名气泡表面                   |
-| `--hpm-tooltip-border`  | 详情地点名气泡边框                   |
-| `--hpm-tooltip-shadow`  | 详情地点名气泡阴影                   |
-| `--hpm-tooltip-text`    | 详情地点名气泡文字                   |
-| `--hpm-panel-radius`    | 桌面面板和移动抽屉圆角               |
-| `--hpm-card-radius`     | 文章卡片圆角                         |
+| 变量                          | 用途                                 |
+| ----------------------------- | ------------------------------------ |
+| `--hpm-accent`                | 图钉、锚点、链接和焦点环             |
+| `--hpm-accent-contrast`       | 强调色上的文字和边框                 |
+| `--hpm-cluster-surface`       | 聚合圆表面                           |
+| `--hpm-cluster-border`        | 聚合圆和缩略图边框                   |
+| `--hpm-panel-surface`         | 支持背景滤镜时的玻璃面板表面         |
+| `--hpm-panel-border`          | 文章面板边框                         |
+| `--hpm-card-surface`          | 文章卡片、控件及面板的不透明降级背景 |
+| `--hpm-text`                  | 主要文字                             |
+| `--hpm-muted`                 | 日期、地点和次要边框                 |
+| `--hpm-route-color`           | 详情地图的直线行程示意段             |
+| `--hpm-track-color`           | 完整真实轨迹线                       |
+| `--hpm-track-progress-color`  | 播放进度线和移动标记                 |
+| `--hpm-track-control-surface` | 统计与播放控件表面                   |
+| `--hpm-track-control-border`  | 统计与播放控件边框                   |
+| `--hpm-tooltip-surface`       | 详情地点名气泡表面                   |
+| `--hpm-tooltip-border`        | 详情地点名气泡边框                   |
+| `--hpm-tooltip-shadow`        | 详情地点名气泡阴影                   |
+| `--hpm-tooltip-text`          | 详情地点名气泡文字                   |
+| `--hpm-panel-radius`          | 桌面面板和移动抽屉圆角               |
+| `--hpm-card-radius`           | 文章卡片圆角                         |
 
 ## 排错与隐私
 
 - 地图未出现：检查 `post_map.enabled: true`、`map.points`、手动模式标签，以及主题是否渲染正文。
 - 构建报错：按错误中的文章路径和字段修正。启用后无效配置会使构建失败；未配置插件则不影响构建。
+- 轨迹构建报错：检查文章相对本地路径的后缀、是否仍在源码树内、8 MiB/200,000 点上限，以及隐私裁剪后是否还剩可用几何。
 - 空白或加载失败：检查 Key 类型、部署域名限制、安全模式是否唯一、代理是否可用、浏览器 CSP 报告及网络。修正配置或遇到 SDK 超时后刷新页面。
 - 图片错误：使用安全的 HTTP(S) 或站点相对图片地址，确认外部访客也能访问。
 - 敏感位置：使用城市或有意模糊后的坐标。详情中的全部坐标和全国地图位置都会公开。插件不会请求访客定位，但地图接近视口时即可能加载高德并联系第三方服务。

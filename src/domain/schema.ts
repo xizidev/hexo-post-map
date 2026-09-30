@@ -13,6 +13,33 @@ const pointSchema = z
   })
   .strict();
 
+const trackSourceSchema = z
+  .string()
+  .refine(
+    (source) =>
+      source.trim().length > 0 &&
+      !source.includes('\0') &&
+      !/^(?:[a-z][a-z0-9+.-]*:|[\\/])/i.test(source) &&
+      /\.(?:gpx|geojson|json)$/i.test(source),
+    { message: 'must be a relative local .gpx, .geojson, or .json path' },
+  );
+
+const privacySchema = z
+  .object({
+    trim_start_meters: z.number().finite().nonnegative().default(0),
+    trim_end_meters: z.number().finite().nonnegative().default(0),
+  })
+  .strict();
+
+const trackSchema = z
+  .object({
+    source: trackSourceSchema,
+    privacy: privacySchema.prefault({}),
+    simplify_tolerance_meters: z.number().finite().min(0).max(10000).default(5),
+    playback: z.boolean().default(true),
+  })
+  .strict();
+
 /**
  * Validates raw map Front Matter. Longitude and latitude are GCJ-02 values and are never converted or jittered.
  */
@@ -25,6 +52,7 @@ export const postMapSchema = z
       .min(2, { message: 'must contain at least two point identifiers' })
       .optional(),
     zoom: z.number().finite().optional(),
+    track: trackSchema.optional(),
   })
   .strict()
   .superRefine((map, context) => {

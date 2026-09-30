@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createAMapProvider } from '../../src/browser/providers/amap';
+import { createAMapOverviewProvider } from '../../src/browser/providers/amap-overview';
 import type { MapHandle, OverviewMapOptions } from '../../src/browser/providers/types';
 import type { OverviewPost } from '../../src/templates/overview';
 
@@ -76,7 +76,7 @@ async function setup() {
       ) {}
     },
   });
-  const provider = await createAMapProvider({
+  const provider = await createAMapOverviewProvider({
     provider: 'amap',
     amap: { key: 'key', mapStyle: 'amap://styles/normal', serviceHost: '/proxy' },
   });

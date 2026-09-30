@@ -1,5 +1,15 @@
 import type { Page, Route } from 'playwright/test';
-import { test, expect } from './fixtures';
+import {
+  expect,
+  fireAnimationFrame,
+  fireCancelledAnimationFrames,
+  installControlledAnimationFrames,
+  installTrackedPage,
+  pendingAnimationFrames,
+  test,
+  TRACK_ASSET_BODY,
+  TRACK_ASSET_PATH,
+} from './fixtures';
 
 async function replaceHostFrom(page: Page, path: string) {
   await page.evaluate(async (path) => {
@@ -21,6 +31,64 @@ async function replaceHostFrom(page: Page, path: string) {
 
 async function clearHost(page: Page) {
   await page.locator('#pjax-test-host').evaluate((host) => host.replaceChildren());
+}
+
+async function observeTrackAbortWithoutCancellingTransport(page: Page) {
+  await page.addInitScript((trackPath) => {
+    const original = window.fetch.bind(window);
+    Reflect.set(window, '__hpmTrackAborts', 0);
+    Reflect.set(window, '__hpmLateTrackResponses', 0);
+    window.fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+      if (url.pathname !== trackPath) return original(input, init);
+      init?.signal?.addEventListener(
+        'abort',
+        () => Reflect.set(window, '__hpmTrackAborts', Reflect.get(window, '__hpmTrackAborts') + 1),
+        { once: true },
+      );
+      const response = await original(input, { ...init, signal: undefined });
+      Reflect.set(
+        window,
+        '__hpmLateTrackResponses',
+        Reflect.get(window, '__hpmLateTrackResponses') + 1,
+      );
+      return response;
+    };
+  }, TRACK_ASSET_PATH);
+}
+
+async function delayTrackConversions(page: Page) {
+  await page.addInitScript(() => {
+    type ConvertCallback = (status: string, result?: unknown) => void;
+    type ConvertFrom = (
+      batch: readonly (readonly number[])[],
+      source: string,
+      callback: ConvertCallback,
+    ) => void;
+    type AMapApi = { convertFrom: ConvertFrom };
+    type FakeSdk = {
+      pendingConversions: Array<() => void>;
+      releaseAllConversions: () => void;
+    };
+    let amap: AMapApi | undefined;
+    Object.defineProperty(window, 'AMap', {
+      configurable: true,
+      get: () => amap,
+      set(value: AMapApi) {
+        const original = value.convertFrom.bind(value);
+        const pending: Array<() => void> = [];
+        value.convertFrom = (batch, source, callback) => {
+          pending.push(() => original(batch, source, callback));
+        };
+        const sdk = Reflect.get(window, '__hpmSdk') as FakeSdk;
+        sdk.pendingConversions = pending;
+        sdk.releaseAllConversions = () => {
+          while (pending.length > 0) pending.shift()!();
+        };
+        amap = value;
+      },
+    });
+  });
 }
 
 test('ordinary -> detail -> detail -> overview -> ordinary uses one lazy runtime', async ({
@@ -304,4 +372,167 @@ test('no-JS detail keeps its static place list and 220px canvas without executin
   } finally {
     await context.close();
   }
+});
+
+test('a tracked root removed during fetch aborts once and rejects a late response', async ({
+  page,
+  network,
+}) => {
+  await observeTrackAbortWithoutCancellingTransport(page);
+  await installTrackedPage(page);
+  let delayed: Route | undefined;
+  await page.route(`**${TRACK_ASSET_PATH}`, (route) => {
+    delayed = route;
+  });
+  try {
+    await page.goto('/blog/posts/plain/');
+    await replaceHostFrom(page, '/blog/posts/route/');
+    await expect.poll(() => Boolean(delayed)).toBe(true);
+    const removed = await page.locator('[data-hpm-detail]').elementHandle();
+    expect(removed).not.toBeNull();
+    await clearHost(page);
+    await expect.poll(() => page.evaluate(() => Reflect.get(window, '__hpmTrackAborts'))).toBe(1);
+    await delayed!.fulfill({ contentType: 'application/json', body: TRACK_ASSET_BODY });
+    delayed = undefined;
+    await expect
+      .poll(() => page.evaluate(() => Reflect.get(window, '__hpmLateTrackResponses')))
+      .toBe(1);
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+    expect(network.local[TRACK_ASSET_PATH]).toBe(1);
+    expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.length)).toBe(0);
+    expect(
+      await removed!.evaluate((root) => ({
+        connected: root.isConnected,
+        active: root.getAttribute('data-hpm-active'),
+        controlsHidden: root.querySelector<HTMLElement>('[data-hpm-playback]')!.hidden,
+      })),
+    ).toEqual({ connected: false, active: 'false', controlsHidden: true });
+    await removed!.dispose();
+  } finally {
+    if (delayed) await delayed.abort();
+    await page.unroute(`**${TRACK_ASSET_PATH}`);
+  }
+});
+
+test('a tracked root removed during conversion destroys once and ignores every late batch', async ({
+  page,
+}) => {
+  await delayTrackConversions(page);
+  await installTrackedPage(page);
+  await page.goto('/blog/posts/plain/');
+  await replaceHostFrom(page, '/blog/posts/route/');
+  await expect
+    .poll(() =>
+      page.evaluate(() => Reflect.get(window, '__hpmSdk')?.pendingConversions.length ?? 0),
+    )
+    .toBe(1);
+  expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').conversionBatches.length)).toBe(
+    0,
+  );
+  const removed = await page.locator('[data-hpm-detail]').elementHandle();
+  await clearHost(page);
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, '__hpmSdk').destroyedMaps))
+    .toBe(1);
+  await page.evaluate(() => Reflect.get(window, '__hpmSdk').releaseAllConversions());
+  await page.evaluate(() => Promise.resolve());
+  expect(
+    await page.evaluate(() => ({
+      maps: Reflect.get(window, '__hpmSdk').maps.length,
+      destroyedMaps: Reflect.get(window, '__hpmSdk').destroyedMaps,
+      batches: Reflect.get(window, '__hpmSdk').conversionBatches.length,
+      polylines: Reflect.get(window, '__hpmSdk').polylines.length,
+      active: document.querySelectorAll('[data-hpm-active="true"]').length,
+    })),
+  ).toEqual({ maps: 1, destroyedMaps: 1, batches: 1, polylines: 0, active: 0 });
+  expect(await removed!.getAttribute('data-hpm-active')).toBe('false');
+  await removed!.dispose();
+});
+
+test('tracked PJAX replacement owns a fresh mount and cancelled playback cannot mutate it', async ({
+  page,
+  network,
+}) => {
+  await installControlledAnimationFrames(page);
+  await installTrackedPage(page);
+  await page.goto('/blog/posts/plain/');
+  await replaceHostFrom(page, '/blog/posts/route/');
+  let root = page.locator('[data-hpm-detail]');
+  await expect(root).toHaveAttribute('data-hpm-active', 'true');
+  await root.locator('[data-hpm-play]').click();
+  await fireAnimationFrame(page, 1_000);
+  await fireAnimationFrame(page, 16_000);
+  const removed = await root.elementHandle();
+  expect(
+    await removed!.evaluate(
+      (element) => element.querySelector<HTMLInputElement>('[data-hpm-progress]')!.value,
+    ),
+  ).toBe('0.5');
+  expect(await pendingAnimationFrames(page)).toBe(1);
+
+  await replaceHostFrom(page, '/blog/posts/route/');
+  root = page.locator('[data-hpm-detail]');
+  await expect(root).toHaveAttribute('data-hpm-active', 'true');
+  await expect(root.locator('[data-hpm-progress]')).toHaveValue('0');
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, '__hpmSdk').destroyedMaps))
+    .toBe(1);
+  expect(network.local[TRACK_ASSET_PATH]).toBe(2);
+  await root.evaluate((element) => {
+    const api = Reflect.get(window, 'HexoPostMap');
+    api.refresh(element);
+    api.refresh(element);
+  });
+  expect(network.local[TRACK_ASSET_PATH]).toBe(2);
+  await fireCancelledAnimationFrames(page, 31_000);
+  expect(
+    await removed!.evaluate(
+      (element) => element.querySelector<HTMLInputElement>('[data-hpm-progress]')!.value,
+    ),
+  ).toBe('0.5');
+  await expect(root.locator('[data-hpm-progress]')).toHaveValue('0');
+
+  await clearHost(page);
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, '__hpmSdk').destroyedMaps))
+    .toBe(2);
+  await clearHost(page);
+  expect(
+    await page.evaluate(() => ({
+      destroyedMaps: Reflect.get(window, '__hpmSdk').destroyedMaps,
+      destroyedTrackOverlays: Reflect.get(window, '__hpmSdk').destroyedTrackOverlays,
+      active: document.querySelectorAll('[data-hpm-active="true"]').length,
+    })),
+  ).toEqual({ destroyedMaps: 2, destroyedTrackOverlays: 14, active: 0 });
+  await removed!.dispose();
+});
+
+test('persisted page lifecycle preserves a manual track position without starting playback', async ({
+  page,
+  network,
+}) => {
+  await installControlledAnimationFrames(page);
+  await installTrackedPage(page);
+  await page.goto('/blog/posts/route/');
+  const range = page.locator('[data-hpm-progress]');
+  await expect(range).toBeVisible();
+  await range.evaluate((element: HTMLInputElement) => {
+    element.value = '0.37';
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.evaluate(() => {
+    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+  });
+  await expect(range).toHaveValue('0.37');
+  await expect(range).toHaveAttribute('aria-valuetext', '行程进度 37%');
+  await expect(page.locator('[data-hpm-play]')).toHaveAttribute('aria-pressed', 'false');
+  expect(await pendingAnimationFrames(page)).toBe(0);
+  expect(network.local[TRACK_ASSET_PATH]).toBe(1);
+  expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').destroyedMaps)).toBe(0);
 });

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createProviderLoader, loadProvider } from '../../src/browser/shared/provider-loader';
+import { loadDetailProvider } from '../../src/browser/detail/provider-loader';
+import { createProviderLoader } from '../../src/browser/shared/provider-loader';
 import type { MapProvider } from '../../src/browser/providers/types';
 
 const config = {
@@ -8,22 +9,24 @@ const config = {
   amap: { key: 'public-key', mapStyle: 'amap://styles/normal', serviceHost: '/proxy' },
 };
 const provider = { mountDetail: vi.fn(), mountOverview: vi.fn() } satisfies MapProvider;
-const factory = vi.hoisted(() => vi.fn());
-vi.mock('../../src/browser/providers/amap', () => ({ createAMapProvider: factory }));
+const detailFactory = vi.hoisted(() => vi.fn());
+vi.mock('../../src/browser/providers/amap', () => ({
+  createAMapDetailProvider: detailFactory,
+}));
 afterEach(() => {
-  Reflect.deleteProperty(window, Symbol.for('hexo-post-map.provider-loader.v1'));
-  factory.mockReset();
+  Reflect.deleteProperty(window, Symbol.for('hexo-post-map.detail-provider-loader.v1'));
+  detailFactory.mockReset();
 });
 
 describe('provider loader', () => {
   it('shares one provider across independent bundle module instances', async () => {
-    factory.mockResolvedValue(provider);
-    const first = loadProvider(config);
+    detailFactory.mockResolvedValue(provider);
+    const first = loadDetailProvider(config);
     vi.resetModules();
-    const otherBundle = await import('../../src/browser/shared/provider-loader');
-    expect(otherBundle.loadProvider(config)).toBe(first);
+    const otherBundle = await import('../../src/browser/detail/provider-loader');
+    expect(otherBundle.loadDetailProvider(config)).toBe(first);
     expect(await first).toBe(provider);
-    expect(factory).toHaveBeenCalledTimes(1);
+    expect(detailFactory).toHaveBeenCalledTimes(1);
   });
   it('shares the pending promise and caches a successful provider', async () => {
     const factory = vi.fn(async () => provider);

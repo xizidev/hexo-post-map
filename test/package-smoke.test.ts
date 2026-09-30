@@ -17,7 +17,10 @@ import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { runInNewContext } from 'node:vm';
 import Hexo from 'hexo';
+import { Window } from 'happy-dom';
 import { describe, expect, it } from 'vitest';
+import { normalizeNpmPackJson } from '../scripts/npm-pack-json.mjs';
+import type { HexoRoute } from '../src/hexo/generator';
 
 const execFileAsync = promisify(execFile);
 
@@ -149,6 +152,54 @@ describe('package build', () => {
           previous = content;
         }
       }
+      await mkdir(join(hexo.source_dir, '_posts'), { recursive: true });
+      await writeFile(
+        join(hexo.source_dir, '_posts/private-track.gpx'),
+        `<gpx xmlns="http://www.topografix.com/GPX/1/1"><metadata><name>PRIVATE_NAME</name></metadata><trk><trkseg>
+<trkpt lon="0" lat="0"><ele>10</ele><time>2026-01-01T00:00:00Z</time></trkpt>
+<trkpt lon="0.001" lat="0"><ele>20</ele><time>2026-01-01T00:01:00Z</time></trkpt>
+</trkseg></trk></gpx>`,
+      );
+      const post = {
+        source: '_posts/trip.md',
+        content: '<p>Trip</p>',
+        map: {
+          points: [{ id: 'shanghai', name: '上海', longitude: 121.4737, latitude: 31.2304 }],
+          track: { source: 'private-track.gpx' },
+        },
+      };
+      const rendered = await hexo.extend.filter.exec('after_post_render', post, { context: hexo });
+      const window = new Window();
+      window.document.body.innerHTML = rendered.content;
+      const descriptor = JSON.parse(
+        window.document.querySelector('[data-hpm-data]')!.textContent!,
+      ).track;
+      expect(descriptor?.url).toMatch(/^\/hexo-post-map\/tracks\/[a-f0-9]{64}\.json$/);
+      const trackedRoutes: HexoRoute[] = await generator.call(hexo, {
+        posts: { toArray: () => [post] },
+      } as unknown as Parameters<typeof generator>[0]);
+      expect(trackedRoutes).toHaveLength(6);
+      const trackRoute = trackedRoutes.find((route) => `/${route.path}` === descriptor.url)!;
+      expect(typeof trackRoute.data).toBe('string');
+      expect(JSON.parse(String(trackRoute.data)).stats).toEqual({
+        distanceMeters: 111.195,
+        elevationGainMeters: 10,
+        durationSeconds: 60,
+      });
+      expect(JSON.stringify(trackedRoutes)).not.toMatch(
+        /private-track|PRIVATE_NAME|2026-01-01|_posts/,
+      );
+      expect(rendered.content).not.toMatch(/private-track|PRIVATE_NAME|2026-01-01|_posts/);
+      const packed = normalizeNpmPackJson(
+        JSON.parse(
+          (await execFileAsync('npm', ['pack', '--json', '--dry-run', '--ignore-scripts'])).stdout,
+        ),
+      );
+      expect(
+        packed
+          .flatMap((item) => item.files.map((file) => file.path))
+          .filter((path) => /\.(?:gpx|geojson)$/u.test(path)),
+      ).toEqual([]);
     } finally {
       await hexo.exit();
       await rm(temp, { recursive: true, force: true });

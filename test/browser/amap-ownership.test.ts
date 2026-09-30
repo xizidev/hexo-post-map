@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAMapProvider } from '../../src/browser/providers/amap';
+import { createAMapDetailProvider, createAMapProvider } from '../../src/browser/providers/amap';
 import { createProviderLoader } from '../../src/browser/shared/provider-loader';
 
 const sdk = vi.hoisted(() => ({ load: vi.fn(), reset: vi.fn() }));
@@ -21,6 +21,7 @@ const api = {
   Map: class {},
   Marker: class {},
   Polyline: class {},
+  convertFrom() {},
 };
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -33,6 +34,7 @@ function deferred<T>() {
 }
 beforeEach(() => {
   globals.forEach((key) => Reflect.deleteProperty(window, key));
+  Reflect.deleteProperty(window, Symbol.for('hexo-post-map.amap-load.v1'));
   sdk.load.mockReset().mockImplementation(async () => {
     set('AMap', api);
     return api;
@@ -43,12 +45,48 @@ beforeEach(() => {
 });
 afterEach(() => {
   globals.forEach((key) => Reflect.deleteProperty(window, key));
+  Reflect.deleteProperty(window, Symbol.for('hexo-post-map.amap-load.v1'));
   Reflect.deleteProperty(window, Symbol.for('hexo-post-map.amap-terminal.v1'));
   document.head.replaceChildren();
   vi.useRealTimers();
 });
 
 describe('AMap page global ownership', () => {
+  it('shares one in-flight SDK load across independent detail and overview bundles', async () => {
+    const loading = deferred<typeof api>();
+    sdk.load.mockReturnValueOnce(loading.promise);
+    const detail = createAMapDetailProvider(config);
+    vi.resetModules();
+    const { createAMapOverviewProvider } =
+      await import('../../src/browser/providers/amap-overview');
+    const overview = createAMapOverviewProvider(config);
+
+    expect(sdk.load).toHaveBeenCalledTimes(1);
+    loading.resolve(api);
+    await expect(detail).resolves.toHaveProperty('mountDetail');
+    await expect(overview).resolves.toHaveProperty('mountOverview');
+    expect(sdk.load).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects conflicting detail and overview SDK configurations while loading', async () => {
+    const loading = deferred<typeof api>();
+    sdk.load.mockReturnValueOnce(loading.promise);
+    const detail = createAMapDetailProvider(config);
+    vi.resetModules();
+    const { createAMapOverviewProvider } =
+      await import('../../src/browser/providers/amap-overview');
+
+    await expect(
+      createAMapOverviewProvider({
+        ...config,
+        amap: { ...config.amap, mapStyle: 'amap://styles/dark' },
+      }),
+    ).rejects.toThrow('configuration');
+    expect(sdk.load).toHaveBeenCalledTimes(1);
+    loading.resolve(api);
+    await expect(detail).resolves.toHaveProperty('mountDetail');
+  });
+
   it('restores an accessor security descriptor without invoking the host setter', async () => {
     const oldSecurity = { serviceHost: 'https://theme.test/proxy' };
     const setter = vi.fn();

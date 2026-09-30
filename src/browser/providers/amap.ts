@@ -1,11 +1,22 @@
-import AMapLoader from '@amap/amap-jsapi-loader';
 import type { Coordinate } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
 import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
 import { createClusterMarker, createImageMarker, overviewFitPadding } from '../overview/markers';
 import { createDetailMarker, type DetailMarkerElement } from '../detail/marker';
+import {
+  convertTrackFromGps,
+  createTrackProgressGeometry,
+  type AMapTrackConversionApi,
+} from './amap-track';
+import {
+  AMAP_LOAD_TIMEOUT_MS as LOAD_TIMEOUT_MS,
+  amapInteraction as interaction,
+  loadAMapApi,
+  type AMapSdkApi,
+} from './amap-sdk';
 import type {
   BrowserProviderConfig,
+  DetailMapHandle,
   DetailMapModel,
   MapHandle,
   MapProvider,
@@ -17,6 +28,7 @@ interface AMapMap {
   on(event: string, callback: () => void): void;
   off(event: string, callback: () => void): void;
   add(overlays: unknown[]): void;
+  remove?(overlays: unknown[]): void;
   setFitView(overlays: unknown[], immediately: boolean, padding: number[]): void;
   setStatus(status: Record<string, boolean>): void;
   destroy(): void;
@@ -26,14 +38,23 @@ interface AMapMap {
 }
 interface AMapMarker {
   setTop(top: boolean): void;
+  setPosition(position: Coordinate): void;
+  setMap?(map: AMapMap | null): void;
 }
-interface AMapApi {
+interface AMapPolyline {
+  setPath(path: readonly Coordinate[]): void;
+  hide(): void;
+  show(): void;
+  setMap?(map: AMapMap | null): void;
+}
+interface AMapApi extends AMapSdkApi {
   Map: new (container: HTMLElement, options: Record<string, unknown>) => AMapMap;
   Marker: new (options: Record<string, unknown>) => AMapMarker;
-  Polyline: new (options: Record<string, unknown>) => unknown;
+  Polyline: new (options: Record<string, unknown>) => AMapPolyline;
   Bounds: new (southwest: Coordinate, northeast: Coordinate) => unknown;
   Pixel: new (x: number, y: number) => unknown;
   plugin(names: string[], ready: () => void): void;
+  convertFrom?: AMapTrackConversionApi['convertFrom'];
   MarkerCluster?: new (
     map: AMapMap,
     data: ClusterPoint[],
@@ -60,156 +81,12 @@ interface ClusterOptions {
   renderClusterMarker(context: ClusterContext): void;
   renderMarker(context: ClusterContext): void;
 }
-const loader = AMapLoader as unknown as {
-  load(options: { key: string; version: string }): Promise<AMapApi>;
-  reset(): void;
-};
-const LOAD_TIMEOUT_MS = 20_000;
-const attemptKey = Symbol.for('hexo-post-map.amap-attempt.v1');
-const terminalKey = Symbol.for('hexo-post-map.amap-terminal.v1');
-
-// A timed-out JSONP response may still execute. Keep one inert callback, without attempt state.
-function ignoreLateApiResponse(): void {}
-
-function existingApi(value: unknown): value is AMapApi {
-  if (value === null || typeof value !== 'object') return false;
-  const api = value as Record<string, unknown>;
-  return (
-    typeof api.version === 'string' &&
-    /^2(?:\.|$)/u.test(api.version) &&
-    ['Map', 'Marker', 'Polyline'].every((name) => typeof api[name] === 'function')
-  );
-}
-
-function isSdkScript(script: HTMLScriptElement): boolean {
-  return /^https:\/\/webapi\.amap\.com\/maps(?:\?|$)/u.test(script.src);
-}
-
-/** Own only the request started here, never an SDK or configuration belonging to the theme. */
-function loadApi(config: BrowserProviderConfig): Promise<AMapApi> {
-  if (Reflect.get(window, terminalKey)) {
-    return Promise.reject(new Error('Map SDK loading timed out; reload page to retry'));
-  }
-  const currentApi: unknown = Reflect.get(window, 'AMap');
-  if (currentApi !== undefined) {
-    return existingApi(currentApi)
-      ? Promise.resolve(currentApi)
-      : Promise.reject(new Error('Cannot reuse existing map SDK'));
-  }
-  if (
-    Reflect.get(window, attemptKey) ||
-    ['AMapUI', 'Loca', '___onAPILoaded'].some((key) => Reflect.get(window, key) !== undefined) ||
-    Array.from(document.scripts).some(isSdkScript)
-  ) {
-    return Promise.reject(new Error('Cannot take ownership of existing map SDK loading state'));
-  }
-  const previousSecurity = Object.getOwnPropertyDescriptor(window, '_AMapSecurityConfig');
-  const security =
-    config.amap.serviceHost !== undefined
-      ? { serviceHost: config.amap.serviceHost }
-      : { securityJsCode: config.amap.securityJsCode };
-  const attempt = {};
-  const scriptsBefore = new Set(document.scripts);
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let ownedScripts: HTMLScriptElement[] = [];
-    let ownedCallback: unknown;
-    const timer = window.setTimeout(
-      () => fail(new Error('Map SDK loading timed out; reload page to retry'), true),
-      LOAD_TIMEOUT_MS,
-    );
-    const ownsAttempt = () => Reflect.get(window, attemptKey) === attempt;
-    function release() {
-      clearTimeout(timer);
-      if (ownsAttempt()) Reflect.deleteProperty(window, attemptKey);
-    }
-    function fail(error: unknown, terminal = false) {
-      if (settled) return;
-      settled = true;
-      if (terminal) Reflect.set(window, terminalKey, true);
-      if (ownsAttempt()) {
-        const ownsSecurity = Reflect.get(window, '_AMapSecurityConfig') === security;
-        const currentCallback: unknown = Reflect.get(window, '___onAPILoaded');
-        const ownsCallback = currentCallback === undefined || currentCallback === ownedCallback;
-        ownedScripts.forEach((script) => script.remove());
-        if (currentCallback === ownedCallback && ownedCallback !== undefined) {
-          if (terminal) Reflect.set(window, '___onAPILoaded', ignoreLateApiResponse);
-          else Reflect.deleteProperty(window, '___onAPILoaded');
-        }
-        // reset() deletes all three SDK globals. Only use it while none has been supplied by another owner.
-        if (
-          !terminal &&
-          ownsSecurity &&
-          ownsCallback &&
-          ['AMap', 'AMapUI', 'Loca'].every((key) => Reflect.get(window, key) === undefined)
-        )
-          loader.reset();
-        if (ownsSecurity) {
-          if (previousSecurity)
-            Object.defineProperty(window, '_AMapSecurityConfig', previousSecurity);
-          else Reflect.deleteProperty(window, '_AMapSecurityConfig');
-        }
-      }
-      release();
-      reject(error);
-    }
-    try {
-      if (
-        !Reflect.defineProperty(window, '_AMapSecurityConfig', {
-          configurable: previousSecurity?.configurable ?? true,
-          enumerable: previousSecurity?.enumerable ?? true,
-          writable: true,
-          value: security,
-        })
-      )
-        throw new Error('Cannot configure map SDK');
-      Reflect.set(window, attemptKey, attempt);
-      const pending = loader.load({ key: config.amap.key, version: '2.0' });
-      ownedScripts = Array.from(document.scripts).filter(
-        (script) => !scriptsBefore.has(script) && isSdkScript(script),
-      );
-      const callback: unknown = Reflect.get(window, '___onAPILoaded');
-      if (typeof callback === 'function') {
-        ownedCallback = (...args: unknown[]) => {
-          if (!settled && ownsAttempt()) Reflect.apply(callback, window, args);
-        };
-        Reflect.set(window, '___onAPILoaded', ownedCallback);
-      }
-      pending.then((api) => {
-        if (settled) return;
-        const installed: unknown = Reflect.get(window, 'AMap');
-        if (!ownsAttempt() || (installed !== undefined && installed !== api)) {
-          fail(new Error('Map SDK ownership changed during loading'));
-          return;
-        }
-        settled = true;
-        release();
-        resolve(api);
-      }, fail);
-    } catch (error) {
-      fail(error);
-    }
-  });
-}
-
-function interaction(active: boolean): Record<string, boolean> {
-  return {
-    scrollWheel: active,
-    touchZoom: active,
-    dragEnable: active,
-    keyboardEnable: active,
-    doubleClickZoom: active,
-    zoomEnable: active,
-    rotateEnable: false,
-  };
-}
-
 function mountDetail(
   api: AMapApi,
   mapStyle: string,
   container: HTMLElement,
   model: DetailMapModel,
-): Promise<MapHandle> {
+): Promise<DetailMapHandle> {
   return new Promise((resolve, reject) => {
     if (model.signal?.aborted) {
       reject(new Error('Map initialization cancelled'));
@@ -228,8 +105,19 @@ function mountDetail(
       animateEnable: !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
     });
     let complete = false;
+    let mapReady = false;
+    let trackReady = model.track === undefined;
+    let trackMounted = false;
+    let trackErrorReported = false;
     let destroyed = false;
     const markers: AMapMarker[] = [];
+    const fullTrackLines: AMapPolyline[] = [];
+    const progressTrackLines: AMapPolyline[] = [];
+    const trackOverlays: Array<AMapPolyline | AMapMarker> = [];
+    let movingTrackMarker: AMapMarker | undefined;
+    let updateTrackProgress: ((progress: number) => void) | undefined;
+    let schematicRoute: AMapPolyline | undefined;
+    const trackAbort = model.track ? new AbortController() : undefined;
     const markerViews: Array<
       DetailMarkerElement & {
         sdkMarker: AMapMarker;
@@ -243,7 +131,68 @@ function mountDetail(
       }
     > = [];
     let activeMarker: (typeof markerViews)[number] | undefined;
-    const timeout = window.setTimeout(fail, LOAD_TIMEOUT_MS);
+    const timeout = window.setTimeout(onDeadline, LOAD_TIMEOUT_MS);
+
+    function routeColor(): string {
+      return getComputedStyle(container).getPropertyValue('--hpm-route-color').trim() || '#0f766e';
+    }
+
+    function addSchematicRoute(): void {
+      if (schematicRoute || model.map.route.length <= 1) return;
+      schematicRoute = new api.Polyline({
+        path: model.map.route.map((routePoint) => routePoint.coordinate),
+        strokeColor: routeColor(),
+        strokeWeight: 3,
+      });
+      map.add([schematicRoute]);
+    }
+
+    function removeTrackOverlays(): void {
+      if (!trackOverlays.length) return;
+      const overlays = [...trackOverlays];
+      try {
+        map.remove?.(overlays);
+      } catch {
+        // Every owned overlay is also detached below; map destruction remains the final boundary.
+      }
+      for (const overlay of overlays) {
+        try {
+          overlay.setMap?.(null);
+        } catch {
+          // A vendor cleanup failure must not turn track-only degradation into provider failure.
+        }
+      }
+      trackOverlays.length = 0;
+      fullTrackLines.length = 0;
+      progressTrackLines.length = 0;
+      movingTrackMarker = undefined;
+      updateTrackProgress = undefined;
+      trackMounted = false;
+    }
+
+    function reportTrackError(): void {
+      if (trackErrorReported || destroyed) return;
+      trackErrorReported = true;
+      try {
+        model.onTrackError?.();
+      } catch {
+        // The detail status callback is advisory and cannot make the provider unavailable.
+      }
+    }
+
+    function degradeTrack(): void {
+      if (destroyed) return;
+      removeTrackOverlays();
+      try {
+        addSchematicRoute();
+      } catch {
+        fail();
+        return;
+      }
+      trackReady = true;
+      reportTrackError();
+      finishIfReady();
+    }
 
     function closeActive() {
       activeMarker?.setExpanded(false);
@@ -282,6 +231,7 @@ function mountDetail(
       if (destroyed) return;
       destroyed = true;
       clearTimeout(timeout);
+      trackAbort?.abort();
       map.off('complete', ready);
       map.off('error', fail);
       map.off('click', onMapClick);
@@ -303,6 +253,7 @@ function mountDetail(
         marker.scrollViewport.removeEventListener('touchend', marker.onTooltipTouchEnd);
         marker.scrollViewport.removeEventListener('touchcancel', marker.onTooltipTouchEnd);
       });
+      removeTrackOverlays();
       model.signal?.removeEventListener('abort', cancel);
       map.destroy();
     }
@@ -316,15 +267,33 @@ function mountDetail(
       destroy();
       if (!complete) reject(new Error('Map initialization cancelled'));
     }
-    function ready() {
+
+    function onDeadline(): void {
       if (destroyed || complete) return;
+      if (!mapReady) {
+        fail();
+        return;
+      }
+      if (!trackReady) {
+        trackAbort?.abort();
+        degradeTrack();
+      }
+    }
+
+    function finishIfReady() {
+      if (destroyed || complete || !mapReady || !trackReady) return;
       try {
         // AMap's avoid order is top, bottom, left, right. Reserve room for
         // the 44px bottom-anchored control plus a wrapped place tooltip.
-        if (markers.length > 1) map.setFitView(markers, true, [112, 24, 24, 24]);
+        const fitOverlays = trackMounted ? [...markers, ...fullTrackLines] : markers;
+        if (markers.length > 1 || fullTrackLines.length)
+          map.setFitView(fitOverlays, true, [112, 24, 24, 24]);
         clearTimeout(timeout);
         complete = true;
-        resolve({
+        const handle: DetailMapHandle = {
+          get hasTrack() {
+            return trackMounted;
+          },
           destroy,
           setInteractive(active) {
             if (destroyed) return;
@@ -334,10 +303,29 @@ function mountDetail(
               fail();
             }
           },
-        });
+          ...(updateTrackProgress
+            ? {
+                setTrackProgress(progress: number) {
+                  if (destroyed || !trackMounted) return;
+                  try {
+                    updateTrackProgress?.(progress);
+                  } catch {
+                    degradeTrack();
+                  }
+                },
+              }
+            : {}),
+        };
+        resolve(handle);
       } catch {
         fail();
       }
+    }
+
+    function ready() {
+      if (destroyed || complete) return;
+      mapReady = true;
+      finishIfReady();
     }
     map.on('complete', ready);
     map.on('error', fail);
@@ -349,6 +337,10 @@ function mountDetail(
     window.addEventListener('resize', closeActive);
     window.addEventListener('pagehide', closeActive);
     model.signal?.addEventListener('abort', cancel, { once: true });
+    if (model.signal?.aborted) {
+      cancel();
+      return;
+    }
 
     try {
       const routeIds = new Set(model.map.route.map((point) => point.id));
@@ -426,17 +418,104 @@ function mountDetail(
         markerViews.push(markerView);
         markers.push(sdkMarker);
       }
-      const overlays: unknown[] = [...markers];
-      if (model.map.route.length > 1)
-        overlays.push(
-          new api.Polyline({
-            path: model.map.route.map((point) => point.coordinate),
-            strokeColor:
-              getComputedStyle(container).getPropertyValue('--hpm-route-color').trim() || '#0f766e',
-            strokeWeight: 3,
-          }),
-        );
-      map.add(overlays);
+      map.add(markers);
+      if (destroyed) return;
+      if (!model.track) {
+        addSchematicRoute();
+        return;
+      }
+      if (typeof api.convertFrom !== 'function') {
+        degradeTrack();
+        return;
+      }
+      void convertTrackFromGps(
+        api as AMapApi & AMapTrackConversionApi,
+        model.track,
+        trackAbort!.signal,
+        {
+          timeoutMilliseconds: false,
+        },
+      ).then(
+        (track) => {
+          if (destroyed || trackReady) return;
+          const styles = getComputedStyle(container);
+          const fullColor =
+            styles.getPropertyValue('--hpm-track-color').trim() ||
+            styles.getPropertyValue('--hpm-route-color').trim() ||
+            '#64748b';
+          const progressColor =
+            styles.getPropertyValue('--hpm-track-progress-color').trim() ||
+            styles.getPropertyValue('--hpm-accent').trim() ||
+            '#2563eb';
+          try {
+            for (const segment of track.segments) {
+              const line = new api.Polyline({
+                path: segment,
+                strokeColor: fullColor,
+                strokeOpacity: 0.55,
+                strokeWeight: 5,
+                lineCap: 'round',
+                lineJoin: 'round',
+              });
+              fullTrackLines.push(line);
+              trackOverlays.push(line);
+            }
+            if (model.trackPlayback === true) {
+              const geometry = createTrackProgressGeometry(track);
+              const initial = geometry.at(0);
+              for (let index = 0; index < track.segments.length; index += 1) {
+                const line = new api.Polyline({
+                  // Keep a vendor-valid path while hiding all progress at the initial state.
+                  path: track.segments[index]!,
+                  strokeColor: progressColor,
+                  strokeWeight: 5,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                  zIndex: 41,
+                });
+                progressTrackLines.push(line);
+                trackOverlays.push(line);
+              }
+              const markerContent = document.createElement('span');
+              markerContent.className = 'hpm-track-marker';
+              markerContent.setAttribute('aria-hidden', 'true');
+              movingTrackMarker = new api.Marker({
+                position: initial.coordinate,
+                content: markerContent,
+                anchor: 'center',
+                clickable: false,
+                bubble: false,
+                keyboardEnable: false,
+                zIndex: 42,
+              });
+              trackOverlays.push(movingTrackMarker);
+              updateTrackProgress = (progress) => {
+                const state = geometry.at(progress);
+                for (let index = 0; index < progressTrackLines.length; index += 1) {
+                  const line = progressTrackLines[index]!;
+                  const path = state.paths[index]!;
+                  if (path.length > 1) {
+                    line.setPath(path);
+                    line.show();
+                  } else line.hide();
+                }
+                movingTrackMarker?.setPosition(state.coordinate);
+              };
+            }
+            map.add(trackOverlays);
+            if (destroyed) return;
+            progressTrackLines.forEach((line) => line.hide());
+            trackMounted = true;
+            trackReady = true;
+            finishIfReady();
+          } catch {
+            degradeTrack();
+          }
+        },
+        () => {
+          if (!destroyed && !trackReady) degradeTrack();
+        },
+      );
     } catch {
       fail();
     }
@@ -748,10 +827,19 @@ async function mountOverview(
 }
 
 export async function createAMapProvider(config: BrowserProviderConfig): Promise<MapProvider> {
-  const api = await loadApi(config);
+  const api = await loadAMapApi<AMapApi>(config);
   return {
     mountDetail: (container, model) => mountDetail(api, config.amap.mapStyle, container, model),
     mountOverview: (container, options) =>
       mountOverview(api, config.amap.mapStyle, container, options),
+  };
+}
+
+export async function createAMapDetailProvider(
+  config: BrowserProviderConfig,
+): Promise<Pick<MapProvider, 'mountDetail'>> {
+  const api = await loadAMapApi<AMapApi>(config);
+  return {
+    mountDetail: (container, model) => mountDetail(api, config.amap.mapStyle, container, model),
   };
 }

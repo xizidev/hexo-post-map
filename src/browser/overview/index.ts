@@ -4,14 +4,14 @@ import type {
   BrowserProviderConfig,
   FocusOriginResolver,
   MapHandle,
-  ProviderLoader,
+  OverviewProviderLoader,
 } from '../providers/types';
 import { registerRuntimeHydrator } from '../runtime/bridge';
 import { FEATURES, type RuntimeController } from '../runtime/types';
 import { setStatus, showFallback } from '../shared/dom';
-import { loadProvider } from '../shared/provider-loader';
 import { installImageFallback } from './markers';
 import { renderPostPanel, type PanelHandle } from './panel';
+import { loadOverviewProvider } from './provider-loader';
 
 interface OverviewConfig extends BrowserProviderConfig {
   dataUrl: string;
@@ -53,7 +53,7 @@ function readPosts(value: unknown): OverviewPost[] {
 
 export function hydrateOverview(
   root: HTMLElement,
-  load: ProviderLoader = loadProvider,
+  load: OverviewProviderLoader = loadOverviewProvider,
   fetcher: typeof fetch = fetch,
 ): RuntimeController {
   const registry = controllers();
@@ -221,7 +221,7 @@ export function hydrateOverview(
 
 export function initializeOverviewMaps(
   scope: ParentNode = document,
-  load: ProviderLoader = loadProvider,
+  load: OverviewProviderLoader = loadOverviewProvider,
   fetcher: typeof fetch = fetch,
 ): void {
   scope

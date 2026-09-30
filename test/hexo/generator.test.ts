@@ -1,8 +1,11 @@
 import Hexo from 'hexo';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { SiteLocals } from 'hexo/dist/types';
 import registerHelpers from 'hexo/dist/plugins/helper';
 import { Window } from 'happy-dom';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { resolveConfig } from '../../src/config/resolve';
 import {
   createOverviewRoutes,
@@ -10,6 +13,8 @@ import {
   type OverviewSourcePost,
 } from '../../src/hexo/generator';
 import { registerPlugin } from '../../src/hexo/register';
+import { createTrackCompiler } from '../../src/tracks/compiler';
+import { createPostFilter } from '../../src/hexo/post-filter';
 
 const rawConfig = {
   enabled: true,
@@ -56,6 +61,187 @@ function document(routes: HexoRoute[], path = 'map/index.html') {
   window.document.write(html);
   return window.document;
 }
+
+const temporaryDirectories: string[] = [];
+afterEach(() =>
+  temporaryDirectories
+    .splice(0)
+    .forEach((directory) => rmSync(directory, { recursive: true, force: true })),
+);
+function trackedInstance(root = '/') {
+  const directory = mkdtempSync(join(tmpdir(), 'hpm-track-generator-'));
+  temporaryDirectories.push(directory);
+  const hexo = instance(root);
+  // Use a resolved, non-default source directory to catch accidental base_dir/config joins.
+  hexo.source_dir = join(directory, 'custom-source');
+  mkdirSync(join(hexo.source_dir, '_posts/nested'), { recursive: true });
+  const content = JSON.stringify({
+    type: 'Feature',
+    properties: { name: 'PRIVATE_NAME', timestamp: 'PRIVATE_TIMESTAMP' },
+    geometry: {
+      type: 'LineString',
+      coordinates: [
+        [0, 0, 10],
+        [0.001, 0, 20],
+      ],
+    },
+  });
+  for (const name of ['private-track.geojson', 'copy.geojson'])
+    writeFileSync(join(hexo.source_dir, '_posts/nested', name), content);
+  return hexo;
+}
+function trackedPost(overrides: Partial<OverviewSourcePost> = {}) {
+  return post({
+    source: '_posts/nested/trip.md',
+    map: { ...onePoint, track: { source: 'private-track.geojson' } },
+    ...overrides,
+  });
+}
+
+describe('track route publication', () => {
+  it('publishes every snapshot already embedded by SSR even if later locals change track options', () => {
+    const hexo = trackedInstance();
+    const options = config({ enabled: false });
+    const compiler = createTrackCompiler(hexo.source_dir);
+    const rendered = createPostFilter(options, compiler)(trackedPost());
+    const window = new Window();
+    window.document.body.innerHTML = rendered.content;
+    const first = JSON.parse(window.document.querySelector('[data-hpm-data]')!.textContent!).track;
+    const changed = trackedPost({
+      map: {
+        ...onePoint,
+        track: {
+          source: 'private-track.geojson',
+          privacy: { trim_start_meters: 50 },
+        },
+      },
+    });
+    const routes = createOverviewRoutes(
+      { posts: { toArray: () => [changed] } },
+      options,
+      hexo,
+      compiler,
+    );
+    expect(routes.find((route) => `/${route.path}` === first.url)).toBeDefined();
+    expect(routes.filter((route) => route.path.includes('/tracks/'))).toHaveLength(2);
+    compiler.beginGeneration();
+    const next = createOverviewRoutes(
+      { posts: { toArray: () => [changed] } },
+      options,
+      hexo,
+      compiler,
+    );
+    expect(next.find((route) => `/${route.path}` === first.url)).toBeUndefined();
+    expect(next.filter((route) => route.path.includes('/tracks/'))).toHaveLength(1);
+  });
+  it.each([true, false])(
+    'publishes unique sanitized string assets independently of overview enabled=%s',
+    (enabled) => {
+      const routes = generate(
+        [
+          trackedPost(),
+          trackedPost({ map: { ...onePoint, track: { source: 'copy.geojson', playback: false } } }),
+          trackedPost({ published: false, source: '_posts/nested/draft.md' }),
+        ],
+        trackedInstance(),
+        config({ enabled }),
+      );
+      const tracks = routes.filter((route) => route.path.startsWith('hexo-post-map/tracks/'));
+      expect(tracks).toHaveLength(1);
+      expect(routes.at(-1)).toBe(tracks[0]);
+      expect(tracks[0]!.path).toMatch(/^hexo-post-map\/tracks\/[a-f0-9]{64}\.json$/);
+      expect(typeof tracks[0]!.data).toBe('string');
+      expect(JSON.parse(String(tracks[0]!.data))).toEqual({
+        version: 1,
+        coordinateSystem: 'wgs84',
+        segments: [
+          [
+            [0, 0, 10],
+            [0.001, 0, 20],
+          ],
+        ],
+        stats: { distanceMeters: 111.195, elevationGainMeters: 10 },
+      });
+      expect(JSON.stringify(routes)).not.toMatch(/private-track|copy\.geojson|PRIVATE_|_posts/);
+      if (enabled) {
+        const overview = data(routes);
+        expect(Object.keys(overview)).toEqual(['version', 'posts']);
+        expect(overview.version).toBe(1);
+        expect(overview.posts).toHaveLength(2);
+        expect(Object.keys(overview.posts[0])).toEqual([
+          'title',
+          'url',
+          'date',
+          'image',
+          'location',
+        ]);
+        expect(JSON.stringify(overview)).not.toContain('track');
+      } else expect(routes).toHaveLength(6);
+    },
+  );
+
+  it('publishes a draft track present in generator locals even without any published post', () => {
+    const routes = generate([trackedPost({ published: false })], trackedInstance());
+    expect(data(routes)).toEqual({ version: 1, posts: [] });
+    expect(routes.filter((route) => route.path.startsWith('hexo-post-map/tracks/'))).toHaveLength(
+      1,
+    );
+  });
+
+  it('adds no track routes for point-only sites or disabled detail maps', () => {
+    expect(generate([post()]).filter((route) => route.path.includes('/tracks/'))).toEqual([]);
+    const options = resolveConfig({ ...rawConfig, post: { enabled: false } }, {})!;
+    expect(
+      generate([trackedPost()], instance(), options).filter((route) =>
+        route.path.includes('/tracks/'),
+      ),
+    ).toEqual([]);
+  });
+
+  it.each(['/', '/blog/'])(
+    'registration shares source resolution and refreshes changed track bytes for %s',
+    async (root) => {
+      const hexo = trackedInstance(root);
+      hexo.config.post_map = rawConfig;
+      registerPlugin(hexo);
+      hexo.extend.generator.register('asset', () => []);
+      hexo.locals.set('posts', () => ({ toArray: () => [] }));
+      const render = async () => {
+        const result = await hexo.extend.filter.exec('after_post_render', trackedPost(), {
+          context: hexo,
+        });
+        const window = new Window();
+        window.document.body.innerHTML = result.content;
+        return JSON.parse(window.document.querySelector('[data-hpm-data]')!.textContent!).track;
+      };
+      const publish = async () => {
+        const generator = hexo.extend.generator.get('post-map');
+        return (await generator.call(hexo, {
+          posts: { toArray: () => [trackedPost()] },
+        } as unknown as SiteLocals)) as HexoRoute[];
+      };
+      const first = await render();
+      expect(first?.url).toMatch(new RegExp(`^${root}hexo-post-map/tracks/[a-f0-9]{64}\\.json$`));
+      expect((await publish()).some((route) => `${root}${route.path}` === first.url)).toBe(true);
+      writeFileSync(
+        join(hexo.source_dir, '_posts/nested/private-track.geojson'),
+        JSON.stringify({
+          type: 'LineString',
+          coordinates: [
+            [0, 0],
+            [0.002, 0],
+          ],
+        }),
+      );
+      await hexo.execFilter('before_generate', null, { context: hexo });
+      const second = await render();
+      const routes = await publish();
+      expect(second.url).not.toBe(first.url);
+      expect(routes.some((route) => `${root}${route.path}` === second.url)).toBe(true);
+      expect(routes.some((route) => `${root}${route.path}` === first.url)).toBe(false);
+    },
+  );
+});
 
 describe('overview generation', () => {
   it('is a no-op without enabled plugin configuration, including malformed map data', () => {

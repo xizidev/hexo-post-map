@@ -1,0 +1,15 @@
+{
+  "type": "Feature",
+  "properties": {
+    "private": "DO_NOT_PUBLISH_GEOJSON_PROPERTY",
+    "coordTimes": ["2024-01-02T03:04:05Z", "2024-01-02T03:05:05Z"]
+  },
+  "geometry": {
+    "type": "LineString",
+    "coordinates": [
+      [118.76, 32.02, 8],
+      [118.761, 32.021, 9],
+      [118.762, 32.022, 7]
+    ]
+  }
+}

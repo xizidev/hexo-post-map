@@ -3,11 +3,21 @@ export const fakeSdk = String.raw`
 (() => {
   const maps = [];
   const markerLayout = window.__hpmSdkMarkerLayout ?? [];
-  window.__hpmSdk = { maps, paths: [], markers: [], destroyedMaps: 0 };
+  window.__hpmSdk = {
+    maps,
+    paths: [],
+    markers: [],
+    polylines: [],
+    conversionBatches: [],
+    polylineUpdates: [],
+    markerPositions: [],
+    destroyedTrackOverlays: 0,
+    destroyedMaps: 0,
+  };
   class Map {
     constructor(container, options) {
       this.container = container; this.options = options; this.zoom = options.zoom;
-      this.events = {}; this.bounds = []; this.status = options; maps.push(this);
+      this.events = {}; this.bounds = []; this.status = options; this.overlays = []; maps.push(this);
       this.onCanvasClick = event => { if (event.target === container) this.emit('click'); };
       container.addEventListener('click', this.onCanvasClick);
       setTimeout(() => this.emit('complete'), 0);
@@ -15,7 +25,7 @@ export const fakeSdk = String.raw`
     on(event, callback) { (this.events[event] ??= new Set()).add(callback); }
     off(event, callback) { this.events[event]?.delete(callback); }
     emit(event) { this.events[event]?.forEach(callback => callback()); }
-    add(overlays) { overlays.forEach((overlay, index) => {
+    add(overlays) { this.overlays.push(...overlays); overlays.forEach((overlay, index) => {
       if (!overlay.options.content) return;
       const content = overlay.options.content;
       const wrapper = overlay.element;
@@ -26,6 +36,7 @@ export const fakeSdk = String.raw`
       content.style.position = 'relative';
       wrapper.append(content); this.container.append(wrapper);
     }); }
+    remove(overlays) { this.overlays = this.overlays.filter(overlay => !overlays.includes(overlay)); }
     setFitView(overlays, immediately, padding) { this.fitted = true; this.fitPadding = padding; }
     setStatus(status) { this.status = status; }
     destroy() {
@@ -43,8 +54,38 @@ export const fakeSdk = String.raw`
       window.__hpmSdk.markers.push(this);
     }
     setTop(top) { this.top = top; this.element.style.zIndex = top ? '1000' : '0'; }
+    setPosition(position) {
+      this.options.position = [...position];
+      window.__hpmSdk.markerPositions.push([...position]);
+    }
+    setMap(map) {
+      this.map = map;
+      if (!map && this.options.content?.classList.contains('hpm-track-marker') && !this.destroyed) {
+        this.destroyed = true; window.__hpmSdk.destroyedTrackOverlays++;
+      }
+      if (!map) this.element.remove();
+    }
   }
-  class Polyline { constructor(options) { this.options = options; window.__hpmSdk.paths.push(options.path); } }
+  class Polyline {
+    constructor(options) {
+      this.options = options;
+      this.isTrack = options.strokeWeight === 5;
+      window.__hpmSdk.paths.push(options.path);
+      window.__hpmSdk.polylines.push(this);
+    }
+    setPath(path) {
+      this.options.path = path;
+      window.__hpmSdk.polylineUpdates.push(path);
+    }
+    hide() { this.hidden = true; }
+    show() { this.hidden = false; }
+    setMap(map) {
+      this.map = map;
+      if (!map && this.isTrack && !this.destroyed) {
+        this.destroyed = true; window.__hpmSdk.destroyedTrackOverlays++;
+      }
+    }
+  }
   class Bounds { constructor(southwest, northeast) { this.southwest = southwest; this.northeast = northeast; } }
   class Pixel { constructor(x, y) { this.x = x; this.y = y; } }
   class MarkerCluster {
@@ -71,7 +112,16 @@ export const fakeSdk = String.raw`
     }
     setMap(map) { if (!map) this.map.container.replaceChildren(); }
   }
-  window.AMap = { version: '2.0', Map, Marker, Polyline, Bounds, Pixel, MarkerCluster, plugin(names, callback) { callback(); } };
+  function convertFrom(batch, source, callback) {
+    window.__hpmSdk.conversionBatches.push(batch.map(coordinate => [...coordinate]));
+    if (window.__hpmSdkConversionFailure) {
+      callback('error'); return;
+    }
+    callback('complete', {
+      locations: batch.map(([longitude, latitude]) => [longitude + 0.001, latitude + 0.001]),
+    });
+  }
+  window.AMap = { version: '2.0', Map, Marker, Polyline, Bounds, Pixel, MarkerCluster, convertFrom, plugin(names, callback) { callback(); } };
   window.___onAPILoaded();
 })();
 `;

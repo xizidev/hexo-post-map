@@ -4,6 +4,7 @@ import { PostMapValidationError } from '../../src/domain/errors';
 import { normalizePostMap } from '../../src/domain/normalize';
 
 const sourcePath = 'source/_posts/invalid.md';
+const point = { id: 'shanghai', name: '上海', longitude: 121.4737, latitude: 31.2304 };
 
 function expectValidationError(raw: unknown, fieldPath: string): PostMapValidationError {
   try {
@@ -181,5 +182,69 @@ describe('normalizePostMap validation diagnostics', () => {
     );
 
     expect(error.value).toBe(true);
+  });
+
+  it.each(['trip.gpx', './tracks/trip.GPX', 'trip.GeoJSON', 'trip.JsOn'])(
+    'accepts a relative track source with a supported suffix: %s',
+    (source) => {
+      expect(normalizePostMap({ points: [point], track: { source } }, sourcePath)).not.toBeNull();
+    },
+  );
+
+  it.each([
+    ['', 'map.track.source'],
+    ['   ', 'map.track.source'],
+    ['/tmp/trip.gpx', 'map.track.source'],
+    ['C:\\tracks\\trip.gpx', 'map.track.source'],
+    ['https://example.com/trip.gpx', 'map.track.source'],
+    ['//example.com/trip.gpx', 'map.track.source'],
+    ['trip\0.gpx', 'map.track.source'],
+    ['trip.txt', 'map.track.source'],
+  ])('rejects an invalid track source %j', (source, fieldPath) => {
+    const error = expectValidationError({ points: [point], track: { source } }, fieldPath);
+    expect(error.value).toBe(source);
+  });
+
+  it('requires the track source at its exact field', () => {
+    expectValidationError({ points: [point], track: {} }, 'map.track.source');
+  });
+
+  it.each([
+    ['trim_start_meters', -1],
+    ['trim_start_meters', Number.NaN],
+    ['trim_start_meters', Number.POSITIVE_INFINITY],
+    ['trim_end_meters', -1],
+    ['trim_end_meters', Number.NEGATIVE_INFINITY],
+  ] as const)('rejects invalid privacy %s value %s', (field, value) => {
+    const error = expectValidationError(
+      { points: [point], track: { source: 'trip.gpx', privacy: { [field]: value } } },
+      `map.track.privacy.${field}`,
+    );
+    expect(error.value).toBe(value);
+  });
+
+  it.each([-1, 10000.01, Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects invalid simplify tolerance %s',
+    (value) => {
+      const error = expectValidationError(
+        { points: [point], track: { source: 'trip.gpx', simplify_tolerance_meters: value } },
+        'map.track.simplify_tolerance_meters',
+      );
+      expect(error.value).toBe(value);
+    },
+  );
+
+  it.each([
+    [{ source: 'trip.gpx', typo: true }, 'map.track.typo'],
+    [{ source: 'trip.gpx', privacy: { typo: true } }, 'map.track.privacy.typo'],
+  ])('rejects unknown nested track keys at %s', (track, fieldPath) => {
+    expectValidationError({ points: [point], track }, fieldPath);
+  });
+
+  it('requires a boolean playback value', () => {
+    expectValidationError(
+      { points: [point], track: { source: 'trip.gpx', playback: 'true' } },
+      'map.track.playback',
+    );
   });
 });

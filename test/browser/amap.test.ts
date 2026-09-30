@@ -1,8 +1,11 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createAMapProvider } from '../../src/browser/providers/amap';
+import { createAMapDetailProvider as createAMapProvider } from '../../src/browser/providers/amap';
 import { normalizePostMap } from '../../src/domain/normalize';
 import type { DetailMapModel } from '../../src/browser/providers/types';
+import { hydrateDetail } from '../../src/browser/detail';
+import { renderDetailMap } from '../../src/templates/detail';
+import { resolveConfig } from '../../src/config/resolve';
 
 const sdk = vi.hoisted(() => ({ load: vi.fn(), reset: vi.fn() }));
 vi.mock('@amap/amap-jsapi-loader', () => ({ default: sdk }));
@@ -11,6 +14,9 @@ const config = {
   amap: { key: 'key', mapStyle: 'amap://styles/dark', serviceHost: '/proxy' },
 };
 let instance: FakeMap;
+let convertFrom: ReturnType<typeof vi.fn>;
+let rejectedTrackStroke: string | undefined;
+let onTrackPosition: (() => void) | undefined;
 class FakeMap {
   listeners = new Map<string, () => void>();
   overlays: unknown[] = [];
@@ -37,6 +43,9 @@ class FakeMap {
       if (overlay instanceof FakeMarker) this.container.append(overlay.options.content);
     });
   }
+  remove = vi.fn((overlays: unknown[]) => {
+    this.overlays = this.overlays.filter((overlay) => !overlays.includes(overlay));
+  });
   setFitView = vi.fn();
   setStatus = vi.fn();
   destroy = vi.fn();
@@ -46,13 +55,35 @@ class FakeMarker {
   setTop = vi.fn((top: boolean) => {
     this.isTop = top;
   });
-  constructor(readonly options: { position: number[]; content: HTMLElement }) {}
+  setPosition = vi.fn(() => onTrackPosition?.());
+  setMap = vi.fn();
+  constructor(
+    readonly options: {
+      position: number[];
+      content: HTMLElement;
+      clickable?: boolean;
+      bubble?: boolean;
+    },
+  ) {}
 }
 function markerButton(marker: FakeMarker): HTMLButtonElement {
-  return marker.options.content.querySelector<HTMLButtonElement>('.hpm-detail-marker')!;
+  return marker.options.content!.querySelector<HTMLButtonElement>('.hpm-detail-marker')!;
 }
 class FakePolyline {
-  constructor(readonly options: { path: number[][] }) {}
+  setPath = vi.fn();
+  setMap = vi.fn();
+  hide = vi.fn();
+  show = vi.fn();
+  constructor(
+    readonly options: {
+      path: number[][];
+      strokeColor?: string;
+      strokeWeight?: number;
+      strokeOpacity?: number;
+    },
+  ) {
+    if (options.strokeColor === rejectedTrackStroke) throw new Error('overlay failed');
+  }
 }
 function model(extra = {}): DetailMapModel {
   return {
@@ -66,11 +97,49 @@ function model(extra = {}): DetailMapModel {
     defaultZoom: 11,
   };
 }
+const recordedTrack = {
+  version: 1 as const,
+  coordinateSystem: 'wgs84' as const,
+  segments: [
+    [[110, 20] as const, [110.01, 20] as const],
+    [[111, 21] as const, [111.01, 21] as const],
+  ],
+  stats: { distanceMeters: 2_000 },
+};
+function trackedModel(playback: boolean, onTrackError = vi.fn()): DetailMapModel {
+  return {
+    ...model({
+      representative: 'a',
+      points: [
+        { id: 'a', name: 'A', longitude: 121, latitude: 31 },
+        { id: 'b', name: 'B', longitude: 122, latitude: 32 },
+      ],
+      route: ['a', 'b'],
+    }),
+    track: recordedTrack,
+    trackPlayback: playback,
+    onTrackError,
+  };
+}
 beforeEach(() => {
+  rejectedTrackStroke = undefined;
+  onTrackPosition = undefined;
+  convertFrom = vi.fn(
+    (
+      batch: Array<readonly [number, number]>,
+      _source: string,
+      callback: (status: string, result?: { locations: unknown }) => void,
+    ) => {
+      callback('complete', {
+        locations: batch.map(([longitude, latitude]) => [longitude + 0.1, latitude + 0.2]),
+      });
+    },
+  );
   sdk.load.mockReset().mockResolvedValue({
     Map: FakeMap,
     Marker: FakeMarker,
     Polyline: FakePolyline,
+    convertFrom,
   });
   sdk.reset.mockReset();
 });
@@ -80,6 +149,100 @@ afterEach(() => {
 });
 
 describe('AMap adapter', () => {
+  it.each([false, true])(
+    'cleans up synchronous initial playback degradation (replacement=%s)',
+    async (replacement) => {
+      vi.stubGlobal('IntersectionObserver', undefined);
+      const frames = new Map<number, FrameRequestCallback>();
+      vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+        frames.set(1, callback);
+        return 1;
+      });
+      vi.stubGlobal('cancelAnimationFrame', (id: number) => frames.delete(id));
+      const motionListeners = new Set<EventListener>();
+      vi.stubGlobal('matchMedia', () => ({
+        matches: false,
+        addEventListener: (_type: string, callback: EventListener) => motionListeners.add(callback),
+        removeEventListener: (_type: string, callback: EventListener) =>
+          motionListeners.delete(callback),
+      }));
+      document.body.innerHTML = renderDetailMap({
+        map: trackedModel(true).map,
+        config: resolveConfig(
+          {
+            enabled: true,
+            amap: { key: 'key', security: { service_host: 'https://example.com/proxy' } },
+          },
+          {},
+        )!,
+        track: {
+          url: `/hexo-post-map/tracks/${'a'.repeat(64)}.json`,
+          stats: recordedTrack.stats,
+          playback: true,
+        },
+      });
+      const root = document.querySelector<HTMLElement>('[data-hpm-detail]')!;
+      const controls = root.querySelector<HTMLElement>('[data-hpm-playback]')!;
+      const play = root.querySelector<HTMLButtonElement>('[data-hpm-play]')!;
+      const range = root.querySelector<HTMLInputElement>('[data-hpm-progress]')!;
+      const removedDocumentListener = vi.spyOn(document, 'removeEventListener');
+      const status = root.querySelector<HTMLElement>('[data-hpm-status]')!;
+      let replacementControls: HTMLElement | undefined;
+      onTrackPosition = () => {
+        // A synchronous SDK callback can reenter controls or a host navigation hook.
+        play.click();
+        if (replacement) {
+          replacementControls = controls.cloneNode(true) as HTMLElement;
+          replacementControls.hidden = false;
+          controls.replaceWith(replacementControls);
+          status.textContent = 'Replacement status';
+        }
+        throw new Error('initial SDK position update failed');
+      };
+      const provider = await createAMapProvider(config);
+      const controller = hydrateDetail(
+        root,
+        async () => provider,
+        async () =>
+          new Response(JSON.stringify(recordedTrack), {
+            headers: { 'content-type': 'application/json' },
+          }),
+      );
+      try {
+        for (let i = 0; i < 30; i++) await Promise.resolve();
+        instance.emit('complete');
+        for (let i = 0; i < 30; i++) await Promise.resolve();
+        expect(motionListeners.size).toBe(0);
+        expect(
+          removedDocumentListener.mock.calls.some(([type]) => type === 'visibilitychange'),
+        ).toBe(true);
+        expect(frames.size).toBe(0);
+        play.click();
+        controls.querySelector<HTMLButtonElement>('[data-hpm-restart]')!.click();
+        range.value = '0.5';
+        range.dispatchEvent(new Event('input'));
+        expect(range.getAttribute('aria-valuetext')).toBe('行程进度 0%');
+        expect(frames.size).toBe(0);
+        if (replacement) {
+          expect(replacementControls?.hidden).toBe(false);
+          expect(status.textContent).toBe('Replacement status');
+        } else {
+          expect(status.textContent).toBe('轨迹暂时无法加载，已显示地点路线。');
+          expect(controls.hidden).toBe(true);
+          expect(root.dataset.hpmActive).toBe('true');
+          expect(
+            instance.overlays.some(
+              (overlay) => overlay instanceof FakePolyline && overlay.options.strokeWeight === 3,
+            ),
+          ).toBe(true);
+        }
+      } finally {
+        controller.destroy();
+        removedDocumentListener.mockRestore();
+        document.body.innerHTML = '';
+      }
+    },
+  );
   it('applies the configured style to a detail map', async () => {
     const provider = await createAMapProvider(config);
     const pending = provider.mountDetail(document.createElement('div'), model());
@@ -425,6 +588,231 @@ describe('AMap adapter', () => {
     instance.emit('complete');
     (await pending).destroy();
     container.remove();
+  });
+
+  it('replaces the schematic route with fitted recorded-track overlays and updates them in place', async () => {
+    const provider = await createAMapProvider(config);
+    const container = document.createElement('div');
+    container.style.setProperty('--hpm-track-color', '#64748b');
+    container.style.setProperty('--hpm-track-progress-color', '#f97316');
+    document.body.append(container);
+    const pending = provider.mountDetail(container, trackedModel(true));
+    await vi.waitFor(() => expect(convertFrom).toHaveBeenCalledTimes(1));
+    const markers = instance.overlays.filter(
+      (overlay): overlay is FakeMarker => overlay instanceof FakeMarker,
+    );
+    const placeMarkers = markers.filter((marker) =>
+      marker.options.content?.querySelector('button'),
+    );
+    const movingMarker = markers.find((marker) =>
+      marker.options.content?.classList.contains('hpm-track-marker'),
+    );
+    const lines = instance.overlays.filter(
+      (overlay): overlay is FakePolyline => overlay instanceof FakePolyline,
+    );
+    const fullLines = lines.filter((line) => line.options.strokeColor === '#64748b');
+    const progressLines = lines.filter((line) => line.options.strokeColor === '#f97316');
+
+    expect(placeMarkers).toHaveLength(2);
+    expect(placeMarkers.map((marker) => markerButton(marker).textContent?.trim())).toEqual([
+      '1',
+      '2',
+    ]);
+    expect(placeMarkers.map((marker) => markerButton(marker).getAttribute('aria-label'))).toEqual([
+      '显示地点 1：A',
+      '显示地点 2：B',
+    ]);
+    expect(fullLines).toHaveLength(2);
+    expect(progressLines).toHaveLength(2);
+    expect(progressLines.map((line) => line.options.path)).toEqual([
+      [
+        [110.1, 20.2],
+        [110.11, 20.2],
+      ],
+      [
+        [111.1, 21.2],
+        [111.11, 21.2],
+      ],
+    ]);
+    expect(progressLines.every((line) => line.hide.mock.calls.length === 1)).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.options.path.some(([longitude]) => longitude === 121 || longitude === 122),
+      ),
+    ).toBe(false);
+    expect(movingMarker?.options).toMatchObject({ clickable: false, bubble: false });
+    expect(movingMarker?.options.position).toEqual([110.1, 20.2]);
+
+    instance.emit('complete');
+    const handle = await pending;
+    expect(handle.hasTrack).toBe(true);
+    expect(handle.setTrackProgress).toBeTypeOf('function');
+    expect(instance.setFitView).toHaveBeenCalledWith(
+      [...placeMarkers, ...fullLines],
+      true,
+      [112, 24, 24, 24],
+    );
+    handle.setTrackProgress?.(0.75);
+    expect(progressLines.every((line) => line.setPath.mock.calls.length > 0)).toBe(true);
+    expect(progressLines.every((line) => line.show.mock.calls.length > 0)).toBe(true);
+    expect(movingMarker?.setPosition).toHaveBeenCalledTimes(1);
+    expect(instance.destroy).not.toHaveBeenCalled();
+    handle.destroy();
+    expect(
+      [...fullLines, ...progressLines].every((line) => line.setMap.mock.calls[0]?.[0] === null),
+    ).toBe(true);
+    expect(movingMarker?.setMap).toHaveBeenCalledWith(null);
+    container.remove();
+  });
+
+  it('renders display-only tracks without progress overlays or a moving marker', async () => {
+    const provider = await createAMapProvider(config);
+    const container = document.createElement('div');
+    container.style.setProperty('--hpm-track-color', '#64748b');
+    container.style.setProperty('--hpm-track-progress-color', '#f97316');
+    const pending = provider.mountDetail(container, trackedModel(false));
+    await vi.waitFor(() => expect(convertFrom).toHaveBeenCalledTimes(1));
+    instance.emit('complete');
+    const handle = await pending;
+    const lines = instance.overlays.filter(
+      (overlay): overlay is FakePolyline => overlay instanceof FakePolyline,
+    );
+    const markers = instance.overlays.filter(
+      (overlay): overlay is FakeMarker => overlay instanceof FakeMarker,
+    );
+
+    expect(lines).toHaveLength(2);
+    expect(lines.every((line) => line.options.strokeColor === '#64748b')).toBe(true);
+    expect(
+      markers.some((marker) => marker.options.content?.classList.contains('hpm-track-marker')),
+    ).toBe(false);
+    expect(handle.hasTrack).toBe(true);
+    expect(handle.setTrackProgress).toBeUndefined();
+    handle.destroy();
+  });
+
+  it('degrades conversion failure once to the schematic route without WGS84 overlays', async () => {
+    convertFrom.mockImplementation((_batch, _source, callback) => callback('error'));
+    const provider = await createAMapProvider(config);
+    const onTrackError = vi.fn();
+    const pending = provider.mountDetail(
+      document.createElement('div'),
+      trackedModel(true, onTrackError),
+    );
+    await vi.waitFor(() => expect(onTrackError).toHaveBeenCalledTimes(1));
+    instance.emit('complete');
+    const handle = await pending;
+    const lines = instance.overlays.filter(
+      (overlay): overlay is FakePolyline => overlay instanceof FakePolyline,
+    );
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.options.path).toEqual([
+      [121, 31],
+      [122, 32],
+    ]);
+    expect(handle.hasTrack).not.toBe(true);
+    expect(handle.setTrackProgress).toBeUndefined();
+    handle.destroy();
+  });
+
+  it('degrades a sparse conversion result once to the schematic route', async () => {
+    convertFrom.mockImplementation((batch, _source, callback) => {
+      const locations = new Array<unknown>(batch.length);
+      locations[0] = [110.1, 20.2];
+      callback('complete', { locations });
+    });
+    const provider = await createAMapProvider(config);
+    const onTrackError = vi.fn();
+    const pending = provider.mountDetail(
+      document.createElement('div'),
+      trackedModel(true, onTrackError),
+    );
+
+    await vi.waitFor(() => expect(onTrackError).toHaveBeenCalledTimes(1));
+    instance.emit('complete');
+    const handle = await pending;
+    const lines = instance.overlays.filter(
+      (overlay): overlay is FakePolyline => overlay instanceof FakePolyline,
+    );
+
+    expect(onTrackError).toHaveBeenCalledTimes(1);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.options.path).toEqual([
+      [121, 31],
+      [122, 32],
+    ]);
+    expect(
+      lines.some((line) => line.options.path.some((coordinate) => coordinate === undefined)),
+    ).toBe(false);
+    expect(handle.hasTrack).not.toBe(true);
+    expect(handle.setTrackProgress).toBeUndefined();
+    handle.destroy();
+  });
+
+  it('degrades track-overlay construction failure without failing the provider', async () => {
+    rejectedTrackStroke = '#64748b';
+    const provider = await createAMapProvider(config);
+    const onTrackError = vi.fn();
+    const container = document.createElement('div');
+    container.style.setProperty('--hpm-track-color', '#64748b');
+    const pending = provider.mountDetail(container, trackedModel(true, onTrackError));
+    await vi.waitFor(() => expect(onTrackError).toHaveBeenCalledTimes(1));
+    instance.emit('complete');
+    const handle = await pending;
+    const lines = instance.overlays.filter(
+      (overlay): overlay is FakePolyline => overlay instanceof FakePolyline,
+    );
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.options.path).toEqual([
+      [121, 31],
+      [122, 32],
+    ]);
+    expect(handle.hasTrack).not.toBe(true);
+    handle.destroy();
+  });
+
+  it('uses the single mount deadline to degrade a stalled conversion after map readiness', async () => {
+    vi.useFakeTimers();
+    convertFrom.mockImplementation(() => {});
+    const provider = await createAMapProvider(config);
+    const onTrackError = vi.fn();
+    const pending = provider.mountDetail(
+      document.createElement('div'),
+      trackedModel(true, onTrackError),
+    );
+    instance.emit('complete');
+    const resolved = expect(pending).resolves.toMatchObject({ hasTrack: false });
+
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    await resolved;
+    expect(onTrackError).toHaveBeenCalledTimes(1);
+    expect(instance.destroy).not.toHaveBeenCalled();
+  });
+
+  it('aborts a pending conversion and ignores its late vendor callback', async () => {
+    let late: ((status: string, result?: { readonly locations?: unknown }) => void) | undefined;
+    convertFrom.mockImplementation((_batch, _source, callback) => {
+      late = callback;
+    });
+    const provider = await createAMapProvider(config);
+    const abort = new AbortController();
+    const onTrackError = vi.fn();
+    const pending = provider.mountDetail(document.createElement('div'), {
+      ...trackedModel(true, onTrackError),
+      signal: abort.signal,
+    });
+
+    abort.abort();
+    await expect(pending).rejects.toThrow('cancelled');
+    const overlaysBeforeLateCallback = [...instance.overlays];
+    late?.('complete', { locations: recordedTrack.segments[0] });
+    await Promise.resolve();
+    expect(instance.overlays).toEqual(overlaysBeforeLateCallback);
+    expect(instance.destroy).toHaveBeenCalledTimes(1);
+    expect(onTrackError).not.toHaveBeenCalled();
   });
 
   it('destroys a pending map on abort and rejects initialization', async () => {

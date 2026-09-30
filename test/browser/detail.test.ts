@@ -5,6 +5,7 @@ import { renderDetailMap } from '../../src/templates/detail';
 import { resolveConfig } from '../../src/config/resolve';
 import { normalizePostMap } from '../../src/domain/normalize';
 import type { DetailMapModel, MapHandle, MapProvider } from '../../src/browser/providers/types';
+import type { PublishedTrackAsset } from '../../src/tracks/types';
 
 const config = resolveConfig(
   { enabled: true, amap: { key: 'key', security: { service_host: 'https://example.com/proxy' } } },
@@ -17,6 +18,33 @@ const map = normalizePostMap(
 function fixture() {
   document.body.innerHTML = renderDetailMap({ map, config });
   return document.querySelector<HTMLElement>('[data-hpm-detail]')!;
+}
+const trackStats = { distanceMeters: 1_200, elevationGainMeters: 30, durationSeconds: 600 };
+const trackAsset = Object.freeze({
+  version: 1,
+  coordinateSystem: 'wgs84',
+  segments: Object.freeze([
+    Object.freeze([Object.freeze([118.7, 32] as const), Object.freeze([118.8, 32.1, 12] as const)]),
+  ]),
+  stats: Object.freeze(trackStats),
+}) satisfies PublishedTrackAsset;
+function trackedFixture(playback = true) {
+  document.body.innerHTML = renderDetailMap({
+    map,
+    config,
+    track: {
+      url: `/hexo-post-map/tracks/${'a'.repeat(64)}.json`,
+      stats: trackStats,
+      playback,
+    },
+  });
+  return document.querySelector<HTMLElement>('[data-hpm-detail]')!;
+}
+function trackResponse(body: unknown = trackAsset, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
 }
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -41,6 +69,82 @@ afterEach(() => {
   activeControllers.clear();
   vi.unstubAllGlobals();
   document.body.innerHTML = '';
+});
+
+describe('tracked detail server rendering', () => {
+  it('renders semantic visible statistics and fallback with initially hidden labelled playback controls', () => {
+    const track = {
+      url: `/blog/hexo-post-map/tracks/${'a'.repeat(64)}.json`,
+      stats: { distanceMeters: 1234, elevationGainMeters: 125, durationSeconds: 5400 },
+      playback: true,
+      source: '_posts/private-track.gpx',
+      name: 'PRIVATE_NAME',
+      timestamp: 'PRIVATE_TIMESTAMP',
+    };
+    document.body.innerHTML = renderDetailMap({ map, config, track });
+    const stats = document.querySelector<HTMLElement>('[data-hpm-track-stats]')!;
+    expect(stats?.tagName).toBe('DL');
+    expect(stats.hidden).toBe(false);
+    expect([...stats.querySelectorAll('dt')].map((node) => node.textContent)).toEqual([
+      '距离',
+      '累计爬升',
+      '时长',
+    ]);
+    expect([...stats.querySelectorAll('dd')].map((node) => node.textContent)).toEqual([
+      '1.23 公里',
+      '125 米',
+      '1 小时 30 分钟',
+    ]);
+    expect(document.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(document.querySelector('[data-hpm-fallback] a')!.textContent).toBe('上海');
+    expect(document.querySelector('[data-hpm-status]')!.getAttribute('aria-live')).toBe('polite');
+    const controls = document.querySelector<HTMLElement>('[data-hpm-playback]')!;
+    expect(controls?.hidden).toBe(true);
+    expect(controls.querySelector('[data-hpm-play]')?.textContent).toBe('播放');
+    expect(controls.querySelector('[data-hpm-play]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(controls.querySelector('[data-hpm-restart]')?.textContent).toBe('重新开始');
+    const range = controls.querySelector<HTMLInputElement>('[data-hpm-progress]')!;
+    expect(range.type).toBe('range');
+    expect(range.getAttribute('aria-label')).toBe('轨迹播放进度');
+    expect([range.min, range.max, range.step, range.value]).toEqual(['0', '1', '0.001', '0']);
+    const embedded = JSON.parse(document.querySelector('[data-hpm-data]')!.textContent!);
+    expect(embedded.track).toEqual({ url: track.url, stats: track.stats, playback: true });
+    expect(document.body.innerHTML).not.toMatch(/private-track|PRIVATE_NAME|PRIVATE_TIMESTAMP/);
+  });
+
+  it('omits optional statistics and controls when playback is disabled while safely serializing data', () => {
+    const name = '</script><img src=x onerror=alert(1)>';
+    const unsafeMap = normalizePostMap(
+      { points: [{ id: 'a', name, longitude: 121, latitude: 31 }] },
+      'a.md',
+    )!;
+    document.body.innerHTML = renderDetailMap({
+      map: unsafeMap,
+      config,
+      track: {
+        url: `/hexo-post-map/tracks/${'b'.repeat(64)}.json`,
+        stats: { distanceMeters: 10 },
+        playback: false,
+      },
+    });
+    expect(document.querySelectorAll('[data-hpm-track-stats] dd')).toHaveLength(1);
+    expect(document.querySelector('[data-hpm-playback]')).toBeNull();
+    expect(document.querySelectorAll('script')).toHaveLength(1);
+    expect(document.querySelector('img')).toBeNull();
+    expect(
+      JSON.parse(document.querySelector('[data-hpm-data]')!.textContent!).map.points[0].name,
+    ).toBe(name);
+  });
+
+  it('leaves point-only markup and browser data free of track additions', () => {
+    const root = fixture();
+    expect(root.querySelector('[data-hpm-track-stats], [data-hpm-playback]')).toBeNull();
+    expect(JSON.parse(root.querySelector('[data-hpm-data]')!.textContent!)).not.toHaveProperty(
+      'track',
+    );
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(root.querySelector('[data-hpm-canvas]')).not.toBeNull();
+  });
 });
 
 describe('detail hydration', () => {
@@ -101,6 +205,7 @@ describe('detail hydration', () => {
     }
     expect(load).toHaveBeenCalledTimes(1);
     expect(mountDetail).toHaveBeenCalledTimes(1);
+    expect(mountDetail.mock.calls[0]?.[1]).not.toHaveProperty('trackPlayback');
     expect(handle.destroy).not.toHaveBeenCalled();
     controller.destroy();
     expect(canvas.tabIndex).toBe(-1);
@@ -337,5 +442,310 @@ describe('detail hydration', () => {
     expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
     expect(root.querySelector<HTMLElement>('[data-hpm-canvas]')!.tabIndex).toBe(-1);
     expect(root.querySelector('[data-hpm-status]')!.textContent).toContain('暂时无法加载');
+  });
+
+  it('starts provider and track loading together only after the existing intersection boundary', async () => {
+    let intersect!: IntersectionObserverCallback;
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          intersect = callback;
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    const root = trackedFixture();
+    const providerPending = deferred<MapProvider>();
+    const responsePending = deferred<Response>();
+    const load = vi.fn(() => providerPending.promise);
+    const fetcher = vi.fn<typeof fetch>(() => responsePending.promise);
+    const mount = vi.fn<MapProvider['mountDetail']>();
+    const handle = {
+      hasTrack: true,
+      destroy: vi.fn(),
+      setInteractive: vi.fn(),
+      setTrackProgress: vi.fn(),
+    };
+    mount.mockResolvedValue(handle);
+
+    hydrateDetail(root, load, fetcher);
+    expect(load).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+
+    intersect([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const fetchSignal = (fetcher.mock.calls[0]?.[1] as RequestInit | undefined)?.signal;
+    expect(fetchSignal).toBeInstanceOf(AbortSignal);
+
+    providerPending.resolve({ mountDetail: mount, mountOverview: vi.fn() });
+    responsePending.resolve(trackResponse());
+    await flush();
+
+    const model = mount.mock.calls[0]?.[1];
+    expect(model?.track).toEqual(trackAsset);
+    expect(model?.trackPlayback).toBe(true);
+    expect(model?.signal).toBe(fetchSignal);
+    expect(root.querySelector<HTMLElement>('[data-hpm-playback]')!.hidden).toBe(false);
+    expect(handle.setTrackProgress).toHaveBeenLastCalledWith(0);
+    expect(root.dataset.hpmActive).toBe('true');
+  });
+
+  it('passes a display-only track to the provider without creating playback controls', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = trackedFixture(false);
+    const mount = vi.fn<MapProvider['mountDetail']>(async () => ({
+      hasTrack: true,
+      destroy: vi.fn(),
+      setInteractive: vi.fn(),
+      setTrackProgress: vi.fn(),
+    }));
+    const fetcher = vi.fn<typeof fetch>(async () => trackResponse());
+
+    hydrateDetail(root, async () => ({ mountDetail: mount, mountOverview: vi.fn() }), fetcher);
+    await flush();
+
+    expect(mount.mock.calls[0]?.[1].track).toEqual(trackAsset);
+    expect(mount.mock.calls[0]?.[1].trackPlayback).toBe(false);
+    expect(root.querySelector('[data-hpm-playback]')).toBeNull();
+    expect(root.dataset.hpmActive).toBe('true');
+  });
+
+  it('uses the unchanged point model and a generic status when track loading fails', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = trackedFixture();
+    const mount = vi.fn<MapProvider['mountDetail']>(async () => ({
+      hasTrack: false,
+      destroy: vi.fn(),
+      setInteractive: vi.fn(),
+    }));
+    const fetcher = vi.fn<typeof fetch>(async () => trackResponse({ private: 'secret' }, 500));
+
+    hydrateDetail(root, async () => ({ mountDetail: mount, mountOverview: vi.fn() }), fetcher);
+    await flush();
+
+    expect(mount.mock.calls[0]?.[1]).toMatchObject({ map });
+    expect(mount.mock.calls[0]?.[1]).not.toHaveProperty('track');
+    expect(mount.mock.calls[0]?.[1]).not.toHaveProperty('trackPlayback');
+    expect(root.dataset.hpmActive).toBe('true');
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>('[data-hpm-playback]')!.hidden).toBe(true);
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe(
+      '轨迹暂时无法加载，已显示地点路线。',
+    );
+    expect(root.textContent).not.toContain('private');
+  });
+
+  it('keeps the complete place-list fallback when the provider fails after track loading', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = trackedFixture();
+    const fetcher = vi.fn<typeof fetch>(async () => trackResponse());
+
+    hydrateDetail(
+      root,
+      async () => {
+        throw new Error('private provider credential');
+      },
+      fetcher,
+    );
+    await flush();
+
+    expect(root.dataset.hpmActive).toBe('false');
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(root.querySelector('[data-hpm-fallback] a')?.textContent).toBe('上海');
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toContain('地图暂时无法加载');
+    expect(root.textContent).not.toContain('credential');
+  });
+
+  it('deduplicates a tracked root so repeated hydration performs one track fetch', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = trackedFixture();
+    const handle = {
+      hasTrack: true,
+      destroy: vi.fn(),
+      setInteractive: vi.fn(),
+      setTrackProgress: vi.fn(),
+    };
+    const load = vi.fn(async () => ({
+      mountDetail: async () => handle,
+      mountOverview: vi.fn(),
+    }));
+    const fetcher = vi.fn<typeof fetch>(async () => trackResponse());
+
+    const first = hydrateDetail(root, load, fetcher);
+    const second = hydrateDetail(root, load, fetcher);
+    await flush();
+
+    expect(second).toBe(first);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['playback', 'play', 'restart', 'progress'])(
+    'detects replacement of the captured track %s control',
+    (control) => {
+      const root = trackedFixture();
+      const controller = hydrateDetail(root, vi.fn(), vi.fn());
+      const original = root.querySelector(`[data-hpm-${control}]`)!;
+
+      original.replaceWith(original.cloneNode(true));
+
+      expect(controller.isCurrent()).toBe(false);
+    },
+  );
+
+  it('aborts the shared lifecycle and ignores late provider and track results after destroy', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = trackedFixture();
+    const providerPending = deferred<MapProvider>();
+    const responsePending = deferred<Response>();
+    const mount = vi.fn<MapProvider['mountDetail']>();
+    const fetcher = vi.fn<typeof fetch>(() => responsePending.promise);
+    const controller = hydrateDetail(root, () => providerPending.promise, fetcher);
+    await Promise.resolve();
+    const signal = (fetcher.mock.calls[0]?.[1] as RequestInit | undefined)?.signal as AbortSignal;
+
+    controller.destroy();
+    expect(signal.aborted).toBe(true);
+    providerPending.resolve({ mountDetail: mount, mountOverview: vi.fn() });
+    responsePending.resolve(trackResponse());
+    await flush();
+
+    expect(mount).not.toHaveBeenCalled();
+    expect(root.dataset.hpmActive).toBe('false');
+    expect(root.querySelector<HTMLElement>('[data-hpm-playback]')!.hidden).toBe(true);
+  });
+
+  it('fully disables visible playback when the current provider fails after a successful mount', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    let lateFrame!: FrameRequestCallback;
+    const requestFrame = vi.fn((callback: FrameRequestCallback) => {
+      lateFrame = callback;
+      return 41;
+    });
+    const cancelFrame = vi.fn();
+    vi.stubGlobal('requestAnimationFrame', requestFrame);
+    vi.stubGlobal('cancelAnimationFrame', cancelFrame);
+    const removeMotionListener = vi.fn();
+    vi.stubGlobal('matchMedia', () => ({
+      matches: false,
+      media: '(prefers-reduced-motion: reduce)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: removeMotionListener,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(() => true),
+    }));
+    const root = trackedFixture();
+    let model!: DetailMapModel;
+    const handle = {
+      hasTrack: true,
+      destroy: vi.fn(),
+      setInteractive: vi.fn(),
+      setTrackProgress: vi.fn(),
+    };
+    hydrateDetail(
+      root,
+      async () => ({
+        mountDetail: async (_container, current) => {
+          model = current;
+          return handle;
+        },
+        mountOverview: vi.fn(),
+      }),
+      async () => trackResponse(),
+    );
+    await flush();
+    const controls = root.querySelector<HTMLElement>('[data-hpm-playback]')!;
+    const play = root.querySelector<HTMLButtonElement>('[data-hpm-play]')!;
+    const restart = root.querySelector<HTMLButtonElement>('[data-hpm-restart]')!;
+    const range = root.querySelector<HTMLInputElement>('[data-hpm-progress]')!;
+    play.click();
+    expect(play.getAttribute('aria-pressed')).toBe('true');
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    const progressCalls = handle.setTrackProgress.mock.calls.length;
+
+    model.onError?.();
+
+    expect(controls.hidden).toBe(true);
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(root.querySelector('[data-hpm-status]')!.textContent).toBe(
+      '地图暂时无法加载，请使用下方地点链接。',
+    );
+    expect(root.dataset.hpmActive).toBe('false');
+    expect(root.querySelector<HTMLElement>('[data-hpm-canvas]')!.tabIndex).toBe(-1);
+    expect(cancelFrame).toHaveBeenCalledWith(41);
+    expect(removeMotionListener).toHaveBeenCalledTimes(1);
+    expect(handle.destroy).toHaveBeenCalledTimes(1);
+    expect(cancelFrame.mock.invocationCallOrder[0]).toBeLessThan(
+      handle.destroy.mock.invocationCallOrder[0]!,
+    );
+
+    play.click();
+    restart.click();
+    range.value = '0.5';
+    range.dispatchEvent(new Event('input'));
+    lateFrame(15_000);
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    expect(handle.setTrackProgress).toHaveBeenCalledTimes(progressCalls);
+    expect(controls.hidden).toBe(true);
+  });
+
+  it('does not mutate replacement-root DOM when a provider callback arrives after staleness', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined);
+    const root = trackedFixture();
+    let model!: DetailMapModel;
+    const fetcher = vi.fn<typeof fetch>(async () => trackResponse());
+    hydrateDetail(
+      root,
+      async () => ({
+        mountDetail: async (_container, current) => {
+          model = current;
+          return {
+            hasTrack: true,
+            destroy: vi.fn(),
+            setInteractive: vi.fn(),
+            setTrackProgress: vi.fn(),
+          };
+        },
+        mountOverview: vi.fn(),
+      }),
+      fetcher,
+    );
+    await flush();
+    const controls = root.querySelector<HTMLElement>('[data-hpm-playback]')!;
+    const status = root.querySelector<HTMLElement>('[data-hpm-status]')!;
+    const fallback = root.querySelector<HTMLElement>('[data-hpm-fallback]')!;
+    expect(controls.hidden).toBe(false);
+    const replacement = controls.cloneNode(true) as HTMLElement;
+    controls.replaceWith(replacement);
+
+    model.onError?.();
+
+    expect(replacement.hidden).toBe(false);
+    expect(status.textContent).toBe('');
+    expect(fallback.hidden).toBe(true);
+    expect(root.dataset.hpmActive).toBe('true');
+  });
+
+  it('rejects non-whitelisted track descriptor fields before any external work', async () => {
+    const root = trackedFixture();
+    const data = root.querySelector('[data-hpm-data]')!;
+    const embedded = JSON.parse(data.textContent ?? '{}');
+    embedded.track.source = '_posts/private.gpx';
+    data.textContent = JSON.stringify(embedded);
+    const load = vi.fn();
+    const fetcher = vi.fn();
+
+    hydrateDetail(root, load, fetcher);
+    await flush();
+
+    expect(load).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(root.querySelector<HTMLElement>('[data-hpm-fallback]')!.hidden).toBe(false);
+    expect(root.querySelector('[data-hpm-status]')!.textContent).not.toContain('private.gpx');
   });
 });
