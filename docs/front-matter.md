@@ -55,6 +55,19 @@ map:
     playback: true
 ```
 
+GPX input must use the GPX 1.1 namespace `http://www.topografix.com/GPX/1/1`. Track segments and points are read only from the `trk` > `trkseg` > `trkpt` hierarchy in that namespace. Route-only (`rte`/`rtept`), waypoint-only (`wpt`), and files using the GPX 1.0 namespace are not supported track inputs; because they yield no supported track segment, they fail with no usable track.
+
+```xml test=track-source-gpx
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">
+  <trk>
+    <trkseg>
+      <trkpt lon="118.7900" lat="32.0800" />
+      <trkpt lon="118.7910" lat="32.0810" />
+    </trkseg>
+  </trk>
+</gpx>
+```
+
 ### Display-only GeoJSON
 
 ```yaml test=post-map-track
@@ -70,6 +83,20 @@ map:
     source: ./tracks/nanjing.geojson
     playback: false
 ```
+
+A GeoJSON source may be a direct `LineString` or `MultiLineString` Geometry, or contain those line geometries in supported `Feature`, `FeatureCollection`, or `GeometryCollection` containers. The other standard geometries (`Point`, `MultiPoint`, `Polygon`, and `MultiPolygon`) are ignored rather than treated as tracks; if no usable line remains, the build fails. Every WGS84 position uses `[longitude, latitude, optional elevation]`; later dimensions and foreign properties are ignored.
+
+```json test=track-source-geojson
+{
+  "type": "LineString",
+  "coordinates": [
+    [118.79, 32.08, 10],
+    [118.791, 32.081, 14]
+  ]
+}
+```
+
+For either format, at least one segment must contain two distinct usable points in the same segment. Separate one-point segments, an empty track, or a line containing only repeated coordinates fails validation.
 
 The maximum source size is 8 MiB, with at most 200,000 raw points and 2,000 published points. The fixed pipeline is secure read and parse → privacy trim → statistics → simplification → canonical JSON → SHA-256. Statistics use the trimmed unsimplified geometry. GPX duration appears only with complete monotonic timestamps; elevation gain appears only with complete elevation values. GeoJSON foreign properties, including timestamp arrays, are ignored.
 

@@ -219,6 +219,19 @@ map:
 
 `source` 是相对于文章源文件的本地路径。对于 `source/_posts/nanjing.md`，示例会解析到 `source/_posts/tracks/nanjing.gpx`。文件必须位于 Hexo 的 `source_dir` 内；远程 URL、绝对路径、目录穿越和逃逸到目录外的符号链接都会使构建失败。
 
+GPX 输入必须使用 GPX 1.1 namespace `http://www.topografix.com/GPX/1/1`。解析器只从该 namespace 内的 `trk` > `trkseg` > `trkpt` 层级读取轨迹段和轨迹点。仅含路线（`rte`/`rtept`）、仅含航点（`wpt`）或使用 GPX 1.0 namespace 的文件不支持作为轨迹输入；由于没有受支持的轨迹段，它们会因无可用轨迹而构建失败。
+
+```xml test=track-source-gpx
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">
+  <trk>
+    <trkseg>
+      <trkpt lon="118.7900" lat="32.0800" />
+      <trkpt lon="118.7910" lat="32.0810" />
+    </trkseg>
+  </trk>
+</gpx>
+```
+
 ### 添加仅展示的 GeoJSON 轨迹
 
 ```yaml test=post-map-track
@@ -234,6 +247,20 @@ map:
     source: ./tracks/nanjing.geojson
     playback: false
 ```
+
+GeoJSON 源可以直接是 `LineString` 或 `MultiLineString` Geometry，也可以把这些线型 geometry 放在受支持的 `Feature`、`FeatureCollection` 或 `GeometryCollection` 容器中。其他标准 geometry（`Point`、`MultiPoint`、`Polygon`、`MultiPolygon`）会被忽略，不作为轨迹；如果最终没有可用线，构建失败。WGS84 坐标顺序为 `[longitude, latitude, optional elevation]`；更后面的坐标维度和外部属性会被忽略。
+
+```json test=track-source-geojson
+{
+  "type": "LineString",
+  "coordinates": [
+    [118.79, 32.08, 10],
+    [118.791, 32.081, 14]
+  ]
+}
+```
+
+无论哪种格式，最终都必须至少有一个轨迹段，在同一轨迹段中包含两个空间位置不同的可用点。多个相互分离的单点段、空轨迹或只重复同一坐标的线都会校验失败。
 
 支持 `.gpx`、`.geojson` 和 GeoJSON `.json`。`privacy.trim_start_meters`、`privacy.trim_end_meters` 默认都是 `0`，`simplify_tolerance_meters` 默认 `5`，`playback` 默认 `true`。每个源文件最大 8 MiB、最多 200,000 个原始点，发布资源最多 2,000 个点。
 

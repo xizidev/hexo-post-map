@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { resolveConfig } from '../../src/config/resolve';
 import { normalizePostMap, normalizePostMapDocument } from '../../src/domain/normalize';
+import { parseGeoJson } from '../../src/tracks/geojson';
+import { parseGpx } from '../../src/tracks/gpx';
 
 const visualThemeVariables = [
   '--hpm-accent',
@@ -32,6 +34,14 @@ function examples(file: string, marker: string): Record<string, unknown>[] {
 
 function markdownFile(file: string): string {
   return readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+}
+
+function sourceExamples(file: string, language: string, marker: string): string[] {
+  return Array.from(
+    markdownFile(file).matchAll(
+      new RegExp('```' + language + ' test=' + marker + '\\n([\\s\\S]*?)```', 'gu'),
+    ),
+  ).map((match) => match[1]!);
 }
 
 describe.each(['README.md', 'README.zh-CN.md'])('%s authoring examples', (file) => {
@@ -185,4 +195,59 @@ describe('recorded-track documentation contract', () => {
     expect(compatibility).toMatch(/overview[\s\S]*never[\s\S]*track/iu);
     expect(releases).toMatch(/v0\.5[\s\S]*content-addressed|v0\.5[\s\S]*hashed/iu);
   });
+
+  it.each([
+    [
+      'README.md',
+      /route-only[\s\S]*waypoint-only[\s\S]*GPX 1\.0[\s\S]*(?:not supported|fail)/iu,
+      /other (?:supported )?standard geometr(?:y|ies)[\s\S]*(?:ignored|not treated as tracks)[\s\S]*(?:no usable line|fail)/iu,
+      /two distinct usable points[\s\S]*same segment/iu,
+    ],
+    [
+      'README.zh-CN.md',
+      /仅含[^。\n]*(?:路线|rte)[\s\S]*仅含[^。\n]*(?:航点|wpt)[\s\S]*GPX 1\.0[\s\S]*(?:不支持|失败)/u,
+      /其他[^。\n]*(?:geometry|几何)[\s\S]*(?:忽略|不作为轨迹)[\s\S]*(?:没有可用线|失败)/iu,
+      /同一(?:轨迹)?段[\s\S]*两个[^。\n]*不同[^。\n]*可用点/u,
+    ],
+    [
+      'docs/front-matter.md',
+      /route-only[\s\S]*waypoint-only[\s\S]*GPX 1\.0[\s\S]*(?:not supported|fail)/iu,
+      /other (?:supported )?standard geometr(?:y|ies)[\s\S]*(?:ignored|not treated as tracks)[\s\S]*(?:no usable line|fail)/iu,
+      /two distinct usable points[\s\S]*same segment/iu,
+    ],
+  ])(
+    '%s states the exact GPX and GeoJSON parser boundary',
+    (file, unsupportedGpx, ignoredGeoJson, usableSegment) => {
+      const markdown = markdownFile(file);
+      expect(markdown).toContain('http://www.topografix.com/GPX/1/1');
+      expect(markdown).toMatch(/GPX 1\.1[\s\S]*`trk`[\s\S]*`trkseg`[\s\S]*`trkpt`/iu);
+      expect(markdown).toMatch(unsupportedGpx);
+      expect(markdown).toMatch(
+        /`LineString`[\s\S]*`MultiLineString`[\s\S]*`Feature`[\s\S]*`FeatureCollection`[\s\S]*`GeometryCollection`/u,
+      );
+      expect(markdown).toMatch(ignoredGeoJson);
+      expect(markdown).toContain('`[longitude, latitude, optional elevation]`');
+      expect(markdown).toMatch(usableSegment);
+    },
+  );
+
+  it.each(['README.md', 'README.zh-CN.md', 'docs/front-matter.md'])(
+    '%s keeps its minimal GPX and GeoJSON source examples parser-valid',
+    (file) => {
+      const gpx = sourceExamples(file, 'xml', 'track-source-gpx');
+      const geoJson = sourceExamples(file, 'json', 'track-source-geojson');
+      expect(gpx).toHaveLength(1);
+      expect(geoJson).toHaveLength(1);
+      if (gpx.length !== 1 || geoJson.length !== 1) return;
+      expect(parseGpx(Buffer.from(gpx[0]!))).toEqual([
+        [{ coordinate: [118.79, 32.08] }, { coordinate: [118.791, 32.081] }],
+      ]);
+      expect(parseGeoJson(Buffer.from(geoJson[0]!))).toEqual([
+        [
+          { coordinate: [118.79, 32.08], elevationMeters: 10 },
+          { coordinate: [118.791, 32.081], elevationMeters: 14 },
+        ],
+      ]);
+    },
+  );
 });
