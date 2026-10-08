@@ -122,6 +122,94 @@ describe('overview session cache', () => {
     }
   });
 
+  it.each(['getter', 'getItem'] as const)(
+    'preserves unknown stored scopes after initial %s failure and later removal',
+    (operation) => {
+      const fixture = storageFixture();
+      const initial = JSON.stringify({
+        version: 1,
+        scopes: [
+          { scope: 'a', snapshot: snapshot() },
+          {
+            scope: 'b',
+            snapshot: {
+              ...snapshot(),
+              panel: { mode: 'single', urls: [b.url], scroll: { top: 8 } },
+            },
+          },
+        ],
+      });
+      fixture.values.set(key, initial);
+      let getterFails = operation === 'getter';
+      if (operation === 'getItem') fixture.fail('getItem');
+      const cache = createSnapshotCache({
+        storage: () => {
+          if (getterFails) throw Error('temporarily blocked');
+          return fixture.storage;
+        },
+      });
+      expect(cache.read('a', context)).toBeUndefined();
+      getterFails = false;
+      fixture.fail(undefined);
+      cache.remove('a');
+      expect(cache.read('a', context)).toBeUndefined();
+      const fresh = createSnapshotCache({ storage: () => fixture.storage });
+      expect(fresh.read('b', context)?.panel).toEqual({
+        mode: 'single',
+        urls: [b.url],
+        scroll: { top: 8 },
+      });
+      // Failed hydration means this instance is memory-only; even its target stays persisted.
+      expect(fixture.values.get(key)).toBe(initial);
+      expect(fixture.values.get('theme-session')).toBe('keep');
+    },
+  );
+
+  it.each(['getter', 'getItem'] as const)(
+    'preserves unknown stored scopes after initial %s failure and later save',
+    (operation) => {
+      const fixture = storageFixture();
+      const initial = JSON.stringify({
+        version: 1,
+        scopes: [
+          { scope: 'a', snapshot: snapshot() },
+          {
+            scope: 'b',
+            snapshot: {
+              ...snapshot(),
+              panel: { mode: 'single', urls: [b.url], scroll: { top: 8 } },
+            },
+          },
+        ],
+      });
+      fixture.values.set(key, initial);
+      let getterFails = operation === 'getter';
+      if (operation === 'getItem') fixture.fail('getItem');
+      const cache = createSnapshotCache({
+        storage: () => {
+          if (getterFails) throw Error('temporarily blocked');
+          return fixture.storage;
+        },
+      });
+      expect(cache.read('a', context)).toBeUndefined();
+      getterFails = false;
+      fixture.fail(undefined);
+      const newer = { ...snapshot(), view: { ...view, zoom: 12 } };
+      cache.save('a', newer, context);
+      expect(cache.read('a', context)).toEqual(newer);
+      const fresh = createSnapshotCache({ storage: () => fixture.storage });
+      expect(fresh.read('b', context)?.panel).toEqual({
+        mode: 'single',
+        urls: [b.url],
+        scroll: { top: 8 },
+      });
+      expect(fixture.values.get(key)).toBe(initial);
+      cache.remove('a');
+      expect(cache.read('a', context)).toBeUndefined();
+      expect(fixture.values.get(key)).toBe(initial);
+    },
+  );
+
   it('keeps the latest saves when timestamps tie', () => {
     const fixture = storageFixture();
     const cache = createSnapshotCache({ storage: () => fixture.storage });

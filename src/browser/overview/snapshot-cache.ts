@@ -74,6 +74,7 @@ export function createSnapshotCache(options: {
 }): SnapshotCache {
   const memory = new Map<string, OverviewSnapshot>();
   let loaded = false;
+  let hydrated = false;
   function trim(now?: number): void {
     trimScopes(memory, now);
   }
@@ -82,17 +83,19 @@ export function createSnapshotCache(options: {
     // Load at most once: failed removals must not resurrect stale persistent state in this document.
     loaded = true;
     try {
-      for (const { scope, snapshot } of entries(
-        options.storage()?.getItem(STORAGE_KEY) ?? null,
-        now,
-      ))
-        memory.set(scope, snapshot);
+      const storage = options.storage();
+      if (!storage) return;
+      const stored = storage.getItem(STORAGE_KEY);
+      for (const { scope, snapshot } of entries(stored, now)) memory.set(scope, snapshot);
+      hydrated = true;
     } catch {
       /* Storage can be blocked; this document's memory remains usable. */
     }
     trim(now);
   }
   function persist(): void {
+    // An unread envelope may contain other scopes: failed hydration stays memory-only.
+    if (!hydrated) return;
     try {
       const storage = options.storage();
       if (!storage) return;
