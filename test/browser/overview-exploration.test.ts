@@ -9,7 +9,8 @@ import type {
   OverviewPanelState,
   OverviewView,
 } from '../../src/browser/overview/exploration-types';
-import type { OverviewMapHandle } from '../../src/browser/providers/types';
+import type { OverviewMapHandle, OverviewMapOptions } from '../../src/browser/providers/types';
+import type { OverviewPost } from '../../src/templates/overview';
 import { hydrateOverview } from '../../src/browser/overview/index';
 import {
   createBrowserRuntime,
@@ -31,6 +32,7 @@ function fixture(
   restore = true,
   create = createExplorationController,
   share = false,
+  randomOptions: { random?: boolean; posts?: readonly OverviewPost[]; maxZoom?: number } = {},
 ) {
   const doc = owner.document as unknown as Document;
   const root = doc.createElement('section');
@@ -55,9 +57,9 @@ function fixture(
     showList,
     overviewUrl: path,
     dataUrl: `${path}posts.json`,
-    flags: { ...flags, restore, share },
-    maxZoom: 18,
-    posts: [post],
+    flags: { ...flags, restore, share, random: randomOptions.random ?? false },
+    maxZoom: randomOptions.maxZoom ?? 18,
+    posts: randomOptions.posts ?? [post],
     panel: { read, open },
     isCurrent: () => current,
   });
@@ -66,7 +68,9 @@ function fixture(
     setInteractive() {},
     getView: () => view,
     setView() {},
-    focusPost() {},
+    focusPost: vi.fn((selected, zoom) => {
+      view = { center: [selected.location.longitude, selected.location.latitude], zoom };
+    }),
     onViewEnd(callback) {
       listener = callback;
       return () => {
@@ -81,6 +85,7 @@ function fixture(
     handle,
     open,
     read,
+    viewEnd: () => listener,
     activate: () => controller.activate(handle),
     panel(state: OverviewPanelState) {
       panel = state;
@@ -101,6 +106,7 @@ function fixture(
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 describe('browser exploration config', () => {
   it('accepts complete safe config and disables old or unsafe projections', () => {
@@ -154,7 +160,9 @@ describe('share runtime ownership', () => {
     root.append(canvas, data);
     document.body.append(root);
     const destroyed = vi.fn();
-    const mount = vi.fn(async () => {
+    const mount = vi.fn<
+      (container: HTMLElement, options: OverviewMapOptions) => Promise<OverviewMapHandle>
+    >(async () => {
       if (failMount) throw new Error('map failed');
       if (settings?.legacy) return { destroy: destroyed, setInteractive() {} };
       return {
@@ -188,10 +196,12 @@ describe('share runtime ownership', () => {
     for (let i = 0; i < 20; i++) await Promise.resolve();
     return { owner, root, runtime, mount, destroyed };
   }
-  it.each(['toolbar', 'all', 'share', 'status', 'manual', 'input', 'label', 'close'])(
+  it.each(['toolbar', 'all', 'share', 'status', 'manual', 'input', 'label', 'close', 'random'])(
     'refresh cleans a replaced %s control and remounts one current toolbar',
     async (part) => {
-      const f = await runtimeFixture();
+      const f = await runtimeFixture(false, {
+        flags: { restore: false, share: true, random: true },
+      });
       if (['manual', 'input', 'label', 'close'].includes(part)) {
         Object.defineProperty(f.owner.navigator, 'clipboard', { value: undefined });
         f.root.querySelector<HTMLButtonElement>('[data-hpm-share]')!.click();
@@ -205,26 +215,50 @@ describe('share runtime ownership', () => {
         input: 'input',
         label: 'label',
         close: '[data-hpm-share-close]',
+        random: '[data-hpm-random]',
       };
       const old = f.root.querySelector(selectors[part as keyof typeof selectors])!;
       expect(old).not.toBeNull();
       old.replaceWith(old.cloneNode(true));
+      // A late SDK marker callback must not open stale UI before refresh disposes it.
+      f.mount.mock.calls[0]![1].onPostSelect(post, f.root);
+      expect(f.root.querySelector('.hpm-panel')).toBeNull();
       f.runtime.api.refresh(f.root);
       for (let i = 0; i < 20; i++) await Promise.resolve();
       expect(f.destroyed).toHaveBeenCalledTimes(1);
       expect(f.mount).toHaveBeenCalledTimes(2);
       expect(f.root.querySelectorAll('[data-hpm-toolbar]')).toHaveLength(1);
+      expect(f.root.querySelectorAll('[data-hpm-random]')).toHaveLength(1);
       expect(f.root.querySelector('[data-hpm-share-manual]')).toBeNull();
       f.runtime.api.destroy();
     },
   );
   it('keeps a failed map fallback stable on refresh without sharing or implicit provider retries', async () => {
-    const f = await runtimeFixture(true);
+    const f = await runtimeFixture(true, {
+      flags: { restore: false, share: true, random: true },
+    });
     expect(f.root.dataset.hpmActive).toBe('false');
     expect(f.root.querySelector('[data-hpm-share]')).toBeNull();
+    expect(f.root.querySelector('[data-hpm-random]')).toBeNull();
     f.runtime.api.refresh(f.root);
     for (let i = 0; i < 20; i++) await Promise.resolve();
     expect(f.mount).toHaveBeenCalledTimes(1);
+    f.runtime.api.destroy();
+  });
+  it('opens a real article preview and returns user-close focus to the random button', async () => {
+    const f = await runtimeFixture(false, {
+      flags: { restore: false, share: true, random: true },
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const random = f.root.querySelector<HTMLButtonElement>('[data-hpm-random]')!;
+    random.click();
+    const panel = f.root.querySelector<HTMLElement>('.hpm-panel')!;
+    expect(panel).not.toBeNull();
+    expect(panel.querySelector('a')?.getAttribute('href')).toBe('/a/');
+    panel.querySelector<HTMLButtonElement>('.hpm-panel__close')!.click();
+    expect(f.root.querySelector('.hpm-panel')).toBeNull();
+    expect(f.root.ownerDocument.activeElement).toBe(random);
+    expect(f.owner.location.pathname).toBe('/blog/map/');
     f.runtime.api.destroy();
   });
   it.each(['overviewUrl', 'exploration'] as const)(
@@ -233,6 +267,7 @@ describe('share runtime ownership', () => {
       const f = await runtimeFixture(false, { missing });
       expect(f.root.dataset.hpmActive).toBe('true');
       expect(f.root.querySelector('[data-hpm-share]')).toBeNull();
+      expect(f.root.querySelector('[data-hpm-random]')).toBeNull();
       f.runtime.api.destroy();
     },
   );
@@ -242,14 +277,209 @@ describe('share runtime ownership', () => {
       for (const legacy of [true, false]) {
         const f = await runtimeFixture(false, {
           legacy,
-          flags: { restore, share: true, random: false },
+          flags: { restore, share: true, random: true },
         });
         expect(f.root.dataset.hpmActive).toBe('true');
         expect(!!f.root.querySelector('[data-hpm-share]')).toBe(!legacy);
+        expect(!!f.root.querySelector('[data-hpm-random]')).toBe(!legacy);
         f.runtime.api.destroy();
       }
     },
   );
+});
+describe('random exploration controls', () => {
+  const a = { ...post, location: { name: 'A', longitude: 121.123456789, latitude: 31.987654321 } };
+  const b = { ...post, title: 'B', url: '/b/' };
+  const c = { ...post, title: 'C', url: '/c/' };
+  function randomFixture(posts: readonly OverviewPost[] = [a, b, c], maxZoom = 18) {
+    return fixture(undefined, '/map/', false, createExplorationController, true, {
+      random: true,
+      posts,
+      maxZoom,
+    });
+  }
+  function button(f: ReturnType<typeof fixture>) {
+    const control = f.root.querySelector<HTMLButtonElement>('[data-hpm-random]');
+    expect(control).not.toBeNull();
+    return control!;
+  }
+  it('defaults random off and hides zero-candidate and incomplete-capability buttons', () => {
+    const rng = vi.spyOn(Math, 'random');
+    const disabled = fixture();
+    disabled.activate();
+    expect(disabled.root.querySelector('[data-hpm-random]')).toBeNull();
+    const empty = randomFixture([{ ...a, url: '' }, a, { ...a }]);
+    empty.activate();
+    expect(empty.root.querySelector('[data-hpm-random]')).toBeNull();
+    const legacy = randomFixture();
+    legacy.controller.activate({ destroy() {}, setInteractive() {} });
+    expect(legacy.root.querySelector('[data-hpm-random]')).toBeNull();
+    expect(rng).not.toHaveBeenCalled();
+  });
+  it('shows the button only after activation and previews the exact chosen location without navigation', () => {
+    const f = randomFixture();
+    const rng = vi.spyOn(Math, 'random').mockReturnValue(0);
+    const push = vi.spyOn(f.owner.history, 'pushState');
+    const replace = vi.spyOn(f.owner.history, 'replaceState');
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const href = f.owner.location.href;
+    expect(f.root.querySelector('[data-hpm-random]')).toBeNull();
+    f.activate();
+    button(f).click();
+    expect(f.handle.focusPost).toHaveBeenCalledWith(a, 11, { immediately: false });
+    expect(f.handle.getView?.()).toEqual({ center: [121.123456789, 31.987654321], zoom: 11 });
+    expect(f.open).toHaveBeenCalledWith(
+      { mode: 'single', urls: ['/a/'], scroll: { top: 0 } },
+      { focus: true, origin: button(f), resolveOrigin: expect.any(Function) },
+    );
+    expect(rng).toHaveBeenCalledTimes(1);
+    expect(f.owner.location.href).toBe(href);
+    expect(push).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(f.root.querySelector('[data-hpm-share]')).not.toBeNull();
+    f.controller.destroy({ save: false });
+  });
+  it('excludes current single before the last random choice and keeps last choice local to a controller', () => {
+    const f = randomFixture();
+    const rng = vi.spyOn(Math, 'random').mockReturnValue(0);
+    f.activate();
+    button(f).click();
+    button(f).click();
+    expect(f.handle.focusPost).toHaveBeenLastCalledWith(b, 11, { immediately: false });
+    f.panel({ mode: 'closed' });
+    button(f).click();
+    expect(f.handle.focusPost).toHaveBeenLastCalledWith(a, 11, { immediately: false });
+    f.panel({ mode: 'single', urls: ['/c/'], scroll: { top: 0 } });
+    rng.mockReturnValue(0.6);
+    button(f).click();
+    expect(f.handle.focusPost).toHaveBeenLastCalledWith(b, 11, { immediately: false });
+    const next = randomFixture();
+    rng.mockReturnValue(0);
+    next.activate();
+    button(next).click();
+    expect(next.handle.focusPost).toHaveBeenCalledWith(a, 11, { immediately: false });
+  });
+  it.each([
+    [15, 18, 15],
+    [4, 8, 8],
+  ])('honors reduced motion and clamps current zoom %s at maximum %s', (current, max, target) => {
+    const f = randomFixture([a], max);
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    Object.defineProperty(f.owner, 'matchMedia', {
+      value: (query: string) => ({ matches: query === '(prefers-reduced-motion: reduce)' }),
+    });
+    f.activate();
+    f.view(current);
+    button(f).click();
+    expect(f.handle.focusPost).toHaveBeenCalledWith(a, target, { immediately: true });
+  });
+  it.each(['/unknown/', '/c/'])(
+    'falls back to the last random choice for non-unique single %s',
+    (url) => {
+      const f = randomFixture([a, b, c, { ...c }]);
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      f.activate();
+      button(f).click();
+      f.panel({ mode: 'single', urls: [url], scroll: { top: 0 } });
+      button(f).click();
+      expect(f.handle.focusPost).toHaveBeenLastCalledWith(b, 11, { immediately: false });
+    },
+  );
+  it('a failing SDK focus leaves the panel closed', () => {
+    const f = randomFixture();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    f.activate();
+    vi.mocked(f.handle.focusPost!).mockImplementationOnce(() => {
+      throw new Error('sdk');
+    });
+    button(f).click();
+    expect(f.open).not.toHaveBeenCalled();
+    expect(f.read()).toEqual({ mode: 'closed' });
+  });
+  it.each([NaN, Infinity, -0.1, 1])('invalid rng=%s leaves map and panel untouched', (sample) => {
+    const f = randomFixture();
+    f.activate();
+    vi.spyOn(Math, 'random').mockReturnValue(sample);
+    button(f).click();
+    expect(f.handle.focusPost).not.toHaveBeenCalled();
+    expect(f.open).not.toHaveBeenCalled();
+  });
+  it('late view-end after rapid choices and a user close only checkpoints the view', () => {
+    vi.useFakeTimers();
+    const f = fixture(undefined, '/map/', true, createExplorationController, false, {
+      random: true,
+      posts: [a, b, c],
+    });
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    f.activate();
+    const lateViewEnd = f.viewEnd()!;
+    button(f).click();
+    button(f).click();
+    f.panel({ mode: 'closed' });
+    lateViewEnd();
+    vi.advanceTimersByTime(200);
+    expect(f.open).toHaveBeenCalledTimes(2);
+    expect(f.saved()[0].snapshot).toMatchObject({ view: { zoom: 11 }, panel: { mode: 'closed' } });
+    f.controller.destroy({ save: false });
+    lateViewEnd();
+    expect(f.open).toHaveBeenCalledTimes(2);
+  });
+  it.each(['close', 'new choice', 'dispose'] as const)(
+    'a reentrant SDK %s fences the older random panel',
+    (action) => {
+      const f = randomFixture();
+      vi.spyOn(Math, 'random').mockReturnValue(0);
+      f.activate();
+      vi.mocked(f.handle.focusPost!).mockImplementationOnce(() => {
+        if (action === 'close') f.panel({ mode: 'closed' });
+        if (action === 'new choice') button(f).click();
+        if (action === 'dispose') f.controller.destroy({ save: false });
+      });
+      button(f).click();
+      expect(f.open).toHaveBeenCalledTimes(action === 'new choice' ? 1 : 0);
+      if (action === 'new choice')
+        expect(f.open.mock.calls[0]![0]).toEqual({
+          mode: 'single',
+          urls: ['/b/'],
+          scroll: { top: 0 },
+        });
+    },
+  );
+  it('view-end during focus does not cancel the current random preview', () => {
+    const f = randomFixture();
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    f.activate();
+    vi.mocked(f.handle.focusPost!).mockImplementationOnce(() => f.viewEnd()?.());
+    button(f).click();
+    expect(f.open).toHaveBeenCalledTimes(1);
+  });
+  it('replacement identity blocks old random and clipboard actions before SDK reads', async () => {
+    const f = randomFixture();
+    const rng = vi.spyOn(Math, 'random').mockReturnValue(0);
+    let resolve!: () => void;
+    Object.defineProperty(f.owner.navigator, 'clipboard', {
+      value: {
+        writeText: () =>
+          new Promise<void>((done) => {
+            resolve = done;
+          }),
+      },
+    });
+    f.activate();
+    f.root.querySelector<HTMLButtonElement>('[data-hpm-share]')!.click();
+    const random = button(f);
+    random.replaceWith(random.cloneNode(true));
+    const getView = vi.spyOn(f.handle, 'getView');
+    expect(f.controller.isCurrent()).toBe(false);
+    random.click();
+    resolve();
+    await Promise.resolve();
+    expect(rng).not.toHaveBeenCalled();
+    expect(getView).not.toHaveBeenCalled();
+    expect(f.root.querySelector('[data-hpm-share-status]')?.textContent).toBe('');
+  });
 });
 describe('exploration checkpoints', () => {
   it('selects a valid explicit share without hydrating storage first', () => {

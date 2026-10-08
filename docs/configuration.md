@@ -23,7 +23,7 @@ post_map:
     exploration:
       restore: true
       share: true
-      random: false
+      random: false # Optional: true enables previews without automatic navigation
   cluster:
     grid_size: 60
     max_zoom: 18
@@ -69,9 +69,13 @@ Exploration flags reject strings, numbers, nulls, arrays, and unknown keys. Rest
 
 Sharing is independent of restoration and is available on both the generated overview and tag-embedded overview after successful initialization with full view capabilities. The **分享地图** control reads the live view and panel on click. Clipboard failure or unavailability provides a root-local labeled read-only field; Escape or Close returns focus without scrolling. `share: false` disables both the control and incoming query parsing. Embedded maps do not consume their host page's query. Sharing always targets the configured overview route at the current origin, for root `/` and subdirectory `/blog/` installations.
 
+Random exploration is optional and defaults to `random: false`. Enable it with `random: true` to show **随机一站** after a capable overview loads with unique, safe article candidates. Selection uses the existing dataset without background article requests; it only centers the map and opens a preview, leaving article navigation to the reader and never starting track playback. Candidates retain their order and receive equal probability; with alternatives, the current unique single preview is excluded before the previous random choice. One candidate may repeat, and zero candidates hide the button. Coordinates stay exact; zoom follows `min(max_zoom, max(current_zoom, 11))`. Reduced motion applies the view immediately. Sharing and restoration remain independent.
+
 The public v1 query whitelist is `hpm_v=1`, `hpm_center=longitude,latitude` (six decimal places maximum in generated links), `hpm_zoom` (two decimal places maximum), and optional `hpm_post`. The latter is an exact, unique, safe dataset reference; group/all panels and unknown/ambiguous posts become view-only. Links are at most 4,096 characters, dropping an oversized article reference. The literal overview route and terminal `index.html` alias accept shares; encoded path separators are not decoded. A fully valid explicit share takes priority over document memory, then session storage, then the normal fitted default. Duplicate/unknown `hpm_` keys or invalid version/view invalidate the share. Sharing does not change browser history, resource fetching, navigation, or map configuration. URLs are public, not a secrecy boundary; see [security](security.md).
 
 中文：三项开关必须为布尔值，默认 `restore: true`、`share: true`、`random: false`。仅恢复当前标签页最近的有效视角及面板，不逐条回放历史；有效期 2 小时，最多 16 个作用域，每份快照 16 KiB。
+
+中文：`random: true` 可选开启“随机一站”，仅使用已有文章数据、无后台文章请求，只定位并预览，不自动跳转或播放轨迹。没有唯一安全候选时隐藏按钮；有多个候选时优先排除当前单篇文章，否则排除上次随机文章。代表坐标不抖动，减少动态效果时立即定位。
 
 These names are case-sensitive:
 

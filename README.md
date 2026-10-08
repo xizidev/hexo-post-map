@@ -33,7 +33,7 @@ post_map:
     exploration:
       restore: true
       share: true
-      random: false
+      random: false # Set true to enable optional random previews
   cluster:
     grid_size: 60
     max_zoom: 18
@@ -49,6 +49,8 @@ All credential values above are placeholders. Set `amap.key` to the Key generate
 `overview.exploration` accepts only boolean `restore`, `share`, and `random` flags, with the defaults shown above. Return restoration keeps the latest map view and article panel in this tab for up to two hours, across PJAX navigation or a reload. Memory and session storage retain at most 16 map scopes; each snapshot is limited to 16 KiB. Restoration does not take focus, scroll the page, or replay individual history entries. Setting `restore: false` clears only the current map scope. Blocked session storage degrades to bounded memory for the current document. Sharing and random selection are configured separately from restoration.
 
 With `share: true`, both the generated overview page and an embedded overview tag offer **分享地图** after a capable map loads. It copies the current view and a single article preview; groups and the all-post list share the view only. Clipboard denial, missing support, or restricted access shows a labeled read-only field for manual copying; Escape or Close returns focus to the share button. Links target the current browser origin and the configured overview route, including sites hosted at `/` or `/blog/`. Sharing works independently when `restore: false`; `share: false` hides the control and ignores incoming share parameters. Embedded maps ignore the host article's share query.
+
+Set `random: true` to opt in to **随机一站** on a loaded overview with at least one unique, safe article URL. It samples the existing article dataset uniformly, excluding the current single preview or otherwise the last random choice when alternatives exist; one article may repeat. The map centers on the article's exact representative coordinates at `min(max_zoom, max(current_zoom, 11))`, then opens its preview. Reduced motion makes the move immediate. Selection sends no background article requests, changes no browser history, and does not navigate to the article or start track playback; readers choose whether to open the article.
 
 Share format v1 contains only `hpm_v=1`, `hpm_center=longitude,latitude` (up to six decimals), `hpm_zoom` (up to two decimals), and an optional `hpm_post` that exactly matches one safe article URL in the current dataset. Links are limited to 4,096 characters; an article reference that exceeds the limit is omitted. The overview page accepts its literal route and terminal `index.html` alias, and valid explicit links take priority over saved state without changing the address bar or taking focus. Invalid/duplicate/unknown `hpm_` parameters are ignored as a whole; unknown or ambiguous articles retain only the valid view. These links expose the view and article reference to recipients and ordinary URL logs; they are not a confidential channel. They contain no AMap credentials, proxy configuration, article body, images, or tracks.
 

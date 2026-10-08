@@ -11,6 +11,7 @@ import { createOverviewScope, createSnapshot } from './snapshot';
 import { getDocumentSnapshotCache, type SnapshotCache } from './snapshot-cache';
 import { createOverviewShare, readOverviewShare } from './share';
 import { createShareControls } from './share-controls';
+import { chooseRandomPost, randomTargetZoom } from './random';
 
 const scopeOwners = new WeakMap<SnapshotCache, Map<string, object>>();
 const ownershipKey = Symbol.for('hexo-post-map.overview-scope-owners.v1');
@@ -113,6 +114,9 @@ export function createExplorationController(options: ExplorationOptions): Explor
   let timer: ReturnType<typeof setTimeout> | undefined;
   let candidate: OverviewSnapshot | undefined;
   let shareControls: ReturnType<typeof createShareControls> | undefined;
+  let randomButton: HTMLButtonElement | undefined;
+  let lastRandomUrl: string | undefined;
+  let operation = 0;
   const cache = scope ? getDocumentSnapshotCache(owner) : undefined;
   const token = {};
   const owners = cache && ownership(cache);
@@ -127,7 +131,10 @@ export function createExplorationController(options: ExplorationOptions): Explor
     options.isCurrent() &&
     options.toolbar.parentElement === options.root &&
     options.toolbar.contains(options.showList);
-  const current = () => baseCurrent() && (!shareControls || shareControls.isCurrent());
+  const controlsCurrent = () =>
+    baseCurrent() &&
+    (!randomButton || options.toolbar.querySelector('[data-hpm-random]') === randomButton);
+  const current = () => controlsCurrent() && (!shareControls || shareControls.isCurrent());
   const shareContext = {
     origin: owner.location.origin,
     overviewUrl: options.overviewUrl,
@@ -161,7 +168,7 @@ export function createExplorationController(options: ExplorationOptions): Explor
     capture();
     saveCandidate();
   }
-  function changed(event?: { scroll?: boolean }) {
+  function scheduleCheckpoint(event?: { scroll?: boolean }) {
     if (!current() || !handle || !options.flags.restore || !ownsScope()) return;
     if (!event?.scroll) capture();
     if (timer !== undefined) return;
@@ -169,6 +176,40 @@ export function createExplorationController(options: ExplorationOptions): Explor
       timer = undefined;
       checkpoint();
     }, 200);
+  }
+  function changed(event?: { scroll?: boolean }) {
+    if (!event?.scroll) operation++;
+    scheduleCheckpoint(event);
+  }
+  function randomClick() {
+    if (!current() || !handle || !randomButton) return;
+    const sequence = ++operation;
+    try {
+      const panel = options.panel.read();
+      if (!current() || sequence !== operation) return;
+      const excludedUrl =
+        panel.mode === 'single' && index.unique.has(panel.urls[0]) ? panel.urls[0] : lastRandomUrl;
+      const post = chooseRandomPost(index, excludedUrl, Math.random);
+      if (!post || !current() || sequence !== operation) return;
+      const view = handle.getView!();
+      if (!view || !Number.isFinite(view.zoom) || !current() || sequence !== operation) return;
+      const immediately = owner.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+      if (!current() || sequence !== operation) return;
+      lastRandomUrl = post.url;
+      handle.focusPost!(post, randomTargetZoom(view.zoom, options.maxZoom), { immediately });
+      if (!current() || sequence !== operation) return;
+      options.panel.open(
+        { mode: 'single', urls: [post.url], scroll: { top: 0 } },
+        {
+          focus: true,
+          origin: randomButton,
+          resolveOrigin: () => (current() ? randomButton : undefined),
+        },
+      );
+      changed();
+    } catch {
+      /* SDK reads and focus are best effort; never reopen a previous preview. */
+    }
   }
   function pagehide(event: PageTransitionEvent) {
     if (event.persisted) {
@@ -198,17 +239,26 @@ export function createExplorationController(options: ExplorationOptions): Explor
           { focus: false },
         );
       } else if (initial) options.panel.open(initial.panel, { focus: false });
+      if (options.flags.random && index.unique.size > 0) {
+        randomButton = options.root.ownerDocument.createElement('button');
+        randomButton.type = 'button';
+        randomButton.className = 'hpm-overview__random';
+        randomButton.dataset.hpmRandom = '';
+        randomButton.textContent = '随机一站';
+        randomButton.addEventListener('click', randomClick);
+        options.toolbar.append(randomButton);
+      }
       if (options.flags.share)
         shareControls = createShareControls({
           root: options.root,
           toolbar: options.toolbar,
-          isCurrent: baseCurrent,
+          isCurrent: controlsCurrent,
           getLink: () => {
             const view = handle?.getView?.();
             return view ? createOverviewShare(view, options.panel.read(), shareContext) : undefined;
           },
         });
-      unsubscribe = mounted.onViewEnd!(() => changed());
+      unsubscribe = mounted.onViewEnd!(() => scheduleCheckpoint());
       owner.addEventListener('pagehide', pagehide);
     },
     changed,
@@ -221,6 +271,9 @@ export function createExplorationController(options: ExplorationOptions): Explor
         saveCandidate();
       }
       disposed = true;
+      operation++;
+      randomButton?.removeEventListener('click', randomClick);
+      randomButton?.remove();
       shareControls?.destroy();
       unsubscribe?.();
       owner.removeEventListener('pagehide', pagehide);
