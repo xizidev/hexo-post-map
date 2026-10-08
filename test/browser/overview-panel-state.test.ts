@@ -192,4 +192,69 @@ describe('panel scroll checkpoints', () => {
       expect(disconnect).toHaveBeenCalledOnce();
     },
   );
+  it.each(['user', 'replace', 'teardown'] as const)(
+    'cleans immediate and revealed image fallbacks before late errors after %s',
+    (reason) => {
+      // Isolate request delivery: Happy DOM can otherwise fail src assignments
+      // automatically before the explicit late-error lifecycle check.
+      const sources = new WeakMap<HTMLImageElement, string>();
+      vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(false);
+      vi.spyOn(HTMLImageElement.prototype, 'src', 'get').mockImplementation(function (
+        this: HTMLImageElement,
+      ) {
+        return sources.get(this) ?? '';
+      });
+      const writes = vi
+        .spyOn(HTMLImageElement.prototype, 'src', 'set')
+        .mockImplementation(function (this: HTMLImageElement, source: string) {
+          sources.set(this, source);
+        });
+      let deliver!: IntersectionObserverCallback;
+      vi.stubGlobal(
+        'IntersectionObserver',
+        class {
+          constructor(callback: IntersectionObserverCallback) {
+            deliver = callback;
+          }
+          observe() {}
+          unobserve() {}
+          disconnect() {}
+        },
+      );
+      const { panel } = setup(
+        posts.slice(0, 4).map((post, index) => ({ ...post, image: `/image-${index}.jpg` })),
+        { placeholderUrl: '/fallback.jpg' },
+      );
+      const images = Array.from(panel.element.querySelectorAll('img'));
+      expect(images.map((image) => image.src)).toEqual(['/image-0.jpg', '/image-1.jpg', '', '']);
+      const reveal = (image: HTMLImageElement) =>
+        deliver(
+          [
+            {
+              target: image,
+              isIntersecting: true,
+              intersectionRatio: 1,
+              boundingClientRect: new DOMRect(0, 0, 96, 72),
+              intersectionRect: new DOMRect(0, 0, 96, 72),
+              rootBounds: null,
+              time: 0,
+            },
+          ],
+          {} as IntersectionObserver,
+        );
+      reveal(images[2]!);
+      expect(images[2]!.src).toBe('/image-2.jpg');
+      panel.destroy(reason);
+      writes.mockClear();
+      images.forEach((image) => image.dispatchEvent(new Event('error')));
+      reveal(images[3]!);
+      expect(images.map((image) => image.src)).toEqual([
+        '/image-0.jpg',
+        '/image-1.jpg',
+        '/image-2.jpg',
+        '',
+      ]);
+      expect(writes).not.toHaveBeenCalled();
+    },
+  );
 });

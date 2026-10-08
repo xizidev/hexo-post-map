@@ -68,8 +68,10 @@ export function renderPostPanel(
     const row = document.createElement('li');
     row.className = 'hpm-post';
     const deferred = index >= immediateImageCount;
-    const image = createPostImage(post, options.placeholderUrl ?? '', { deferred });
+    // Own fallback cleanup for immediate images as well as observer-revealed ones.
+    const image = createPostImage(post, options.placeholderUrl ?? '', { deferred: true });
     if (deferred) deferredImages.push(image);
+    else imageCleanups.push(revealPostImage(image, options.placeholderUrl ?? ''));
     image.className = 'hpm-post__image';
     const details = document.createElement('div');
     details.className = 'hpm-post__body';
