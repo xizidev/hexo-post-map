@@ -313,22 +313,52 @@ async function denyClipboard(page: Page) {
   });
 }
 
-function expectNoExtraData(local: Record<string, number>, allowArticle = false) {
+function expectNoExtraData(local: Record<string, number>, clickedArticlePath?: string) {
   expect(
     Object.keys(local).filter(
-      (path) =>
-        path.includes('/hexo-post-map/tracks/') ||
-        /\.(gpx|geojson)$/u.test(path) ||
-        (!allowArticle && path.includes('/posts/')),
+      (path) => path.includes('/hexo-post-map/tracks/') || /\.(gpx|geojson)$/u.test(path),
     ),
   ).toEqual([]);
+  expect(
+    Object.fromEntries(Object.entries(local).filter(([path]) => path.includes('/posts/'))),
+  ).toEqual(clickedArticlePath ? { [clickedArticlePath]: 1 } : {});
+}
+
+test('article request guard accepts only the one clicked article request', () => {
+  expectNoExtraData({ '/blog/posts/plain/': 1 }, '/blog/posts/plain/');
+});
+
+const extraArticleRequests: { name: string; local: Record<string, number> }[] = [
+  {
+    name: 'another article pathname',
+    local: { '/blog/posts/plain/': 1, '/blog/posts/other/': 1 },
+  },
+  {
+    name: 'a second request with the same pathname (including a different fixture query)',
+    local: { '/blog/posts/plain/': 2 },
+  },
+];
+for (const { name, local } of extraArticleRequests) {
+  test(`article request guard rejects ${name}`, () => {
+    expect(() => expectNoExtraData(local, '/blog/posts/plain/')).toThrow();
+  });
 }
 
 for (const mobile of [false, true]) {
   test.describe(mobile ? 'mobile exploration' : 'desktop exploration', () => {
     test.use({ viewport: mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 } });
 
-    test('returns with view panel and scroll but no stolen focus', async ({ page, network }) => {
+    test('returns with view panel and scroll but no stolen focus', async ({
+      page,
+      context,
+      network,
+    }) => {
+      const articleRequests: string[] = [];
+      context.on('request', (request) => {
+        const url = new URL(request.url());
+        if (url.origin === 'http://127.0.0.1:4179' && url.pathname.includes('/posts/'))
+          articleRequests.push(url.href);
+      });
       await installOverviewExplorationFixture(page, { count: 30, flags });
       await page.addInitScript(() => Reflect.set(window, '__hpmDocumentId', Math.random()));
       await page.goto('/blog/map/');
@@ -342,8 +372,10 @@ for (const mobile of [false, true]) {
       });
       const documentId = await page.evaluate(() => Reflect.get(window, '__hpmDocumentId'));
       const pagePosition = await page.evaluate(() => [scrollX, scrollY]);
+      expectNoExtraData(network.local);
       await clickVisibleArticle(page);
       await expect(page).toHaveURL(/\/blog\/posts\/plain\/\?hpm_fixture=\d+$/u);
+      const clickedArticleUrl = page.url();
       await page.goBack();
       await expect(page.getByRole('dialog')).toBeVisible();
       expect(await page.evaluate(() => Reflect.get(window, '__hpmDocumentId'))).not.toBe(
@@ -361,7 +393,8 @@ for (const mobile of [false, true]) {
           }),
         )
         .toEqual([121.4737, 31.2304, 12.25]);
-      expectNoExtraData(network.local, true);
+      expectNoExtraData(network.local, new URL(clickedArticleUrl).pathname);
+      expect(articleRequests).toEqual([clickedArticleUrl]);
     });
 
     test('clipboard denied is keyboard-operable', async ({ page, network }) => {
