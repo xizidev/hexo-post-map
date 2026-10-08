@@ -1,6 +1,7 @@
 import type { NormalizedPostMap } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
 import type { PublishedTrackAsset } from '../../tracks/types';
+import type { OverviewView } from '../overview/exploration-types';
 
 export interface BrowserProviderConfig {
   readonly provider: 'amap';
@@ -27,6 +28,7 @@ export interface OverviewMapOptions {
   readonly gridSize: number;
   readonly maxZoom: number;
   readonly placeholderUrl: string;
+  readonly initialView?: OverviewView;
   readonly signal?: AbortSignal;
   readonly onError?: () => void;
   readonly onPostSelect: (
@@ -48,6 +50,14 @@ export interface MapHandle {
   destroy(): void;
 }
 
+/** Exploration is available only when the SDK supplies its complete view surface. */
+export interface OverviewMapHandle extends MapHandle {
+  getView?(): OverviewView | undefined;
+  setView?(view: OverviewView, options: { immediately: boolean }): void;
+  focusPost?(post: OverviewPost, zoom: number, options: { immediately: boolean }): void;
+  onViewEnd?(listener: () => void): () => void;
+}
+
 /** Optional fields preserve compatibility until a provider mounts a validated track. */
 export interface DetailMapHandle extends MapHandle {
   readonly hasTrack?: boolean;
@@ -59,7 +69,7 @@ export interface DetailMapProvider {
 }
 
 export interface OverviewMapProvider {
-  mountOverview(container: HTMLElement, options: OverviewMapOptions): Promise<MapHandle>;
+  mountOverview(container: HTMLElement, options: OverviewMapOptions): Promise<OverviewMapHandle>;
 }
 
 export interface MapProvider extends DetailMapProvider, OverviewMapProvider {}

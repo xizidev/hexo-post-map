@@ -135,6 +135,12 @@ class OverviewFakeMap {
   getZoom() {
     return this.zoom;
   }
+  getCenter() {
+    return { getLng: () => 121, getLat: () => 31 };
+  }
+  setZoomAndCenter(zoom: number) {
+    this.zoom = zoom;
+  }
   setBounds = vi.fn();
   setZoom = vi.fn((zoom: number) => {
     this.zoom = zoom;

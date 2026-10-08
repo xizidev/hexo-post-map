@@ -2,15 +2,20 @@ import { safeUrl } from '../../presentation/safe-html';
 import type { OverviewPost } from '../../templates/overview';
 import { sortPosts } from './cluster-decision';
 import { createPostImage, revealPostImage } from './markers';
+import type { PanelScroll } from './exploration-types';
 
 export { createPostImage } from './markers';
 
 let panelSequence = 0;
 const immediateImageCount = 2;
 
+export type PanelCloseReason = 'user' | 'replace' | 'teardown';
+
 export interface PanelHandle {
   readonly element: HTMLElement;
-  destroy(): void;
+  getScroll(): PanelScroll;
+  restoreScroll(scroll: PanelScroll): void;
+  destroy(reason?: PanelCloseReason): void;
 }
 
 export function renderPostPanel(
@@ -22,7 +27,9 @@ export function renderPostPanel(
     origin?: HTMLElement;
     resolveOrigin?: () => HTMLElement | undefined;
     fallback?: HTMLElement;
-    onClose?: () => void;
+    focusOnOpen?: boolean;
+    onScroll?: () => void;
+    onClose?: (reason: PanelCloseReason) => void;
   } = {},
 ): PanelHandle {
   const origin =
@@ -54,6 +61,9 @@ export function renderPostPanel(
   list.className = 'hpm-post-list';
   const deferredImages: HTMLImageElement[] = [];
   const imageCleanups: (() => void)[] = [];
+  const rows: { element: HTMLElement; url?: string }[] = [];
+  const rowsByUrl = new Map<string, HTMLElement>();
+  const ambiguousUrls = new Set<string>();
   for (const [index, post] of sortPosts(posts).entries()) {
     const row = document.createElement('li');
     row.className = 'hpm-post';
@@ -67,6 +77,11 @@ export function renderPostPanel(
     title.className = 'hpm-post__title';
     title.textContent = post.title;
     const url = safeUrl(post.url, 'post');
+    rows.push({ element: row, url: url ? post.url : undefined });
+    if (url) {
+      if (rowsByUrl.has(post.url)) ambiguousUrls.add(post.url);
+      else rowsByUrl.set(post.url, row);
+    }
     const card = document.createElement(url ? 'a' : 'div');
     card.className = 'hpm-post__link';
     if (url) card.setAttribute('href', url);
@@ -104,21 +119,68 @@ export function renderPostPanel(
     );
     deferredImages.forEach((image) => imageObserver?.observe(image));
   } else deferredImages.forEach(loadImage);
-  function destroy() {
+  // Measure ordered row boxes only on checkpoint reads. A scroll event never
+  // scans the list or reveals images; callers can merge their own checkpoints.
+  function getScroll(): PanelScroll {
+    const top = Math.max(0, scroller.scrollTop);
+    if (destroyed || !rows.length) return { top };
+    const viewportTop = scroller.getBoundingClientRect().top + scroller.clientTop;
+    let low = 0;
+    let high = rows.length;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (rows[middle]!.element.getBoundingClientRect().top <= viewportTop) low = middle + 1;
+      else high = middle;
+    }
+    const row = rows[Math.max(0, low - 1)]!;
+    if (!row.url || ambiguousUrls.has(row.url)) return { top };
+    return {
+      top,
+      anchor: { url: row.url, offset: row.element.getBoundingClientRect().top - viewportTop },
+    };
+  }
+  function restoreScroll(scroll: PanelScroll) {
+    if (destroyed) return;
+    let top = Number.isFinite(scroll.top) ? scroll.top : 0;
+    const row =
+      scroll.anchor && !ambiguousUrls.has(scroll.anchor.url)
+        ? rowsByUrl.get(scroll.anchor.url)
+        : undefined;
+    if (row && scroll.anchor && Number.isFinite(scroll.anchor.offset)) {
+      top =
+        row.getBoundingClientRect().top -
+        scroller.getBoundingClientRect().top -
+        scroller.clientTop +
+        scroller.scrollTop -
+        scroll.anchor.offset;
+    }
+    scroller.scrollTop = Math.max(
+      0,
+      Math.min(top, Math.max(0, scroller.scrollHeight - scroller.clientHeight)),
+    );
+  }
+  function onScroll() {
+    if (!destroyed) options.onScroll?.();
+  }
+  function closeByUser() {
+    destroy('user');
+  }
+  function destroy(reason: PanelCloseReason = 'user') {
     if (destroyed) return;
     destroyed = true;
-    const restore = element.contains(document.activeElement);
-    close.removeEventListener('click', destroy);
+    const restore = reason === 'user' && element.contains(document.activeElement);
+    close.removeEventListener('click', closeByUser);
     element.removeEventListener('keydown', onKey);
+    scroller.removeEventListener('scroll', onScroll);
     imageObserver?.disconnect();
     imageCleanups.forEach((cleanup) => cleanup());
     element.remove();
     if (restore) {
       const current = options.resolveOrigin ? options.resolveOrigin() : origin;
       const target = current?.isConnected ? current : options.fallback;
-      if (target?.isConnected) target.focus();
+      if (target?.isConnected) target.focus({ preventScroll: true });
     }
-    options.onClose?.();
+    options.onClose?.(reason);
   }
   function onKey(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
@@ -126,9 +188,10 @@ export function renderPostPanel(
     event.stopPropagation();
     destroy();
   }
-  close.addEventListener('click', destroy);
+  close.addEventListener('click', closeByUser);
   element.addEventListener('keydown', onKey);
+  scroller.addEventListener('scroll', onScroll, { passive: true });
   (options.container ?? document.body).append(element);
-  close.focus();
-  return { element, destroy };
+  if (options.focusOnOpen !== false) close.focus({ preventScroll: true });
+  return { element, getScroll, restoreScroll, destroy };
 }
