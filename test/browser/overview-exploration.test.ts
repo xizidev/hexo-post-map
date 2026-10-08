@@ -10,6 +10,11 @@ import type {
   OverviewView,
 } from '../../src/browser/overview/exploration-types';
 import type { OverviewMapHandle } from '../../src/browser/providers/types';
+import { hydrateOverview } from '../../src/browser/overview/index';
+import {
+  createBrowserRuntime,
+  type BrowserRuntimeOptions,
+} from '../../src/browser/runtime/runtime';
 
 const post = {
   title: 'A',
@@ -25,6 +30,7 @@ function fixture(
   path = '/map/',
   restore = true,
   create = createExplorationController,
+  share = false,
 ) {
   const doc = owner.document as unknown as Document;
   const root = doc.createElement('section');
@@ -49,7 +55,7 @@ function fixture(
     showList,
     overviewUrl: path,
     dataUrl: `${path}posts.json`,
-    flags: { ...flags, restore },
+    flags: { ...flags, restore, share },
     maxZoom: 18,
     posts: [post],
     panel: { read, open },
@@ -92,7 +98,10 @@ function fixture(
     },
   };
 }
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 describe('browser exploration config', () => {
   it('accepts complete safe config and disables old or unsafe projections', () => {
     expect(
@@ -111,7 +120,217 @@ describe('browser exploration config', () => {
       expect(readBrowserExplorationConfig(raw, 'https://example.test')).toBeUndefined();
   });
 });
+
+describe('share runtime ownership', () => {
+  async function runtimeFixture(
+    failMount = false,
+    settings?: {
+      legacy?: boolean;
+      missing?: 'overviewUrl' | 'exploration';
+      flags?: { restore: boolean; share: boolean; random: boolean };
+    },
+  ) {
+    const owner = new Window({ url: 'http://127.0.0.1:4000/blog/map/' });
+    const document = owner.document as unknown as Document;
+    vi.stubGlobal('window', owner);
+    vi.stubGlobal('document', document);
+    const root = document.createElement('section');
+    root.dataset.hpmOverview = '';
+    const canvas = document.createElement('div');
+    canvas.dataset.hpmCanvas = '';
+    const data = document.createElement('script');
+    data.dataset.hpmData = '';
+    const config: Record<string, unknown> = {
+      provider: 'amap',
+      amap: { key: 'public-test-key' },
+      cluster: { gridSize: 72, maxZoom: 18 },
+      dataUrl: '/blog/map/posts.json',
+      placeholderUrl: '/placeholder.svg',
+      overviewUrl: '/blog/map/',
+      exploration: settings?.flags ?? { restore: false, share: true, random: false },
+    };
+    if (settings?.missing) delete config[settings.missing];
+    data.textContent = JSON.stringify(config);
+    root.append(canvas, data);
+    document.body.append(root);
+    const destroyed = vi.fn();
+    const mount = vi.fn(async () => {
+      if (failMount) throw new Error('map failed');
+      if (settings?.legacy) return { destroy: destroyed, setInteractive() {} };
+      return {
+        destroy: destroyed,
+        setInteractive() {},
+        getView: () => ({ center: [121, 31] as const, zoom: 11 }),
+        setView() {},
+        focusPost() {},
+        onViewEnd: () => () => {},
+      };
+    });
+    const runtime = createBrowserRuntime({
+      page: owner as unknown as BrowserRuntimeOptions['page'],
+      document,
+      assetBase: new URL('http://127.0.0.1:4000/assets/'),
+      mutationObserver: null,
+      resources: { ensure: async () => true, isReady: () => true, stop() {} },
+    });
+    runtime.register({
+      id: 'overview',
+      selector: '[data-hpm-overview]',
+      mount: (element) =>
+        hydrateOverview(
+          element,
+          async () => ({ mountOverview: mount }),
+          async () => new Response(JSON.stringify({ version: 1, posts: [post] })),
+        ),
+    });
+    runtime.start();
+    document.dispatchEvent(new owner.Event('DOMContentLoaded') as unknown as Event);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    return { owner, root, runtime, mount, destroyed };
+  }
+  it.each(['toolbar', 'all', 'share', 'status', 'manual', 'input', 'label', 'close'])(
+    'refresh cleans a replaced %s control and remounts one current toolbar',
+    async (part) => {
+      const f = await runtimeFixture();
+      if (['manual', 'input', 'label', 'close'].includes(part)) {
+        Object.defineProperty(f.owner.navigator, 'clipboard', { value: undefined });
+        f.root.querySelector<HTMLButtonElement>('[data-hpm-share]')!.click();
+      }
+      const selectors = {
+        toolbar: '[data-hpm-toolbar]',
+        all: '[data-hpm-show-list]',
+        share: '[data-hpm-share]',
+        status: '[data-hpm-share-status]',
+        manual: '[data-hpm-share-manual]',
+        input: 'input',
+        label: 'label',
+        close: '[data-hpm-share-close]',
+      };
+      const old = f.root.querySelector(selectors[part as keyof typeof selectors])!;
+      expect(old).not.toBeNull();
+      old.replaceWith(old.cloneNode(true));
+      f.runtime.api.refresh(f.root);
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      expect(f.destroyed).toHaveBeenCalledTimes(1);
+      expect(f.mount).toHaveBeenCalledTimes(2);
+      expect(f.root.querySelectorAll('[data-hpm-toolbar]')).toHaveLength(1);
+      expect(f.root.querySelector('[data-hpm-share-manual]')).toBeNull();
+      f.runtime.api.destroy();
+    },
+  );
+  it('keeps a failed map fallback stable on refresh without sharing or implicit provider retries', async () => {
+    const f = await runtimeFixture(true);
+    expect(f.root.dataset.hpmActive).toBe('false');
+    expect(f.root.querySelector('[data-hpm-share]')).toBeNull();
+    f.runtime.api.refresh(f.root);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(f.mount).toHaveBeenCalledTimes(1);
+    f.runtime.api.destroy();
+  });
+  it.each(['overviewUrl', 'exploration'] as const)(
+    'preserves old HTML missing %s without showing new share controls',
+    async (missing) => {
+      const f = await runtimeFixture(false, { missing });
+      expect(f.root.dataset.hpmActive).toBe('true');
+      expect(f.root.querySelector('[data-hpm-share]')).toBeNull();
+      f.runtime.api.destroy();
+    },
+  );
+  it.each([true, false])(
+    'keeps sharing independent of restore=%s and disables it for legacy capabilities',
+    async (restore) => {
+      for (const legacy of [true, false]) {
+        const f = await runtimeFixture(false, {
+          legacy,
+          flags: { restore, share: true, random: false },
+        });
+        expect(f.root.dataset.hpmActive).toBe('true');
+        expect(!!f.root.querySelector('[data-hpm-share]')).toBe(!legacy);
+        f.runtime.api.destroy();
+      }
+    },
+  );
+});
 describe('exploration checkpoints', () => {
+  it('selects a valid explicit share without hydrating storage first', () => {
+    const owner = new Window({
+      url: 'http://127.0.0.1:4000/map/?hpm_v=1&hpm_center=120,30&hpm_zoom=16',
+    });
+    const getter = vi.fn(() => {
+      throw new Error('blocked');
+    });
+    Object.defineProperty(owner, 'sessionStorage', { get: getter });
+    const f = fixture(owner, '/map/', true, createExplorationController, true);
+    expect(f.controller.initialView).toEqual({ center: [120, 30], zoom: 16 });
+    expect(getter).not.toHaveBeenCalled();
+    f.controller.destroy({ save: false });
+  });
+  it('explicit share wins over memory and session before mount and opens single without focus', () => {
+    const owner = new Window({
+      url: 'https://example.test/map/?hpm_v=1&hpm_center=120,30&hpm_zoom=16&hpm_post=%2Fa%2F',
+    });
+    const f = fixture(owner);
+    f.activate();
+    f.view(12);
+    f.panel({ mode: 'all', scroll: { top: 10 } });
+    f.controller.destroy({ save: true });
+    const next = fixture(owner, '/map/', true, createExplorationController, true);
+    expect(next.controller.initialView).toEqual({ center: [120, 30], zoom: 16 });
+    next.activate();
+    expect(next.open).toHaveBeenCalledWith(
+      { mode: 'single', urls: ['/a/'], scroll: { top: 0 } },
+      { focus: false },
+    );
+    next.controller.destroy({ save: false });
+    const freshOwner = new Window({ url: owner.location.href });
+    freshOwner.sessionStorage.setItem(key, owner.sessionStorage.getItem(key)!);
+    const fresh = fixture(freshOwner, '/map/', true, createExplorationController, true);
+    expect(fresh.controller.initialView?.zoom).toBe(16);
+  });
+  it('shares the live view and panel with restore disabled and does not consume a disabled query', () => {
+    const owner = new Window({
+      url: 'https://example.test/map/?hpm_v=1&hpm_center=120,30&hpm_zoom=16',
+    });
+    const disabled = fixture(owner);
+    expect(disabled.controller.initialView).toBeUndefined();
+    disabled.activate();
+    expect(disabled.root.querySelector('[data-hpm-share]')).toBeNull();
+    const f = fixture(owner, '/map/', false, createExplorationController, true);
+    expect(f.root.querySelector('[data-hpm-share]')).toBeNull();
+    f.activate();
+    f.view(14);
+    f.panel({ mode: 'single', urls: ['/a/'], scroll: { top: 88 } });
+    Object.defineProperty(owner.navigator, 'clipboard', { value: undefined });
+    f.root.querySelector<HTMLButtonElement>('[data-hpm-share]')!.click();
+    const url = new URL(f.root.querySelector('input')!.value);
+    expect(url.searchParams.get('hpm_zoom')).toBe('14');
+    expect(url.searchParams.get('hpm_post')).toBe('/a/');
+    expect(f.saved()).toHaveLength(0);
+  });
+  it('ignores explicit query in embedded roots and hides sharing for incomplete capabilities', () => {
+    const owner = new Window({
+      url: 'https://example.test/article/?hpm_v=1&hpm_center=120,30&hpm_zoom=16',
+    });
+    const f = fixture(owner, '/map/', true, createExplorationController, true);
+    expect(f.controller.initialView).toBeUndefined();
+    f.controller.activate({
+      destroy() {},
+      setInteractive() {},
+      getView: () => ({ center: [1, 2], zoom: 3 }),
+    });
+    expect(f.root.querySelector('[data-hpm-share]')).toBeNull();
+  });
+  it('invalidates replaced toolbar/all/share/status identities without rereading them', () => {
+    for (const selector of ['[data-hpm-share]', '[aria-live]', 'button', 'div']) {
+      const f = fixture(undefined, '/map/', true, createExplorationController, true);
+      f.activate();
+      // Fixtures expose the same base toolbar/all nodes used by the coordinator.
+      const toolbar = f.root.children[1]!;
+      const target = selector === 'div' ? toolbar : toolbar.querySelector(selector)!;
+      target.replaceWith(target.cloneNode(true));
+      expect(f.controller.isCurrent()).toBe(false);
+    }
+  });
   it('coalesces saves and preserves an open panel on teardown', () => {
     vi.useFakeTimers();
     const f = fixture();

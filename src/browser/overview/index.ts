@@ -92,7 +92,7 @@ export function hydrateOverview(
   showList.setAttribute('aria-expanded', 'false');
   toolbar.append(showList);
   root.append(toolbar);
-  function isCurrent() {
+  function baseCurrent() {
     return (
       !disposed &&
       root.isConnected &&
@@ -103,6 +103,9 @@ export function hydrateOverview(
       toolbar.querySelector('[data-hpm-show-list]') === showList &&
       toolbar.parentElement === root
     );
+  }
+  function isCurrent() {
+    return baseCurrent() && (failed || !exploration || exploration.isCurrent());
   }
   function fail() {
     if (disposed || failed) return;
@@ -131,6 +134,8 @@ export function hydrateOverview(
     cleanups.forEach((cleanup) => cleanup());
     showList.removeEventListener('click', onList);
     toolbar.remove();
+    // A replaced toolbar is stale plugin UI in this root, too.
+    root.querySelectorAll(':scope > [data-hpm-toolbar]').forEach((element) => element.remove());
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
   }
@@ -262,7 +267,7 @@ export function hydrateOverview(
           maxZoom: config.cluster.maxZoom,
           posts,
           panel: panelPort,
-          isCurrent,
+          isCurrent: baseCurrent,
         });
       const mounted = await provider.mountOverview(canvas!, {
         posts,

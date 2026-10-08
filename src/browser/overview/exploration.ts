@@ -9,6 +9,8 @@ import type {
 import { createPostIndex, hasUrlUserinfo } from './post-index';
 import { createOverviewScope, createSnapshot } from './snapshot';
 import { getDocumentSnapshotCache, type SnapshotCache } from './snapshot-cache';
+import { createOverviewShare, readOverviewShare } from './share';
+import { createShareControls } from './share-controls';
 
 const scopeOwners = new WeakMap<SnapshotCache, Map<string, object>>();
 const ownershipKey = Symbol.for('hexo-post-map.overview-scope-owners.v1');
@@ -110,6 +112,7 @@ export function createExplorationController(options: ExplorationOptions): Explor
   let unsubscribe: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let candidate: OverviewSnapshot | undefined;
+  let shareControls: ReturnType<typeof createShareControls> | undefined;
   const cache = scope ? getDocumentSnapshotCache(owner) : undefined;
   const token = {};
   const owners = cache && ownership(cache);
@@ -119,9 +122,26 @@ export function createExplorationController(options: ExplorationOptions): Explor
     while (owners!.size > 16) owners!.delete(owners!.keys().next().value!);
   }
   const ownsScope = () => !!scope && owners?.get(scope) === token;
-  const current = () => !disposed && options.isCurrent();
+  const baseCurrent = () =>
+    !disposed &&
+    options.isCurrent() &&
+    options.toolbar.parentElement === options.root &&
+    options.toolbar.contains(options.showList);
+  const current = () => baseCurrent() && (!shareControls || shareControls.isCurrent());
+  const shareContext = {
+    origin: owner.location.origin,
+    overviewUrl: options.overviewUrl,
+    maxZoom: options.maxZoom,
+    index,
+  };
+  const shared =
+    current() && options.flags.share
+      ? readOverviewShare(owner.location.href, shareContext)
+      : undefined;
   const initial =
-    scope && current() && options.flags.restore ? cache?.read(scope, context()) : undefined;
+    !shared && scope && current() && options.flags.restore
+      ? cache?.read(scope, context())
+      : undefined;
   if (scope && current() && !options.flags.restore) cache?.remove(scope);
   function capture() {
     if (!current() || !handle || !options.flags.restore || !ownsScope()) return;
@@ -158,7 +178,7 @@ export function createExplorationController(options: ExplorationOptions): Explor
     }
   }
   return {
-    initialView: initial?.view,
+    initialView: shared?.view ?? initial?.view,
     isCurrent: current,
     activate(mounted) {
       if (
@@ -170,7 +190,24 @@ export function createExplorationController(options: ExplorationOptions): Explor
       )
         return;
       handle = mounted;
-      if (initial) options.panel.open(initial.panel, { focus: false });
+      if (shared) {
+        options.panel.open(
+          shared.postUrl
+            ? { mode: 'single', urls: [shared.postUrl], scroll: { top: 0 } }
+            : { mode: 'closed' },
+          { focus: false },
+        );
+      } else if (initial) options.panel.open(initial.panel, { focus: false });
+      if (options.flags.share)
+        shareControls = createShareControls({
+          root: options.root,
+          toolbar: options.toolbar,
+          isCurrent: baseCurrent,
+          getLink: () => {
+            const view = handle?.getView?.();
+            return view ? createOverviewShare(view, options.panel.read(), shareContext) : undefined;
+          },
+        });
       unsubscribe = mounted.onViewEnd!(() => changed());
       owner.addEventListener('pagehide', pagehide);
     },
@@ -184,6 +221,7 @@ export function createExplorationController(options: ExplorationOptions): Explor
         saveCandidate();
       }
       disposed = true;
+      shareControls?.destroy();
       unsubscribe?.();
       owner.removeEventListener('pagehide', pagehide);
     },

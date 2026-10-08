@@ -307,8 +307,11 @@
 }
 
 .hpm-overview__list-toggle,
+.hpm-overview__share,
+.hpm-overview__share-manual button,
 .hpm-panel__close {
-  min-height: 2.75rem;
+  min-width: 44px;
+  min-height: max(44px, 2.75rem);
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--hpm-muted);
   border-radius: 0.35rem;
@@ -327,6 +330,55 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  max-width: calc(100% - 32px);
+  justify-content: flex-end;
+}
+
+.hpm-overview__share-status {
+  flex-basis: 100%;
+  text-align: right;
+  color: var(--hpm-text);
+}
+
+.hpm-overview__share-status:not(:empty) {
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.35rem;
+  background: var(--hpm-card-surface);
+}
+
+.hpm-overview__share-manual {
+  box-sizing: border-box;
+  grid-area: map;
+  position: absolute;
+  z-index: 11;
+  top: 104px;
+  right: 16px;
+  width: min(24rem, calc(100% - 32px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--hpm-panel-border);
+  border-radius: var(--hpm-panel-radius);
+  background: var(--hpm-card-surface);
+  color: var(--hpm-text);
+}
+
+.hpm-overview__share-manual label {
+  grid-column: 1 / -1;
+}
+
+.hpm-overview__share-manual input {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 44px;
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid var(--hpm-muted);
+  border-radius: 0.35rem;
+  background: var(--hpm-surface);
+  color: var(--hpm-text);
+  font: inherit;
 }
 
 .hpm-image-marker {
@@ -595,6 +647,7 @@
 .hpm-detail .hpm-playback input:focus-visible,
 .hpm-overview [data-hpm-canvas]:focus-visible,
 .hpm-overview button:focus-visible,
+.hpm-overview input:focus-visible,
 .hpm-overview a:focus-visible,
 .hpm-panel button:focus-visible,
 .hpm-panel a:focus-visible {
