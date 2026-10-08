@@ -2,6 +2,30 @@
 
 Changes are recorded through release pull requests.
 
+## [0.5.0](https://github.com/xizidev/hexo-post-map/compare/v0.4.0...v0.5.0) (2026-10-08)
+
+
+### Features
+
+* compile privacy-safe track assets ([97e7a55](https://github.com/xizidev/hexo-post-map/commit/97e7a55cd610b18a239f8e8f0d1b5f203f9467d8))
+* finish accessible track playback experience ([4ba6e42](https://github.com/xizidev/hexo-post-map/commit/4ba6e42a1c24b98861793564eb5a61d3e8790b5f))
+* load and control article track playback ([1345563](https://github.com/xizidev/hexo-post-map/commit/13455634bd4a88226441667a1c11b1073b6f5e08))
+* publish hashed article track assets ([6f343a1](https://github.com/xizidev/hexo-post-map/commit/6f343a1f2941b6d5db70399e721f7d99869d652e))
+* render recorded tracks with amap ([67622ae](https://github.com/xizidev/hexo-post-map/commit/67622ae116c4ca1a1bf14defe2c00ea7c3cefe8f))
+* securely parse local track files ([8772b69](https://github.com/xizidev/hexo-post-map/commit/8772b6907c4eae9e6c2890f94e53ae1fe15002fd))
+* validate recorded track front matter ([dcc3863](https://github.com/xizidev/hexo-post-map/commit/dcc3863949b3d14027e72276936f359cdce355c7))
+
+
+### Bug Fixes
+
+* block raw track assets before Hexo route updates ([a35c8bd](https://github.com/xizidev/hexo-post-map/commit/a35c8bdcd01baf785a4ea8ce3da2878d8781f0c5))
+* fence track reads against filesystem races ([909a663](https://github.com/xizidev/hexo-post-map/commit/909a663ee1b216355c7442e2d03ec715b1dd7c1e))
+* isolate and validate amap track rendering ([0362935](https://github.com/xizidev/hexo-post-map/commit/03629351d895f296bda0ad4015a221987855df37))
+* preserve track display mode and failure state ([06130ad](https://github.com/xizidev/hexo-post-map/commit/06130ad284797cc41508dfa1074a34280a82c989))
+* preserve track privacy and generation consistency ([813953a](https://github.com/xizidev/hexo-post-map/commit/813953ae33049be6e91b952bea9eac1c706aa867))
+* trim tracks across the antimeridian ([77e4ce1](https://github.com/xizidev/hexo-post-map/commit/77e4ce1b1f2dc337e590fb4a1c420ba0d89ddd6f))
+* trust compiled tracks and refresh cached post maps ([85e97f0](https://github.com/xizidev/hexo-post-map/commit/85e97f066a2f43a8e505768d9afd2a35e18fa230))
+
 ## [0.4.0](https://github.com/xizidev/hexo-post-map/compare/v0.3.0...v0.4.0) (2026-09-29)
 
 
