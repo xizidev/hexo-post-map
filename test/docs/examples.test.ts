@@ -90,6 +90,7 @@ describe.each(['README.md', 'README.zh-CN.md'])('%s authoring examples', (file) 
       serviceHost: 'https://maps.example.com/_AMapService',
     });
     expect(proxy?.overview.path).toBe('map/');
+    expect(proxy?.overview.exploration).toEqual({ restore: true, share: true, random: false });
     expect(proxy?.post.position).toBe('before');
     const client = resolveConfig(raw, {
       HEXO_POST_MAP_AMAP_KEY: 'example-test-key',

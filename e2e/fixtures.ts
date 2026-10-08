@@ -173,3 +173,46 @@ export const test = base.extend<{
   ],
 });
 export { expect };
+
+export interface ExplorationFlags {
+  readonly restore: boolean;
+  readonly share: boolean;
+  readonly random: boolean;
+}
+
+/** Changes only public fixture HTML/data; runtime and feature scripts remain packed assets. */
+export async function installOverviewExplorationFixture(
+  page: Page,
+  options: { count: number; flags: ExplorationFlags },
+): Promise<void> {
+  await page.route('**/blog/map/**', async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/blog/map/posts.json') {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          version: 1,
+          posts: Array.from({ length: options.count }, (_, index) => ({
+            title: `Exploration article ${index}`,
+            url: `/blog/posts/plain/?hpm_fixture=${index}`,
+            date: '2024-01-01',
+            image: '/blog/hexo-post-map/assets/placeholder.svg',
+            location: { name: `Place ${index}`, longitude: 118 + index / 10000, latitude: 32 },
+          })),
+        }),
+      });
+      return;
+    }
+    if (path !== '/blog/map/' && path !== '/blog/map/index.html') {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const body = (await response.text()).replace(
+      /(<script type="application\/json" data-hpm-data>)([\s\S]*?)(<\/script>)/u,
+      (_all, start: string, json: string, end: string) =>
+        start + JSON.stringify({ ...JSON.parse(json), exploration: options.flags }) + end,
+    );
+    await route.fulfill({ response, body });
+  });
+}

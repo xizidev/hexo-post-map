@@ -3,6 +3,7 @@ import {
   expect,
   fireAnimationFrame,
   installControlledAnimationFrames,
+  installOverviewExplorationFixture,
   installTrackedPage,
   pendingAnimationFrames,
   test,
@@ -18,6 +19,168 @@ async function tabTo(page: Page, target: Locator) {
     if (await target.evaluate((element) => element === document.activeElement)) return;
   }
   await expect(target).toBeFocused();
+}
+
+for (const viewport of [
+  { width: 1280, height: 900 },
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+  { width: 320, height: 480 },
+]) {
+  for (const mode of ['all', 'single'] as const) {
+    for (const forced of [false, true]) {
+      test(`manual sharing is visible and operable with an open ${mode} panel at ${viewport.width}x${viewport.height} ${forced ? 'forced colors' : 'normal colors'}`, async ({
+        page,
+      }) => {
+        await page.setViewportSize(viewport);
+        await page.emulateMedia({
+          forcedColors: forced ? 'active' : 'none',
+          reducedMotion: 'reduce',
+        });
+        await installOverviewExplorationFixture(page, {
+          count: 30,
+          flags: { restore: true, share: true, random: true },
+        });
+        await page.addInitScript(() => {
+          Object.defineProperty(navigator, 'clipboard', { value: undefined });
+          Math.random = () => 0;
+        });
+        await page.goto('/blog/map/');
+        await page.getByRole('button', { name: mode === 'all' ? /^全部文章/ : '随机一站' }).click();
+        const panel = page.getByRole('dialog');
+        await expect(panel).toBeVisible();
+        const preview = await panel.elementHandle();
+        const canvas = page.locator('[data-hpm-canvas]');
+        const before = (await canvas.boundingBox())!;
+        const share = page.getByRole('button', { name: '分享地图' });
+        await share.click();
+        const input = page.getByRole('textbox', { name: '地图分享链接（请手动复制）' });
+        await expect(input).toBeFocused();
+        if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+          await page.screenshot({
+            path: `.superpowers/sdd/2026-10-08-overview-exploration/output/playwright/manual-open-${viewport.width}-${viewport.height}-${mode}${forced ? '-forced' : ''}.png`,
+          });
+        // Native visibility requires the whole input and close target to survive stacking,
+        // not only CSS visibility or programmatic focus behind another surface.
+        for (const target of [input, page.locator('[data-hpm-share-close]')]) {
+          const bounds = (await target.boundingBox())!;
+          expect(bounds.width).toBeGreaterThanOrEqual(44);
+          expect(bounds.height).toBeGreaterThanOrEqual(44);
+          expect(
+            await target.evaluate((node) => {
+              const box = node.getBoundingClientRect();
+              return [
+                [box.left + 2, box.top + 2],
+                [box.right - 2, box.top + 2],
+                [box.left + 2, box.bottom - 2],
+                [box.right - 2, box.bottom - 2],
+                [box.x + box.width / 2, box.y + box.height / 2],
+              ].every(([x, y]) => node.contains(document.elementFromPoint(x!, y!)));
+            }),
+          ).toBe(true);
+        }
+        await input.click();
+        await expect(input).toBeFocused();
+        await page.keyboard.press('Tab');
+        await expect(page.locator('[data-hpm-share-close]')).toBeFocused();
+        await page.locator('[data-hpm-share-close]').click();
+        await expect(input).toHaveCount(0);
+        await expect(share).toBeFocused();
+        await expect(panel).toBeVisible();
+        expect(
+          await preview!.evaluate((node) => node === document.querySelector('.hpm-panel')),
+        ).toBe(true);
+        const after = (await canvas.boundingBox())!;
+        for (const key of ['x', 'y', 'width', 'height'] as const)
+          expect(Math.abs(after[key] - before[key]), key).toBeLessThanOrEqual(1);
+        const panelClose = page.getByRole('button', { name: '关闭文章面板' });
+        // Circular close targets have intentionally empty corner pixels: check the center.
+        expect(
+          await panelClose.evaluate((node) => {
+            const box = node.getBoundingClientRect();
+            return node.contains(
+              document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+            );
+          }),
+        ).toBe(true);
+        await panelClose.click();
+        await expect(panel).toHaveCount(0);
+        await preview!.dispose();
+      });
+    }
+  }
+}
+
+for (const mobile of [false, true]) {
+  test(`exploration targets and manual copy remain usable with forced colors on ${mobile ? 'mobile' : 'desktop'}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
+    await installOverviewExplorationFixture(page, {
+      count: 30,
+      flags: { restore: true, share: true, random: true },
+    });
+    await page.addInitScript(() =>
+      Object.defineProperty(navigator, 'clipboard', { value: undefined }),
+    );
+    await page.goto('/blog/map/');
+    const share = page.getByRole('button', { name: '分享地图' });
+    await tabTo(page, share);
+    await expect(share).toHaveCSS('outline-width', '3px');
+    const folder = '.superpowers/sdd/2026-10-08-overview-exploration/output/playwright';
+    if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+      await page.screenshot({ path: `${folder}/${mobile ? 'mobile' : 'desktop'}-overview.png` });
+    await page.keyboard.press('Enter');
+    const input = page.getByRole('textbox', { name: '地图分享链接（请手动复制）' });
+    await expect(input).toBeFocused();
+    if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+      await page.screenshot({ path: `${folder}/${mobile ? 'mobile' : 'desktop'}-manual.png` });
+    await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+    for (const selector of [
+      '[data-hpm-show-list]',
+      '[data-hpm-share]',
+      '[data-hpm-random]',
+      '[data-hpm-share-close]',
+      '[data-hpm-share-manual] input',
+    ]) {
+      const box = (await page.locator(selector).boundingBox())!;
+      expect(box.width, selector).toBeGreaterThanOrEqual(44);
+      expect(box.height, selector).toBeGreaterThanOrEqual(44);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+    ).toBeLessThanOrEqual(0);
+    if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+      await page.screenshot({
+        path: `${folder}/${mobile ? 'mobile' : 'desktop'}-manual-forced-colors.png`,
+      });
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /^全部文章/ }).click();
+    const close = page.getByRole('button', { name: '关闭文章面板' });
+    await expect(close).toBeFocused();
+    if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+      await page.screenshot({
+        path: `${folder}/${mobile ? 'mobile' : 'desktop'}-panel-forced-colors.png`,
+      });
+    const closeBox = (await close.boundingBox())!;
+    expect(closeBox.width).toBeGreaterThanOrEqual(44);
+    expect(closeBox.height).toBeGreaterThanOrEqual(44);
+    // Check hit testing, which catches an overlapping toolbar even when boxes are large.
+    expect(
+      await close.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return node.contains(
+          document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+        );
+      }),
+    ).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: /^全部文章/ })).toBeFocused();
+    // A deterministic SDK does not render vendor attribution; reserve its actual corner footprint.
+    const toolbar = (await page.locator('[data-hpm-toolbar]').boundingBox())!;
+    const canvas = (await page.locator('[data-hpm-canvas]').boundingBox())!;
+    expect(toolbar.y + toolbar.height).toBeLessThan(canvas.y + canvas.height - 20);
+  });
 }
 
 test.describe('without JavaScript', () => {

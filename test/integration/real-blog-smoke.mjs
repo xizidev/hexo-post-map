@@ -324,6 +324,20 @@ async function verifyGenerated(site, root) {
   assert.ok(overview.includes('data-hpm-overview'));
   assert.ok(overview.includes(`${root}map/posts.json`));
   assert.ok(overview.includes(`href="${root}${articleRoute}"`));
+  const overviewWindow = new Window({
+    settings: {
+      disableJavaScriptEvaluation: true,
+      disableJavaScriptFileLoading: true,
+      disableCSSFileLoading: true,
+    },
+  });
+  overviewWindow.document.write(overview);
+  const overviewConfig = JSON.parse(
+    overviewWindow.document.querySelector('[data-hpm-data]').textContent,
+  );
+  assert.equal(overviewConfig.overviewUrl, `${root}map/`);
+  assert.equal(overviewConfig.dataUrl, `${root}map/posts.json`);
+  assert.deepEqual(overviewConfig.exploration, { restore: true, share: true, random: false });
   assert.ok(detail.includes(`href="${root}map/"`), 'Cactus map navigation does not respect root');
   const trackedDetail = await readFile(join(output, trackArticleRoute, 'index.html'), 'utf8');
   const trackedWindow = new Window({
@@ -522,6 +536,9 @@ async function browserSmoke(site, root, ordinaryRoute, trackUrl) {
     const origin = `http://127.0.0.1:${server.address().port}`;
     browser = await chromium.launch({ channel: 'chromium' });
     const context = await browser.newContext({ serviceWorkers: 'block' });
+    await context.addInitScript(() =>
+      Object.defineProperty(navigator, 'clipboard', { value: undefined }),
+    );
     let sdkRequests = 0;
     const local = {};
     await context.route('**/*', async (route) => {
@@ -608,6 +625,34 @@ async function browserSmoke(site, root, ordinaryRoute, trackUrl) {
 
     await page.goto(`${origin}${root}map/`, { waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-hpm-overview]')).toHaveAttribute('data-hpm-active', 'true');
+    await expect(page.getByRole('button', { name: '分享地图' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '随机一站' })).toHaveCount(0);
+    await page.evaluate(() =>
+      Reflect.get(window, '__hpmSdk').maps[0].setZoomAndCenter(12, [121.4737, 31.2304], true),
+    );
+    // View changes redraw existing markers: finish their image loads before isolating sharing.
+    await expect
+      .poll(() =>
+        page
+          .locator('[data-hpm-canvas] img')
+          .evaluateAll(
+            (images) =>
+              images.length > 0 &&
+              images.every((image) => image.complete && image.naturalWidth > 0),
+          ),
+      )
+      .toBe(true);
+    const beforeShare = { ...local };
+    await page.getByRole('button', { name: '分享地图' }).click();
+    const copy = page.getByRole('textbox', { name: '地图分享链接（请手动复制）' });
+    await expect(copy).toBeFocused();
+    const shared = new URL(await copy.inputValue());
+    assert.equal(shared.origin, origin);
+    assert.equal(shared.pathname, `${root}map/`);
+    assert.deepEqual([...shared.searchParams.keys()], ['hpm_v', 'hpm_center', 'hpm_zoom']);
+    assert.ok(!shared.href.includes(smokeKey) && !shared.href.includes(smokeCode));
+    assert.deepEqual(local, beforeShare, 'Sharing must not request article or track data');
+    await page.keyboard.press('Escape');
     await page.getByRole('button', { name: '全部文章 2', exact: true }).click();
     const preview = page.getByRole('dialog', { name: '2 篇文章' });
     const shanghaiCard = preview.locator('a').filter({ hasText: '魔都' });
@@ -621,6 +666,17 @@ async function browserSmoke(site, root, ordinaryRoute, trackUrl) {
     await expect(page).toHaveURL(`${origin}${root}${articleRoute}`);
     await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true');
     assert.equal(sdkRequests, 5, 'One SDK request per full document, shared by PJAX roots');
+    await page.goBack();
+    await expect(page.getByRole('dialog', { name: '2 篇文章' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '关闭文章面板' })).not.toBeFocused();
+    assert.deepEqual(
+      await page.evaluate(() => {
+        const map = Reflect.get(window, '__hpmSdk').maps[0];
+        return [map.getCenter().getLng(), map.getCenter().getLat(), map.getZoom()];
+      }),
+      [121.4737, 31.2304, 12],
+    );
+    assert.equal(sdkRequests, 6, 'Full-document return must hydrate one fresh SDK map');
   } finally {
     if (browser) await browser.close();
     server.closeAllConnections();

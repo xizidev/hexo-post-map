@@ -4,6 +4,7 @@ import {
   fireAnimationFrame,
   fireCancelledAnimationFrames,
   installControlledAnimationFrames,
+  installOverviewExplorationFixture,
   installTrackedPage,
   pendingAnimationFrames,
   test,
@@ -32,6 +33,87 @@ async function replaceHostFrom(page: Page, path: string) {
 async function clearHost(page: Page) {
   await page.locator('#pjax-test-host').evaluate((host) => host.replaceChildren());
 }
+
+test('ordinary-page query is ignored and PJAX return restores the latest panel', async ({
+  page,
+  network,
+}) => {
+  await installOverviewExplorationFixture(page, {
+    count: 30,
+    flags: { restore: true, share: true, random: true },
+  });
+  await page.goto(
+    '/blog/posts/plain/?hpm_v=1&hpm_center=121,31&hpm_zoom=12&hpm_post=javascript:alert(1)',
+  );
+  await replaceHostFrom(page, '/blog/map/');
+  await expect(page.getByRole('button', { name: '分享地图' })).toBeVisible();
+  expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps[0].getZoom())).toBe(4);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await page.evaluate(() =>
+    Reflect.get(window, '__hpmSdk').maps[0].setZoomAndCenter(10, [118, 32], true),
+  );
+  await page.getByRole('button', { name: /^全部文章/ }).evaluate((button) => {
+    button.addEventListener(
+      'click',
+      () => Reflect.set(window, '__panelOpenedAt', performance.now()),
+      { once: true },
+    );
+  });
+  await page.getByRole('button', { name: /^全部文章/ }).click();
+  const receipt = await page.locator('.hpm-panel__scroller').evaluate(
+    (node) =>
+      new Promise<{ trusted: boolean; scrollDelay: number; sinceOpen: number; top: number }>(
+        (resolve) => {
+          const started = performance.now();
+          node.addEventListener(
+            'scroll',
+            (event) => {
+              // Register after the controller: its native scroll listener receives the position first.
+              const received = performance.now();
+              const top = node.scrollTop;
+              document.querySelector('#pjax-test-host')!.replaceChildren();
+              resolve({
+                trusted: event.isTrusted,
+                scrollDelay: received - started,
+                sinceOpen: received - Reflect.get(window, '__panelOpenedAt'),
+                top,
+              });
+            },
+            { once: true },
+          );
+          node.scrollTop = 400;
+        },
+      ),
+  );
+  expect(receipt.trusted).toBe(true);
+  expect(receipt.top).toBe(400);
+  expect(receipt.scrollDelay).toBeLessThan(200);
+  expect(receipt.sinceOpen).toBeLessThan(200);
+  console.info(`PJAX native scroll receipt/removal: ${JSON.stringify(receipt)}`);
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, '__hpmSdk').destroyedMaps))
+    .toBe(1);
+  await replaceHostFrom(page, '/blog/map/');
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await expect
+    .poll(() => page.locator('.hpm-panel__scroller').evaluate((node) => node.scrollTop))
+    .toBe(400);
+  await expect(page.getByRole('button', { name: '关闭文章面板' })).not.toBeFocused();
+  expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.at(-1).getZoom())).toBe(10);
+  const before = await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.length);
+  await page.evaluate(() => {
+    // Simulate a theme's URL-only transition; unchanged roots are not a routing API.
+    history.replaceState({ theme: true }, '', '/blog/map/?hpm_v=1&hpm_center=121,31&hpm_zoom=15');
+    Reflect.get(window, 'HexoPostMap').refresh();
+  });
+  expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.length)).toBe(before);
+  expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.at(-1).getZoom())).toBe(10);
+  expect(
+    Object.keys(network.local).filter(
+      (path) => path.includes('/tracks/') || /\.(gpx|geojson)$/u.test(path),
+    ),
+  ).toEqual([]);
+});
 
 async function observeTrackAbortWithoutCancellingTransport(page: Page) {
   await page.addInitScript((trackPath) => {

@@ -10,6 +10,8 @@ Map loading contacts AMap and may reveal ordinary request metadata such as the v
 
 ## Overview share URL boundary
 
+Return snapshots store only the validated view, panel mode, bounded article URL references, scroll state, and save time under the plugin's own session key. They expire after two hours, retain at most 16 scopes and 16 KiB per snapshot, and are not account bookmarks. The plugin does not use localStorage, cookies, geolocation, analytics, or storage-wide clearing. Blocked or throwing session storage falls back to bounded document memory; no storage permission request is made. Sharing and random previews do not request article bodies, raw GPX/GeoJSON, or track assets.
+
 Sharing works on generated overview pages and tag-embedded overviews, always linking to the configured overview route at the current browser origin (including `/` and `/blog/` installations). Only the actual overview route and its literal terminal `index.html` alias consume incoming shares; embedded article maps ignore their host query. `share: false` skips query parsing independently of `restore`.
 
 Version 1 publishes only `hpm_v=1`, `hpm_center`, `hpm_zoom`, and an optional `hpm_post`. Generated center/zoom precision is at most six/two decimals and the complete URL is limited to 4,096 characters. Parsing rejects duplicate or unknown `hpm_` keys, unsupported versions, nonfinite/invalid views, foreign origins, and other routes. Article references are decoded once by URLSearchParams and must exactly match a unique safe URL in the current dataset; unknown, ambiguous, malicious, or overlong references degrade to view-only. Query text never becomes a new href, fetch target, SDK configuration, or image/track resource. Output excludes Web Key, security code, proxy settings, article body, images, and tracks.
@@ -29,6 +31,8 @@ Start/end distance trimming happens before statistics, simplification, and hashi
 Processed track JSON and its statistics are public static files. A content-addressed asset is suitable for a long immutable cache, so deletion from a later build does not retract copies already cached by a CDN, browser, archive, or reader. Treat the first publication as permanent disclosure and use a new source/trim configuration to create a new hash. Removing old hashes from storage is an operational cleanup, not a privacy guarantee.
 
 ## AMap setup
+
+The plugin is free under MIT. Its license does not grant AMap service access or override the provider's account, quota, security, or commercial-use conditions; verify those conditions for your deployment. Exploration adds no paid API or backend.
 
 Obtain a Web/JS API key and configure the allowed deployment domains in your provider account. Production deployments should use a security proxy. AMap's [security guide](https://lbs.amap.com/api/javascript-api-v2/guide/abc/jscode) documents `serviceHost`, the fixed `/_AMapService` prefix, and proxying to `restapi.amap.com` (plus `webapi.amap.com` for custom styles). This plugin requires the browser-facing proxy URL to be HTTPS and does not operate the proxy for you. Restrict your proxy to the intended service paths and add suitable access and rate controls.
 
