@@ -97,7 +97,7 @@ export interface ExplorationOptions {
 export interface ExplorationController {
   readonly initialView?: OverviewView;
   activate(handle: OverviewMapHandle): void;
-  changed(options?: { scroll?: boolean }): void;
+  changed(options?: { scroll?: boolean; top?: number }): void;
   isCurrent(): boolean;
   destroy(options: { save: boolean }): void;
 }
@@ -168,16 +168,33 @@ export function createExplorationController(options: ExplorationOptions): Explor
     capture();
     saveCandidate();
   }
-  function scheduleCheckpoint(event?: { scroll?: boolean }) {
+  function scheduleCheckpoint(event?: { scroll?: boolean; top?: number }) {
     if (!current() || !handle || !options.flags.restore || !ownsScope()) return;
     if (!event?.scroll) capture();
+    else if (
+      candidate &&
+      candidate.panel.mode !== 'closed' &&
+      typeof event.top === 'number' &&
+      Number.isFinite(event.top) &&
+      event.top >= 0 &&
+      event.top <= 1_000_000
+    ) {
+      // A delivered event knows the pixel position even if PJAX removes the
+      // panel before the checkpoint. The old anchor is no longer measured at
+      // this position; retain only pixels without geometry or encoding here.
+      candidate = {
+        ...candidate,
+        savedAt: Date.now(),
+        panel: { ...candidate.panel, scroll: { top: event.top } },
+      };
+    }
     if (timer !== undefined) return;
     timer = setTimeout(() => {
       timer = undefined;
       checkpoint();
     }, 200);
   }
-  function changed(event?: { scroll?: boolean }) {
+  function changed(event?: { scroll?: boolean; top?: number }) {
     if (!event?.scroll) operation++;
     scheduleCheckpoint(event);
   }

@@ -28,7 +28,7 @@ export function renderPostPanel(
     resolveOrigin?: () => HTMLElement | undefined;
     fallback?: HTMLElement;
     focusOnOpen?: boolean;
-    onScroll?: () => void;
+    onScroll?: (top: number) => void;
     onClose?: (reason: PanelCloseReason) => void;
   } = {},
 ): PanelHandle {
@@ -162,7 +162,7 @@ export function renderPostPanel(
     );
   }
   function onScroll() {
-    if (!destroyed) options.onScroll?.();
+    if (!destroyed && element.isConnected) options.onScroll?.(scroller.scrollTop);
   }
   function closeByUser() {
     destroy('user');

@@ -245,6 +245,19 @@ describe('share runtime ownership', () => {
     expect(f.mount).toHaveBeenCalledTimes(1);
     f.runtime.api.destroy();
   });
+  it('passes a received panel scroll through index before immediate root removal', async () => {
+    const f = await runtimeFixture(false, {
+      flags: { restore: true, share: true, random: true },
+    });
+    f.root.querySelector<HTMLButtonElement>('[data-hpm-show-list]')!.click();
+    const scroller = f.root.querySelector<HTMLElement>('.hpm-panel__scroller')!;
+    scroller.scrollTop = 400;
+    scroller.dispatchEvent(new f.owner.Event('scroll') as unknown as Event);
+    f.root.remove();
+    f.runtime.api.destroy();
+    const saved = JSON.parse(f.owner.sessionStorage.getItem(key)!);
+    expect(saved.scopes[0].snapshot.panel).toEqual({ mode: 'all', scroll: { top: 400 } });
+  });
   it('opens a real article preview and returns user-close focus to the random button', async () => {
     const f = await runtimeFixture(false, {
       flags: { restore: false, share: true, random: true },
@@ -712,6 +725,88 @@ describe('exploration checkpoints', () => {
     vi.advanceTimersByTime(1);
     expect(f.read).toHaveBeenCalledTimes(1);
     f.controller.destroy({ save: false });
+  });
+  it.each(['all', 'single', 'group'] as const)(
+    'preserves received %s scroll without stale anchors on removal before 200ms',
+    (mode) => {
+      vi.useFakeTimers();
+      const f = fixture();
+      f.activate();
+      const scroll = { top: 30, anchor: { url: '/a/', offset: -2 } };
+      f.panel(mode === 'all' ? { mode, scroll } : { mode, urls: ['/a/'], scroll });
+      f.read.mockClear();
+      const encode = vi.spyOn(TextEncoder.prototype, 'encode');
+      const serialize = vi.spyOn(JSON, 'stringify');
+      const write = vi.spyOn(f.owner.sessionStorage, 'setItem');
+      f.controller.changed({ scroll: true, top: 250 });
+      f.controller.changed({ scroll: true, top: 400 });
+      vi.advanceTimersByTime(199);
+      expect(f.read).not.toHaveBeenCalled();
+      expect(encode).not.toHaveBeenCalled();
+      expect(serialize).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+      f.root.remove();
+      f.invalidate();
+      f.controller.destroy({ save: true });
+      const panel = f.saved()[0].snapshot.panel;
+      expect(panel.mode).toBe(mode);
+      expect(panel.scroll).toEqual({ top: 400 });
+      expect(f.read).not.toHaveBeenCalled();
+    },
+  );
+  it.each([NaN, Infinity, -1, 1_000_001, null, '400'])(
+    'ignores invalid raw scroll payload %j',
+    (top) => {
+      const f = fixture();
+      f.activate();
+      f.panel({ mode: 'all', scroll: { top: 30, anchor: { url: '/a/', offset: -2 } } });
+      f.controller.changed({ scroll: true, top: top as number });
+      f.root.remove();
+      f.invalidate();
+      f.controller.destroy({ save: true });
+      expect(f.saved()[0].snapshot.panel.scroll).toEqual({
+        top: 30,
+        anchor: { url: '/a/', offset: -2 },
+      });
+    },
+  );
+  it('accepts bounded raw scroll edges and ignores late disconnected/disposed payloads', () => {
+    const f = fixture();
+    f.activate();
+    f.panel({ mode: 'all', scroll: { top: 30 } });
+    f.controller.changed({ scroll: true, top: 0 });
+    f.controller.changed({ scroll: true, top: 1_000_000 });
+    f.root.remove();
+    f.invalidate();
+    f.controller.changed({ scroll: true, top: 900 });
+    f.controller.destroy({ save: true });
+    f.controller.changed({ scroll: true, top: 800 });
+    expect(f.saved()[0].snapshot.panel.scroll).toEqual({ top: 1_000_000 });
+  });
+  it('does not reopen a closed panel or overwrite a newer scope on late scroll', () => {
+    const f = fixture();
+    f.activate();
+    f.panel({ mode: 'closed' });
+    f.controller.changed({ scroll: true, top: 400 });
+    f.root.remove();
+    f.invalidate();
+    f.controller.destroy({ save: true });
+    expect(f.saved()[0].snapshot.panel).toEqual({ mode: 'closed' });
+    const old = fixture(f.owner);
+    old.activate();
+    old.panel({ mode: 'all', scroll: { top: 20 } });
+    const next = fixture(f.owner);
+    next.activate();
+    next.panel({ mode: 'all', scroll: { top: 70 } });
+    next.controller.changed({ scroll: true, top: 80 });
+    old.controller.changed({ scroll: true, top: 900 });
+    next.root.remove();
+    next.invalidate();
+    next.controller.destroy({ save: true });
+    old.root.remove();
+    old.invalidate();
+    old.controller.destroy({ save: true });
+    expect(f.saved()[0].snapshot.panel.scroll).toEqual({ top: 80 });
   });
   it('clears only this scope when restore is false', () => {
     const f = fixture();

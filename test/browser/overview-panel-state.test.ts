@@ -116,6 +116,8 @@ describe('panel scroll checkpoints', () => {
     scroller.scrollTop = 54321;
     for (let i = 0; i < 25; i++) scroller.dispatchEvent(new Event('scroll'));
     expect(onScroll).toHaveBeenCalledTimes(25);
+    expect(onScroll).toHaveBeenLastCalledWith(54321);
+    expect(scroller.getBoundingClientRect).not.toHaveBeenCalled();
     expect(measurements.reduce((sum, spy) => sum + spy.mock.calls.length, 0)).toBe(0);
     expect(panel.getScroll?.()).toEqual({
       top: 54321,
@@ -126,6 +128,15 @@ describe('panel scroll checkpoints', () => {
     );
     expect(Array.from(panel.element.querySelectorAll('img'))).toEqual(images);
     expect(images.filter((image) => image.hasAttribute('src'))).toHaveLength(2);
+  });
+  it('ignores scroll delivery after the panel is disconnected before teardown', () => {
+    const onScroll = vi.fn();
+    const { panel, scroller, measurements } = setup(posts, { onScroll });
+    panel.element.remove();
+    scroller.scrollTop = 400;
+    scroller.dispatchEvent(new Event('scroll'));
+    expect(onScroll).not.toHaveBeenCalled();
+    expect(measurements.every((measurement) => measurement.mock.calls.length === 0)).toBe(true);
   });
   it('uses row boxes for content-visibility without measuring hidden card contents', () => {
     const { panel, scroller, rows } = setup();

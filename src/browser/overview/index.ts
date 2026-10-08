@@ -193,7 +193,7 @@ export function hydrateOverview(
         resolveOrigin,
         fallback: canvas ?? undefined,
         focusOnOpen: focus,
-        onScroll: () => exploration?.changed({ scroll: true }),
+        onScroll: (top) => exploration?.changed({ scroll: true, top }),
         onClose: (reason) => {
           if (origin === showList) {
             showList.setAttribute('aria-expanded', 'false');
