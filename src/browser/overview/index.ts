@@ -3,7 +3,7 @@ import type { OverviewPost } from '../../templates/overview';
 import type {
   BrowserProviderConfig,
   FocusOriginResolver,
-  MapHandle,
+  OverviewMapHandle,
   OverviewProviderLoader,
 } from '../providers/types';
 import { registerRuntimeHydrator } from '../runtime/bridge';
@@ -12,6 +12,13 @@ import { setStatus, showFallback } from '../shared/dom';
 import { installImageFallback } from './markers';
 import { renderPostPanel, type PanelHandle } from './panel';
 import { loadOverviewProvider } from './provider-loader';
+import {
+  createExplorationController,
+  readBrowserExplorationConfig,
+  type ExplorationController,
+  type OverviewPanelPort,
+} from './exploration';
+import type { OverviewPanelState } from './exploration-types';
 
 interface OverviewConfig extends BrowserProviderConfig {
   dataUrl: string;
@@ -62,7 +69,9 @@ export function hydrateOverview(
   const controller = { destroy, isCurrent };
   registry.set(root, controller);
   const abort = new AbortController();
-  let handle: MapHandle | undefined;
+  let handle: OverviewMapHandle | undefined;
+  let exploration: ExplorationController | undefined;
+  let panelState: OverviewPanelState = { mode: 'closed' };
   let panel: PanelHandle | undefined;
   let posts: readonly OverviewPost[] = [];
   let disposed = false;
@@ -70,6 +79,10 @@ export function hydrateOverview(
   const cleanups: (() => void)[] = [];
   const canvas = root.querySelector<HTMLElement>('[data-hpm-canvas]');
   const data = root.querySelector('[data-hpm-data]');
+  const dataText = data?.textContent;
+  const toolbar = document.createElement('div');
+  toolbar.className = 'hpm-overview__toolbar';
+  toolbar.dataset.hpmToolbar = '';
   const showList = document.createElement('button');
   showList.type = 'button';
   showList.className = 'hpm-overview__list-toggle';
@@ -77,19 +90,26 @@ export function hydrateOverview(
   showList.textContent = '全部文章 0';
   showList.hidden = true;
   showList.setAttribute('aria-expanded', 'false');
+  toolbar.append(showList);
+  root.append(toolbar);
   function isCurrent() {
     return (
       !disposed &&
       root.isConnected &&
       root.querySelector('[data-hpm-canvas]') === canvas &&
-      root.querySelector('[data-hpm-data]') === data
+      root.querySelector('[data-hpm-data]') === data &&
+      data?.textContent === dataText &&
+      root.querySelector('[data-hpm-toolbar]') === toolbar &&
+      toolbar.querySelector('[data-hpm-show-list]') === showList &&
+      toolbar.parentElement === root
     );
   }
   function fail() {
     if (disposed || failed) return;
     failed = true;
     abort.abort();
-    panel?.destroy();
+    exploration?.destroy({ save: false });
+    panel?.destroy('teardown');
     handle?.destroy();
     root.dataset.hpmActive = 'false';
     showList.hidden = true;
@@ -102,14 +122,15 @@ export function hydrateOverview(
   };
   function destroy() {
     if (disposed) return;
+    exploration?.destroy({ save: !failed });
     disposed = true;
     if (registry.get(root) === controller) registry.delete(root);
     abort.abort();
-    panel?.destroy();
+    panel?.destroy('teardown');
     handle?.destroy();
     cleanups.forEach((cleanup) => cleanup());
     showList.removeEventListener('click', onList);
-    showList.remove();
+    toolbar.remove();
     root.dataset.hpmActive = 'false';
     showFallback(root, true);
   }
@@ -133,7 +154,6 @@ export function hydrateOverview(
       throw new Error('Invalid map configuration');
     canvas.tabIndex = -1;
     canvas.setAttribute('aria-label', '文章地图');
-    root.append(showList);
     root
       .querySelectorAll<HTMLImageElement>('[data-hpm-image]')
       .forEach((image) => cleanups.push(installImageFallback(image, config.placeholderUrl)));
@@ -146,9 +166,18 @@ export function hydrateOverview(
     posts: readonly OverviewPost[],
     origin: HTMLElement,
     resolveOrigin?: FocusOriginResolver,
+    focus = true,
+    restored?: OverviewPanelState,
   ) {
-    if (disposed || failed) return;
-    panel?.destroy();
+    if (!isCurrent() || failed) return;
+    panel?.destroy('replace');
+    panelState =
+      restored ??
+      (origin === showList
+        ? { mode: 'all', scroll: { top: 0 } }
+        : posts.length === 1
+          ? { mode: 'single', urls: [posts[0]!.url], scroll: { top: 0 } }
+          : { mode: 'group', urls: posts.map((post) => post.url), scroll: { top: 0 } });
     panel = renderPostPanel(
       posts,
       window.matchMedia?.('(max-width: 600px)').matches ? 'mobile' : 'desktop',
@@ -158,28 +187,59 @@ export function hydrateOverview(
         origin,
         resolveOrigin,
         fallback: canvas ?? undefined,
-        onClose: () => {
+        focusOnOpen: focus,
+        onScroll: () => exploration?.changed({ scroll: true }),
+        onClose: (reason) => {
           if (origin === showList) {
             showList.setAttribute('aria-expanded', 'false');
             showList.removeAttribute('aria-controls');
           }
           panel = undefined;
+          if (reason === 'user') {
+            panelState = { mode: 'closed' };
+            exploration?.changed();
+          }
         },
       },
     );
+    if (restored && restored.mode !== 'closed') panel.restoreScroll(restored.scroll);
     if (origin === showList) {
       showList.setAttribute('aria-expanded', 'true');
       showList.setAttribute('aria-controls', panel.element.id);
     }
+    exploration?.changed();
   }
+  const panelPort: OverviewPanelPort = {
+    read() {
+      return panelState.mode === 'closed' || !panel
+        ? { mode: 'closed' }
+        : { ...panelState, scroll: panel.getScroll() };
+    },
+    open(state, options) {
+      if (state.mode === 'closed') return;
+      const selected =
+        state.mode === 'all'
+          ? posts
+          : state.urls
+              .map((url) => posts.find((post) => post.url === url))
+              .filter((post): post is OverviewPost => !!post);
+      select(
+        selected,
+        options.origin ?? (state.mode === 'all' ? showList : canvas!),
+        options.resolveOrigin,
+        options.focus,
+        state,
+      );
+    },
+  };
   async function start() {
     setStatus(root, '');
     try {
       const response = await fetcher(config.dataUrl, { signal: abort.signal });
-      if (disposed || failed) return;
+      if (!isCurrent() || failed) return;
       if (!response.ok) throw new Error('Overview fetch failed');
       const data: unknown = await response.json();
-      if (disposed || failed) return;
+      if (!isCurrent() || failed) return;
       posts = readPosts(data);
       if (posts.length === 0) {
         setStatus(
@@ -189,23 +249,40 @@ export function hydrateOverview(
         return;
       }
       const provider = await load(config);
-      if (disposed || failed) return;
+      if (!isCurrent() || failed) return;
+      const settings = readBrowserExplorationConfig(config, window.location.origin);
+      if (settings)
+        exploration = createExplorationController({
+          root,
+          canvas: canvas!,
+          toolbar,
+          showList,
+          ...settings,
+          dataUrl: config.dataUrl,
+          maxZoom: config.cluster.maxZoom,
+          posts,
+          panel: panelPort,
+          isCurrent,
+        });
       const mounted = await provider.mountOverview(canvas!, {
         posts,
         ...config.cluster,
         placeholderUrl: config.placeholderUrl,
+        initialView: exploration?.initialView,
         signal: abort.signal,
         onError: fail,
         onPostSelect: (post, origin, resolveOrigin) => select([post], origin, resolveOrigin),
-        onGroupSelect: select,
+        onGroupSelect: (posts, origin, resolveOrigin) => select(posts, origin, resolveOrigin),
       });
-      if (disposed || failed) {
+      if (!isCurrent() || failed) {
+        exploration?.destroy({ save: false });
         mounted.destroy();
         return;
       }
       handle = mounted;
       handle.setInteractive(true);
-      if (disposed || failed) return;
+      if (!isCurrent() || failed) return;
+      exploration?.activate(handle);
       root.dataset.hpmActive = 'true';
       showFallback(root, false);
       showList.textContent = `全部文章 ${posts.length}`;

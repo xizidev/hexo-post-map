@@ -141,6 +141,7 @@ describe('recorded-track documentation contract', () => {
   it('keeps the focused file-based proxy configuration valid', () => {
     const [documented] = examples('docs/configuration.md', 'config');
     expect(resolveConfig(documented?.post_map, {})).toMatchObject({
+      overview: { exploration: { restore: true, share: true, random: false } },
       amap: {
         key: 'replace-with-your-web-key',
         mapStyle: 'amap://styles/dark',

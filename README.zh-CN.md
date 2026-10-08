@@ -30,6 +30,10 @@ post_map:
     path: map/
     title: 足迹地图
     layout: page
+    exploration:
+      restore: true
+      share: true
+      random: false
   cluster:
     grid_size: 60
     max_zoom: 18
@@ -41,6 +45,8 @@ post_map:
 ```
 
 以上凭据均为占位符。`amap.key` 和 `amap.security.security_js_code` 分别填写高德控制台生成的 Key 和安全密钥；不要同时再配置 `service_host`。
+
+`overview.exploration` 仅接受 `restore`、`share`、`random` 三项严格布尔值，默认值如上。返回恢复会在当前标签页保留最近的地图视角和文章面板，支持 PJAX 导航或刷新，有效期为 2 小时；内存和 sessionStorage 各最多保留 16 个地图作用域，每份快照不超过 16 KiB。恢复不会抢焦点、滚动页面或逐条回放历史记录。`restore: false` 仅清除当前地图作用域；sessionStorage 被阻止时，当前文档降级为有界内存保存。分享、随机选择与返回恢复分别配置。
 
 ### 申请高德 Key
 

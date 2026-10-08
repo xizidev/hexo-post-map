@@ -7,8 +7,15 @@ import {
 import { renderPostPanel } from '../../src/browser/overview/panel';
 import { renderOverview, type OverviewPost } from '../../src/templates/overview';
 import { resolveConfig } from '../../src/config/resolve';
-import type { MapHandle, MapProvider, OverviewMapOptions } from '../../src/browser/providers/types';
+import type {
+  MapHandle,
+  MapProvider,
+  OverviewMapOptions,
+  OverviewProviderLoader,
+} from '../../src/browser/providers/types';
+import type { OverviewView } from '../../src/browser/overview/exploration-types';
 import { createAMapOverviewProvider } from '../../src/browser/providers/amap-overview';
+import { Window } from 'happy-dom';
 
 const sdk = vi.hoisted(() => ({ load: vi.fn(), reset: vi.fn() }));
 vi.mock('@amap/amap-jsapi-loader', () => ({ default: sdk }));
@@ -76,6 +83,7 @@ function fixture() {
     posts: [b, a],
     config,
     dataUrl: '/blog/map/posts.json',
+    overviewUrl: '/blog/map/',
     placeholderUrl: '/blog/assets/placeholder.svg',
   });
   return document.querySelector<HTMLElement>('[data-hpm-overview]')!;
@@ -94,6 +102,120 @@ afterEach(() => {
   activeControllers.clear();
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+describe('exploration lifecycle integration', () => {
+  function isolated() {
+    const owner = new Window({ url: 'https://example.test/blog/map/' });
+    vi.stubGlobal('window', owner);
+    vi.stubGlobal('document', owner.document);
+    return owner;
+  }
+  it.each(['exploration', 'overviewUrl'])(
+    'keeps old HTML without %s usable without reading storage',
+    async (field) => {
+      const owner = isolated();
+      const storage = vi.fn(() => {
+        throw new Error('blocked');
+      });
+      Object.defineProperty(owner, 'sessionStorage', { get: storage });
+      const root = fixture();
+      const data = root.querySelector('[data-hpm-data]')!;
+      const raw = JSON.parse(data.textContent!);
+      delete raw[field];
+      data.textContent = JSON.stringify(raw);
+      hydrateOverview(
+        root,
+        async () => ({ mountOverview: async () => ({ destroy() {}, setInteractive() {} }) }),
+        async () => new Response(JSON.stringify({ version: 1, posts: [a] })),
+      );
+      await flush();
+      expect(root.dataset.hpmActive).toBe('true');
+      expect(storage).not.toHaveBeenCalled();
+      root.querySelector<HTMLButtonElement>('[data-hpm-show-list]')!.click();
+      expect(root.querySelector('.hpm-panel')).not.toBeNull();
+    },
+  );
+  it('reads current origin and storage only after data and provider readiness', async () => {
+    const owner = isolated();
+    const provider = deferred<Awaited<ReturnType<OverviewProviderLoader>>>();
+    const origin = vi.spyOn(owner.location, 'origin', 'get');
+    const storage = vi.spyOn(owner.sessionStorage, 'getItem');
+    const root = fixture();
+    const mounted = vi.fn(async () => ({
+      destroy() {},
+      setInteractive() {},
+      getView: () => ({ center: [121, 31] as const, zoom: 8 }),
+      setView() {},
+      focusPost() {},
+      onViewEnd: () => () => {},
+    }));
+    hydrateOverview(
+      root,
+      () => provider.promise,
+      async () => new Response(JSON.stringify({ version: 1, posts: [a] })),
+    );
+    await flush();
+    expect(origin).not.toHaveBeenCalled();
+    expect(storage).not.toHaveBeenCalled();
+    provider.resolve({ mountOverview: mounted });
+    await flush();
+    expect(origin).toHaveBeenCalled();
+    expect(storage).toHaveBeenCalledTimes(1);
+    expect(mounted).toHaveBeenCalledTimes(1);
+  });
+  it.each(['text', 'toolbar', 'control'])('invalidates replaced %s identity', async (kind) => {
+    isolated();
+    const f = setup();
+    await flush();
+    expect(f.controller.isCurrent()).toBe(true);
+    if (kind === 'text') f.root.querySelector('[data-hpm-data]')!.textContent += ' ';
+    else {
+      const element = f.root.querySelector(
+        kind === 'toolbar' ? '[data-hpm-toolbar]' : '[data-hpm-show-list]',
+      )!;
+      element.replaceWith(element.cloneNode(true));
+    }
+    expect(f.controller.isCurrent()).toBe(false);
+  });
+  it('restores a panel once without focus and preserves it across fast navigation', async () => {
+    const owner = isolated();
+    const root = fixture();
+    let view: OverviewView = { center: [121, 31], zoom: 9 };
+    const mount = vi.fn(async (_canvas: HTMLElement, options: OverviewMapOptions) => {
+      view = options.initialView ?? view;
+      return {
+        destroy() {},
+        setInteractive() {},
+        getView: () => view,
+        setView() {},
+        focusPost() {},
+        onViewEnd: () => () => {},
+      };
+    });
+    const load = async () => ({ mountOverview: mount });
+    const fetcher = async () => new Response(JSON.stringify({ version: 1, posts: [a, b] }));
+    const first = hydrateOverview(root, load, fetcher);
+    await flush();
+    root.querySelector<HTMLButtonElement>('[data-hpm-show-list]')!.click();
+    root.remove();
+    first.destroy();
+    const secondRoot = fixture();
+    const origin = document.createElement('button');
+    document.body.append(origin);
+    origin.focus();
+    const next = hydrateOverview(secondRoot, load, fetcher);
+    await flush();
+    expect(mount.mock.calls[1]![1].initialView).toEqual({ center: [121, 31], zoom: 9 });
+    expect(secondRoot.querySelectorAll('.hpm-panel')).toHaveLength(1);
+    expect(document.activeElement).toBe(origin);
+    expect(hydrateOverview(secondRoot, load, fetcher)).toBe(next);
+    owner.dispatchEvent(new owner.Event('pageshow'));
+    await flush();
+    expect(mount).toHaveBeenCalledTimes(2);
+    expect(secondRoot.querySelectorAll('.hpm-panel')).toHaveLength(1);
+  });
 });
 
 interface ClusterPoint {

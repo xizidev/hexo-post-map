@@ -311,6 +311,12 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv): ResolvedPlu
     raw.overview === undefined ? undefined : requireConfigObject(raw.overview, 'overview');
   const cluster =
     raw.cluster === undefined ? undefined : requireConfigObject(raw.cluster, 'cluster');
+  const exploration =
+    overview?.exploration === undefined
+      ? undefined
+      : requireConfigObject(overview.exploration, 'overview.exploration');
+  if (exploration)
+    rejectUnknownFields(exploration, 'overview.exploration', ['restore', 'share', 'random']);
   const amap = requireConfigObject(raw.amap, 'amap');
   const security =
     amap.security === undefined ? undefined : requireConfigObject(amap.security, 'amap.security');
@@ -319,7 +325,13 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv): ResolvedPlu
     rejectUnknownFields(post, 'post', ['enabled', 'position', 'height', 'default_zoom']);
   }
   if (overview !== undefined) {
-    rejectUnknownFields(overview, 'overview', ['enabled', 'path', 'title', 'layout']);
+    rejectUnknownFields(overview, 'overview', [
+      'enabled',
+      'path',
+      'title',
+      'layout',
+      'exploration',
+    ]);
   }
   if (cluster !== undefined) {
     rejectUnknownFields(cluster, 'cluster', ['grid_size', 'max_zoom']);
@@ -353,6 +365,23 @@ export function resolveConfig(raw: unknown, env: NodeJS.ProcessEnv): ResolvedPlu
       ),
     },
     overview: {
+      exploration: {
+        restore: optionalBoolean(
+          exploration?.restore,
+          'overview.exploration.restore',
+          DEFAULT_CONFIG.overview.exploration.restore,
+        ),
+        share: optionalBoolean(
+          exploration?.share,
+          'overview.exploration.share',
+          DEFAULT_CONFIG.overview.exploration.share,
+        ),
+        random: optionalBoolean(
+          exploration?.random,
+          'overview.exploration.random',
+          DEFAULT_CONFIG.overview.exploration.random,
+        ),
+      },
       enabled: optionalBoolean(
         overview?.enabled,
         'overview.enabled',

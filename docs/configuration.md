@@ -20,6 +20,10 @@ post_map:
     path: map/
     title: 足迹地图
     layout: page
+    exploration:
+      restore: true
+      share: true
+      random: false
   cluster:
     grid_size: 60
     max_zoom: 18
@@ -46,6 +50,9 @@ For client mode, replace `service_host` with `security_js_code: replace-with-you
 | `overview.path`                  | `map/`     | Safe relative route path, with a trailing slash added if omitted; no leading `/`, traversal, query, or fragment |
 | `overview.title`                 | `足迹地图` | Non-empty string, trimmed                                                                                       |
 | `overview.layout`                | `page`     | `page` or `standalone`; unavailable theme page layout falls back to standalone                                  |
+| `overview.exploration.restore`   | `true`     | Strict boolean; restore the latest valid view and panel in this tab; false clears this scope                    |
+| `overview.exploration.share`     | `true`     | Strict boolean; enable map sharing independently of restoration                                                 |
+| `overview.exploration.random`    | `false`    | Strict boolean; opt in to random post selection                                                                 |
 | `cluster.grid_size`              | `60`       | Finite positive number, in screen pixels (`gridSizePx` inside the browser decision code)                        |
 | `cluster.max_zoom`               | `18`       | Finite number in `[2, 20]`; overview zoom cap and overlap-list threshold                                        |
 | `amap`                           | required   | Object; use `{}` when credentials come entirely from the environment                                            |
@@ -57,6 +64,10 @@ For client mode, replace `service_host` with `security_js_code: replace-with-you
 The default small-screen detail height is `180px` at widths up to 600px. Theme CSS can override `.hpm-detail { --hpm-mobile-height: 200px; }`. A zero or percentage height is accepted but can make a card invisible when its containing block has no usable height; `px` or `rem` is usually easier to size.
 
 ## Environment precedence
+
+Exploration flags reject strings, numbers, nulls, arrays, and unknown keys. Restoration saves the latest valid view and panel, with 200 ms coalesced checkpoints, for two hours in the current tab. Both memory and session storage are bounded to 16 map scopes and 16 KiB per snapshot. It does not replay individual browser history entries, change the address bar, take focus, or scroll the page. Setting `restore: false` clears only the current scope. Blocked storage preserves document-local memory; another full document may retry session storage. Old generated HTML without exploration settings or the overview URL keeps its map usable without reading restoration storage.
+
+中文：三项开关必须为布尔值，默认 `restore: true`、`share: true`、`random: false`。仅恢复当前标签页最近的有效视角及面板，不逐条回放历史；有效期 2 小时，最多 16 个作用域，每份快照 16 KiB。
 
 These names are case-sensitive:
 

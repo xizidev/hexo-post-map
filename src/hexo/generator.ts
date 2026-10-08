@@ -200,6 +200,7 @@ export function createOverviewRoutes(
     posts,
     config,
     dataUrl: publicUrl(dataPath, hexo, 'post'),
+    overviewUrl: publicUrl(config.overview.path, hexo, 'post'),
     placeholderUrl,
   });
   const page: HexoRoute = { path: `${config.overview.path}index.html`, data: '' };

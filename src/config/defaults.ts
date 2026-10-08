@@ -11,6 +11,7 @@ export const DEFAULT_CONFIG = Object.freeze({
     path: 'map/',
     title: '足迹地图',
     layout: 'page' as const,
+    exploration: Object.freeze({ restore: true, share: true, random: false }),
   }),
   cluster: Object.freeze({
     gridSize: 60,

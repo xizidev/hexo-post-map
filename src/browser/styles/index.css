@@ -318,12 +318,15 @@
   cursor: pointer;
 }
 
-.hpm-overview__list-toggle {
+.hpm-overview__toolbar {
   grid-area: map;
   position: absolute;
   z-index: 10;
   top: 16px;
   right: 16px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .hpm-image-marker {
