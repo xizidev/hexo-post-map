@@ -56,6 +56,20 @@ Set `random: true` to opt in to **随机一站** on a loaded overview with at le
 
 Share format v1 contains only `hpm_v=1`, `hpm_center=longitude,latitude` (up to six decimals), `hpm_zoom` (up to two decimals), and an optional `hpm_post` that exactly matches one safe article URL in the current dataset. Links are limited to 4,096 characters; an article reference that exceeds the limit is omitted. The overview page accepts its literal route and terminal `index.html` alias, and valid explicit links take priority over saved state without changing the address bar or taking focus. Invalid/duplicate/unknown `hpm_` parameters are ignored as a whole; unknown or ambiguous articles retain only the valid view. These links expose the view and article reference to recipients and ordinary URL logs; they are not a confidential channel. They contain no AMap credentials, proxy configuration, article body, images, or tracks.
 
+### Upgrade from 0.5 to 0.6
+
+Once 0.6 is published, upgrade in the Hexo site directory:
+
+```sh
+npm install hexo-post-map@^0.6.0
+npx hexo clean
+npx hexo generate
+```
+
+Existing Front Matter, authored coordinates, recorded tracks, and AMap credentials need no migration. If `overview.exploration` is omitted, return restoration and sharing are enabled, while random previews stay disabled. Set the three boolean flags explicitly to opt out or enable random previews; do not use quoted strings such as `"false"`.
+
+Deploy the newly generated HTML, `posts.json`, and `hexo-post-map/` assets together. Refresh affected CDN caches so old HTML is not paired with new scripts. Keep previously published content-addressed track files until older HTML and caches have rolled out. Installing the package does not upload your blog or change the theme's menu.
+
 ### Create an AMap key
 
 1. Register or sign in to the [AMap developer console](https://console.amap.com/) and create an application under application management.
@@ -91,7 +105,7 @@ Preview the configured site locally first:
 
 ```sh
 npx hexo clean
-npx hexo server
+npx hexo server --ip 127.0.0.1
 ```
 
 For an object-storage Bucket deployment, rebuild the static site locally:

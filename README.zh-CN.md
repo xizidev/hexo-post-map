@@ -56,6 +56,20 @@ post_map:
 
 v1 分享仅包含 `hpm_v=1`、`hpm_center=经度,纬度`（最多 6 位小数）、`hpm_zoom`（最多 2 位小数）和可选 `hpm_post`，文章引用必须精确匹配当前数据集中唯一的安全 URL。链接不超过 4,096 字符；过长的文章引用会被省略。总览页仅匹配字面路由及末尾 `index.html` 别名；有效显式分享优先于缓存，不改地址栏、不抢焦点。重复、未知或无效 `hpm_` 参数会使整份分享失效；未知或歧义文章降级为仅视角。分享会将视角和文章引用公开给接收者及通常的 URL 日志，不是保密通道；链接不包含高德凭据、代理配置、文章正文、图片或轨迹。
 
+### 从 0.5 升级到 0.6
+
+0.6 发布后，在 Hexo 站点目录执行：
+
+```sh
+npm install hexo-post-map@^0.6.0
+npx hexo clean
+npx hexo generate
+```
+
+现有 Front Matter、手写坐标、真实轨迹和高德凭据无需迁移。省略 `overview.exploration` 时，默认启用返回恢复和分享，随机预览仍关闭。可显式设置这三项布尔值以关闭功能或开启随机预览；不要写成 `"false"` 等字符串。
+
+请将新生成的 HTML、`posts.json` 和 `hexo-post-map/` 静态资源一起部署，并刷新相关 CDN 缓存，避免旧 HTML 与新脚本混用。旧版本的内容寻址轨迹文件需保留到旧 HTML 和缓存更新完成。安装插件不会自动上传博客，也不会修改主题菜单。
+
 ### 申请高德 Key
 
 1. 注册并登录[高德开放平台](https://console.amap.com/)，进入“应用管理”，创建应用。
@@ -91,7 +105,7 @@ post_map:
 
 ```sh
 npx hexo clean
-npx hexo server
+npx hexo server --ip 127.0.0.1
 ```
 
 发布到对象存储 Bucket 时，在本地重新生成静态站点：
