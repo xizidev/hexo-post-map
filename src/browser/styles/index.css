@@ -710,11 +710,16 @@
   }
 
   .hpm-overview {
-    --hpm-cluster-surface: Highlight;
+    --hpm-cluster-surface: ButtonFace;
     --hpm-cluster-border: ButtonText;
     --hpm-panel-surface: Canvas;
     --hpm-panel-border: CanvasText;
     --hpm-card-surface: Canvas;
+  }
+
+  .hpm-cluster {
+    /* Match the native text backplate and the count surface without opting out. */
+    color: ButtonText;
   }
 
   .hpm-panel {
