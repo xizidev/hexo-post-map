@@ -2,6 +2,13 @@
 
 Changes are recorded through release pull requests.
 
+## [0.6.1](https://github.com/xizidev/hexo-post-map/compare/v0.6.0...v0.6.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* dismiss compact share confirmations without blocking panels ([#26](https://github.com/xizidev/hexo-post-map/issues/26)) ([7a2702b](https://github.com/xizidev/hexo-post-map/commit/7a2702b48a7368a1a30d7d088e922c30ca63e719))
+
 ## [0.6.0](https://github.com/xizidev/hexo-post-map/compare/v0.5.0...v0.6.0) (2026-10-09)
 
 
