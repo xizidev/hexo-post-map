@@ -1,5 +1,15 @@
 # Maintainer release guide
 
+## v0.6 overview exploration boundary
+
+The feature branch adds optional two-hour return restoration, share URLs/manual copying, and opt-in random article previews. Defaults are `restore: true`, `share: true`, `random: false`; strict nonboolean input fails the build. Exploration code is overview-only, the provider-free runtime remains at most 8,192 minified bytes, and detail JSON, `posts.json` version 1, Front Matter, coordinates, resource routes, and lifecycle API version 1 remain compatible.
+
+Acceptance includes packed defaults/custom routes/flags/invalid inputs, full-document return, standard PJAX, genuine Chromium BFCache without request interception, share reception in a new tab, clipboard fallback, stale-root results, dense-list stability, mobile targets, forced colors and reduced motion. The real-blog smoke changes only a temporary copy with dummy credentials and audits repository bytes and cancellation cleanup. Report actual local Node coverage separately from the unchanged CI Node 20/22/24 matrix; a credential-gated live AMap skip is not a live-SDK pass. Deterministic SDK doubles cannot certify vendor tile rendering, attribution, online service behavior, or a deployed CSP.
+
+The feature branch keeps package and manifest versions at 0.5.0. An authorized Release Please release advances them to 0.6.0 through the normal process below; do not bump them by hand. Treat publication as complete only after the release-tag workflow succeeds and the npm registry confirms the expected version, `latest` tag, artifact integrity, and provenance. Blog dependency upgrades and Bucket uploads are separate actions, not side effects of a plugin release.
+
+English and Chinese READMEs describe the 0.5-to-0.6 upgrade, defaults, clean rebuild, and coordinated HTML/data/asset deployment. The release candidate must additionally verify native forced-color cluster-count contrast, both article-panel/manual-copy close orders, and that normal/dark rendering remains unchanged. The browser suite owns these regressions.
+
 ## v0.5 recorded-track boundary
 
 The v0.5 feature is additive: required GCJ-02 `points`, point-only pages, overview `posts.json` version 1, configuration, and lifecycle API remain compatible. Optional WGS84 GPX/GeoJSON input is compiled at build time into privacy-trimmed, bounded, content-addressed JSON under `hexo-post-map/tracks/`. No source file, filename/path, absolute timestamp, GPX metadata, or arbitrary GeoJSON property belongs in the npm package or generated output.
@@ -8,7 +18,7 @@ A v0.5 release candidate must pass documentation examples, complete unit/build c
 
 Do not publish by changing `package.json` on a feature branch. Merge reviewed implementation and documentation through the normal Conventional Commit path, then let Release Please prepare the version/changelog boundary. npm publication remains authorized only by a published GitHub Release and the protected `npm` environment.
 
-The automated path is a Conventional Commit on `main` → Release Please version/changelog PR → reviewed merge → published GitHub Release → `.github/workflows/publish.yml`. `.release-please-manifest.json` records the latest released version (`0.4.0` before this work); Release Please, not a feature branch, advances that release state. The `initial-version: 0.1.0` setting in `release-please-config.json` is only the historical bootstrap default and must not be mistaken for the current package version.
+The automated path is a Conventional Commit on `main` → Release Please version/changelog PR → reviewed merge → published GitHub Release → `.github/workflows/publish.yml`. `.release-please-manifest.json` records the latest released version; Release Please, not a feature branch, advances that release state. The `initial-version: 0.1.0` setting in `release-please-config.json` is only the historical bootstrap default and must not be mistaken for the current package version.
 
 ## One-time administrator setup
 

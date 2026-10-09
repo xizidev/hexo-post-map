@@ -90,6 +90,7 @@ describe.each(['README.md', 'README.zh-CN.md'])('%s authoring examples', (file) 
       serviceHost: 'https://maps.example.com/_AMapService',
     });
     expect(proxy?.overview.path).toBe('map/');
+    expect(proxy?.overview.exploration).toEqual({ restore: true, share: true, random: false });
     expect(proxy?.post.position).toBe('before');
     const client = resolveConfig(raw, {
       HEXO_POST_MAP_AMAP_KEY: 'example-test-key',
@@ -141,6 +142,7 @@ describe('recorded-track documentation contract', () => {
   it('keeps the focused file-based proxy configuration valid', () => {
     const [documented] = examples('docs/configuration.md', 'config');
     expect(resolveConfig(documented?.post_map, {})).toMatchObject({
+      overview: { exploration: { restore: true, share: true, random: false } },
       amap: {
         key: 'replace-with-your-web-key',
         mapStyle: 'amap://styles/dark',

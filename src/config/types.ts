@@ -1,3 +1,9 @@
+export interface ExplorationFlags {
+  readonly restore: boolean;
+  readonly share: boolean;
+  readonly random: boolean;
+}
+
 export interface ResolvedPluginConfig {
   readonly provider: 'amap';
   readonly post: {
@@ -11,6 +17,7 @@ export interface ResolvedPluginConfig {
     readonly path: string;
     readonly title: string;
     readonly layout: 'page' | 'standalone';
+    readonly exploration: ExplorationFlags;
   };
   readonly cluster: {
     readonly gridSize: number;

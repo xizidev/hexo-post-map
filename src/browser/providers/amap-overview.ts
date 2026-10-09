@@ -1,6 +1,7 @@
 import type { Coordinate } from '../../domain/types';
 import type { OverviewPost } from '../../templates/overview';
 import { decideClusterAction, type Bounds } from '../overview/cluster-decision';
+import type { OverviewView } from '../overview/exploration-types';
 import { createClusterMarker, createImageMarker, overviewFitPadding } from '../overview/markers';
 import {
   AMAP_LOAD_TIMEOUT_MS,
@@ -11,7 +12,7 @@ import {
 } from './amap-sdk';
 import type {
   BrowserProviderConfig,
-  MapHandle,
+  OverviewMapHandle,
   OverviewMapOptions,
   OverviewMapProvider,
 } from './types';
@@ -101,9 +102,24 @@ async function mountOverview(
   mapStyle: string,
   container: HTMLElement,
   options: OverviewMapOptions,
-): Promise<MapHandle> {
+): Promise<OverviewMapHandle> {
   if (!Number.isFinite(options.maxZoom) || options.maxZoom < 2 || options.maxZoom > 20)
     throw new Error('Invalid overview maximum zoom');
+  function validView(view: OverviewView): boolean {
+    if (!view || !Array.isArray(view.center) || view.center.length !== 2) return false;
+    const [longitude, latitude] = view.center;
+    return (
+      Number.isFinite(longitude) &&
+      Math.abs(longitude) <= 180 &&
+      Number.isFinite(latitude) &&
+      Math.abs(latitude) <= 90 &&
+      Number.isFinite(view.zoom) &&
+      view.zoom >= 2 &&
+      view.zoom <= options.maxZoom
+    );
+  }
+  if (options.initialView && !validView(options.initialView))
+    throw new Error('Invalid overview view');
   await loadCluster(api, options.signal);
   if (options.signal?.aborted) throw new Error('Map initialization cancelled');
   if (!options.posts.length) throw new Error('Missing overview posts');
@@ -120,7 +136,8 @@ async function mountOverview(
   return new Promise((resolve, reject) => {
     const compactMedia = window.matchMedia?.('(max-width: 600px)');
     const map = new api.Map(container, {
-      zoom: Math.min(4, options.maxZoom),
+      zoom: options.initialView?.zoom ?? Math.min(4, options.maxZoom),
+      ...(options.initialView ? { center: [...options.initialView.center] } : {}),
       mapStyle,
       // Keep overlapping points clustered at the terminal level, including manual zooming.
       zooms: [2, options.maxZoom],
@@ -130,6 +147,13 @@ async function mountOverview(
     let destroyed = false;
     let complete = false;
     let active = false;
+    const supportsView =
+      typeof map.getCenter === 'function' && typeof map.setZoomAndCenter === 'function';
+    const viewListeners = new Set<() => void>();
+    function notifyViewEnd() {
+      if (destroyed || !complete) return;
+      viewListeners.forEach((listener) => listener());
+    }
     let cluster: { setMap(map: AMapSdkMap | null): void } | undefined;
     interface RenderedButton {
       marker: ClusterMarker;
@@ -178,6 +202,9 @@ async function mountOverview(
       clearTimeout(timer);
       map.off('complete', ready);
       map.off('error', fail);
+      map.off('moveend', notifyViewEnd);
+      map.off('zoomend', notifyViewEnd);
+      viewListeners.clear();
       compactMedia?.removeEventListener('change', reanchorLeaves);
       options.signal?.removeEventListener('abort', cancel);
       observer.disconnect();
@@ -214,11 +241,48 @@ async function mountOverview(
     function ready() {
       if (destroyed || complete) return;
       try {
-        fit(postBounds(options.posts));
+        if (supportsView && options.initialView) applyView(options.initialView, true);
+        else fit(postBounds(options.posts));
+        // An SDK operation may synchronously emit error or trigger cancellation.
+        if (destroyed) return;
         clearTimeout(timer);
+        if (supportsView) {
+          map.on('moveend', notifyViewEnd);
+          map.on('zoomend', notifyViewEnd);
+        }
         complete = true;
         resolve({
           destroy,
+          ...(supportsView
+            ? {
+                getView(): OverviewView | undefined {
+                  if (destroyed || !complete) return;
+                  try {
+                    const center = map.getCenter!();
+                    const view: OverviewView = {
+                      center: [center.getLng(), center.getLat()],
+                      zoom: map.getZoom(),
+                    };
+                    return validView(view) ? view : undefined;
+                  } catch {
+                    return undefined;
+                  }
+                },
+                setView,
+                focusPost(post: OverviewPost, zoom: number, settings: { immediately: boolean }) {
+                  setView(
+                    { center: [post.location.longitude, post.location.latitude], zoom },
+                    settings,
+                  );
+                },
+                onViewEnd(listener: () => void) {
+                  if (!destroyed) viewListeners.add(listener);
+                  return () => {
+                    viewListeners.delete(listener);
+                  };
+                },
+              }
+            : {}),
           setInteractive(enabled) {
             if (destroyed) return;
             try {
@@ -233,6 +297,23 @@ async function mountOverview(
             }
           },
         });
+      } catch {
+        fail();
+      }
+    }
+    function applyView(view: OverviewView, immediately: boolean) {
+      map.setStatus({ zoomEnable: true });
+      try {
+        map.setZoomAndCenter!(view.zoom, [...view.center], immediately);
+      } finally {
+        map.setStatus({ zoomEnable: active });
+      }
+    }
+    function setView(view: OverviewView, settings: { immediately: boolean }) {
+      if (destroyed || !complete) return;
+      if (!validView(view)) throw new Error('Invalid overview view');
+      try {
+        applyView(view, settings.immediately);
       } catch {
         fail();
       }

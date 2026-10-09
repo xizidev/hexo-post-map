@@ -17,6 +17,7 @@ export const fakeSdk = String.raw`
   class Map {
     constructor(container, options) {
       this.container = container; this.options = options; this.zoom = options.zoom;
+      this.center = [...(options.center ?? [104, 35])]; this.destroyed = false;
       this.events = {}; this.bounds = []; this.status = options; this.overlays = []; maps.push(this);
       this.onCanvasClick = event => { if (event.target === container) this.emit('click'); };
       container.addEventListener('click', this.onCanvasClick);
@@ -24,7 +25,7 @@ export const fakeSdk = String.raw`
     }
     on(event, callback) { (this.events[event] ??= new Set()).add(callback); }
     off(event, callback) { this.events[event]?.delete(callback); }
-    emit(event) { this.events[event]?.forEach(callback => callback()); }
+    emit(event) { if (!this.destroyed) this.events[event]?.forEach(callback => callback()); }
     add(overlays) { this.overlays.push(...overlays); overlays.forEach((overlay, index) => {
       if (!overlay.options.content) return;
       const content = overlay.options.content;
@@ -40,11 +41,26 @@ export const fakeSdk = String.raw`
     setFitView(overlays, immediately, padding) { this.fitted = true; this.fitPadding = padding; }
     setStatus(status) { this.status = status; }
     destroy() {
+      if (this.destroyed) return;
+      this.destroyed = true;
       window.__hpmSdk.destroyedMaps++;
+      Object.values(this.events).forEach(listeners => listeners.clear());
       this.container.removeEventListener('click', this.onCanvasClick); this.container.replaceChildren();
     }
     getZoom() { return this.zoom; }
-    setZoom(zoom) { this.zoom = zoom; this.cluster?.render(); }
+    getCenter() {
+      const [longitude, latitude] = this.center;
+      return { getLng: () => longitude, getLat: () => latitude };
+    }
+    setZoom(zoom) {
+      if (this.destroyed) return;
+      this.zoom = zoom; this.cluster?.render(); this.emit('zoomend');
+    }
+    setZoomAndCenter(zoom, center, immediately = false) {
+      if (this.destroyed) return;
+      this.center = [...center]; this.lastImmediately = immediately;
+      this.zoom = zoom; this.cluster?.render(); this.emit('moveend'); this.emit('zoomend');
+    }
     setBounds(bounds, immediately, padding) { this.bounds.push(bounds); (this.boundsPadding ??= []).push(padding); }
   }
   class Marker {

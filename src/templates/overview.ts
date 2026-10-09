@@ -19,6 +19,7 @@ export interface OverviewTemplateModel {
   readonly posts: readonly OverviewPost[];
   readonly config: ResolvedPluginConfig;
   readonly dataUrl: string;
+  readonly overviewUrl: string;
   readonly placeholderUrl: string;
 }
 
@@ -27,6 +28,7 @@ export function renderOverview({
   posts,
   config,
   dataUrl,
+  overviewUrl,
   placeholderUrl,
 }: OverviewTemplateModel): string {
   const rows = posts
@@ -38,6 +40,8 @@ export function renderOverview({
     .join('');
   const settings = serializeForHtmlScript({
     dataUrl,
+    overviewUrl,
+    exploration: config.overview.exploration,
     placeholderUrl,
     provider: config.provider,
     amap: config.amap,

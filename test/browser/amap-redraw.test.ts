@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAMapOverviewProvider } from '../../src/browser/providers/amap-overview';
-import type { MapHandle, OverviewMapOptions } from '../../src/browser/providers/types';
+import type { OverviewMapHandle, OverviewMapOptions } from '../../src/browser/providers/types';
 import type { OverviewPost } from '../../src/templates/overview';
 
 const sdk = vi.hoisted(() => ({ load: vi.fn(), reset: vi.fn() }));
@@ -35,6 +35,8 @@ let map: FakeMap;
 let cluster: FakeCluster;
 class FakeMap {
   listeners = new Map<string, () => void>();
+  zoom = 18;
+  center: readonly number[] = [121, 31];
   constructor() {
     // eslint-disable-next-line @typescript-eslint/no-this-alias
     map = this;
@@ -46,7 +48,14 @@ class FakeMap {
     this.listeners.delete(event);
   }
   getZoom() {
-    return 18;
+    return this.zoom;
+  }
+  getCenter() {
+    return { getLng: () => this.center[0]!, getLat: () => this.center[1]! };
+  }
+  setZoomAndCenter(zoom: number, center: readonly number[]) {
+    this.zoom = zoom;
+    this.center = [...center];
   }
   setBounds() {}
   setStatus() {}
@@ -63,7 +72,7 @@ class FakeCluster {
     cluster = this;
   }
 }
-const handles: MapHandle[] = [];
+const handles: OverviewMapHandle[] = [];
 async function setup() {
   sdk.load.mockResolvedValue({
     Map: FakeMap,
@@ -139,6 +148,22 @@ afterEach(() => {
 });
 
 describe('AMap overview redraw resource lifetime', () => {
+  it('does not grow SDK listeners across repeated checkpoint operations', async () => {
+    const { handle } = await setup();
+    const listener = vi.fn();
+    for (let index = 0; index < 200; index++) {
+      const detach = handle.onViewEnd!(listener);
+      handle.setView!({ center: [121, 31], zoom: 18 }, { immediately: true });
+      map.listeners.get('moveend')!();
+      detach();
+    }
+    expect(listener).toHaveBeenCalledTimes(200);
+    expect(map.listeners.size).toBe(4);
+    map.listeners.get('zoomend')!();
+    expect(listener).toHaveBeenCalledTimes(200);
+    handle.destroy();
+    expect(map.listeners.size).toBe(0);
+  });
   it.each(['same-members', 'changed-members'])(
     'updates only the visible button after 200 new-marker redraws: %s',
     async (kind) => {

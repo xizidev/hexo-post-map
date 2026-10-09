@@ -279,9 +279,10 @@ for (const mobile of [false, true]) {
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     const initialMap = (await page.locator('[data-hpm-canvas]').boundingBox())!;
     const initialToggle = (await toggle.boundingBox())!;
-    expect(Math.abs(initialToggle.y - initialMap.y - 16)).toBeLessThanOrEqual(1);
+    const toolbar = (await page.locator('[data-hpm-toolbar]').boundingBox())!;
+    expect(Math.abs(toolbar.y - initialMap.y - 16)).toBeLessThanOrEqual(1);
     expect(
-      Math.abs(initialMap.x + initialMap.width - initialToggle.x - initialToggle.width - 16),
+      Math.abs(initialMap.x + initialMap.width - toolbar.x - toolbar.width - 16),
     ).toBeLessThanOrEqual(1);
     expect(initialToggle.x).toBeGreaterThanOrEqual(initialMap.x);
     expect(initialToggle.y + initialToggle.height).toBeLessThanOrEqual(
@@ -319,9 +320,12 @@ for (const mobile of [false, true]) {
       expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(mapBounds!.y + mapBounds!.height);
     }
     const toggleBounds = await toggle.boundingBox();
-    expect(Math.abs(toggleBounds!.y - mapBounds!.y - 16)).toBeLessThanOrEqual(1);
+    const openToolbarBounds = await page.locator('[data-hpm-toolbar]').boundingBox();
+    expect(Math.abs(openToolbarBounds!.y - mapBounds!.y - 16)).toBeLessThanOrEqual(1);
     expect(
-      Math.abs(mapBounds!.x + mapBounds!.width - toggleBounds!.x - toggleBounds!.width - 16),
+      Math.abs(
+        mapBounds!.x + mapBounds!.width - openToolbarBounds!.x - openToolbarBounds!.width - 16,
+      ),
     ).toBeLessThanOrEqual(1);
     expect(toggleBounds!.y).toBeGreaterThanOrEqual(mapBounds!.y);
     expect(toggleBounds!.y + toggleBounds!.height).toBeLessThanOrEqual(

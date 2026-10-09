@@ -245,6 +245,89 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
             'generated output',
           );
           console.log(`PASS Hexo ${installed.version} / ${theme} ${themeVersion} / ${root}`);
+          if (!serve) {
+            for (const [flag, value] of [
+              ['restore', 'true'],
+              ['share', 1],
+              ['random', null],
+            ]) {
+              const invalid = await generate(
+                {
+                  ...config,
+                  post_map: {
+                    enabled: true,
+                    amap: {},
+                    overview: { exploration: { [flag]: value } },
+                  },
+                },
+                {
+                  HEXO_POST_MAP_AMAP_KEY: dummyKey,
+                  HEXO_POST_MAP_AMAP_SECURITY_JS_CODE: dummyCode,
+                },
+              );
+              assert.notEqual(invalid.code, 0, `Nonboolean ${flag} must fail generation`);
+              assert.ok(
+                invalid.output.includes(`overview.exploration.${flag}`),
+                'Exploration error must name the field',
+              );
+              assert.ok(
+                !invalid.output.includes(dummyKey) && !invalid.output.includes(dummyCode),
+                'Exploration diagnostic leaked credentials',
+              );
+            }
+            const customPath = 'atlas/travel';
+            success(
+              await generate(
+                {
+                  ...config,
+                  post_map: {
+                    enabled: true,
+                    amap: {},
+                    overview: {
+                      path: `${customPath}/`,
+                      exploration: { restore: false, share: false, random: false },
+                    },
+                  },
+                },
+                {
+                  HEXO_POST_MAP_AMAP_KEY: dummyKey,
+                  HEXO_POST_MAP_AMAP_SECURITY_JS_CODE: dummyCode,
+                },
+              ),
+              'custom route with exploration off',
+            );
+            success(
+              await run(
+                process.execPath,
+                [
+                  'node_modules/vitest/vitest.mjs',
+                  'run',
+                  'test/integration/generated-output.test.ts',
+                ],
+                repository,
+                {
+                  HPM_INTEGRATION_SITE: publicDirectory,
+                  HPM_INTEGRATION_ROOT: root,
+                  HPM_INTEGRATION_THEME: theme,
+                  HPM_INTEGRATION_TRACKS: '1',
+                  HPM_INTEGRATION_OVERVIEW: customPath,
+                  HPM_INTEGRATION_EXPLORATION: 'off',
+                },
+              ),
+              'custom generated output',
+            );
+            assert.equal(
+              await access(join(publicDirectory, 'map')).then(
+                () => true,
+                () => false,
+              ),
+              false,
+              'Custom route must not leave the default map route',
+            );
+            console.log(
+              `PASS exploration custom route / flags off / strict inputs: Hexo ${installed.version} / ${theme} / ${root}`,
+            );
+          }
           if (serve) {
             server = createServer(async (request, response) => {
               try {

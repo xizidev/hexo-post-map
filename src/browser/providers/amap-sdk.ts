@@ -12,6 +12,13 @@ export interface AMapSdkMap {
   setStatus(status: Record<string, boolean>): void;
   destroy(): void;
   getZoom(): number;
+  getCenter?(): { getLng(): number; getLat(): number };
+  setZoomAndCenter?(
+    zoom: number,
+    center: Coordinate,
+    immediately: boolean,
+    duration?: number,
+  ): void;
   setZoom(zoom: number, immediately: boolean): void;
   setBounds(bounds: unknown, immediately: boolean, padding: number[]): void;
 }

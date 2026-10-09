@@ -8,6 +8,11 @@ const directory = process.env.HPM_INTEGRATION_SITE;
 const root = process.env.HPM_INTEGRATION_ROOT ?? '/';
 const theme = process.env.HPM_INTEGRATION_THEME ?? 'cactus-minimal';
 const recordedTracks = process.env.HPM_INTEGRATION_TRACKS === '1';
+const overviewPath = process.env.HPM_INTEGRATION_OVERVIEW ?? 'map';
+const exploration =
+  process.env.HPM_INTEGRATION_EXPLORATION === 'off'
+    ? { restore: false, share: false, random: false }
+    : { restore: true, share: true, random: false };
 const html = async (path: string) => {
   const window = new Window({
     settings: {
@@ -43,8 +48,25 @@ async function filePaths(path = ''): Promise<string[]> {
 }
 
 describe.skipIf(!directory)('installed tarball generated output', () => {
+  it('emits root-aware overview route and exploration flags without changing detail JSON', async () => {
+    const overview = await html(overviewPath);
+    const settings = JSON.parse(overview.querySelector('[data-hpm-data]')!.textContent!);
+    expect(settings.overviewUrl).toBe(`${root}${overviewPath}/`);
+    expect(settings.dataUrl).toBe(`${root}${overviewPath}/posts.json`);
+    expect(settings.exploration).toEqual(exploration);
+    const detail = JSON.parse(
+      (await html('posts/single')).querySelector('[data-hpm-data]')!.textContent!,
+    );
+    expect(detail).not.toHaveProperty('exploration');
+    expect(detail).not.toHaveProperty('overviewUrl');
+    expect(
+      (await readFile(join(directory!, 'hexo-post-map/assets/runtime.js'))).length,
+    ).toBeLessThanOrEqual(8192);
+  });
   it('projects only public fields and sorts the complete mapped-post fallback', async () => {
-    const envelope = JSON.parse(await readFile(join(directory!, 'map/posts.json'), 'utf8'));
+    const envelope = JSON.parse(
+      await readFile(join(directory!, overviewPath, 'posts.json'), 'utf8'),
+    );
     expect(envelope.version).toBe(1);
     expect(envelope.posts).toHaveLength(recordedTracks ? 6 : 4);
     expect(envelope.posts.map((post: { url: string }) => post.url)).toEqual([
@@ -58,7 +80,7 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
       expect(Object.keys(post).sort()).toEqual(['date', 'image', 'location', 'title', 'url']);
       expect(Object.keys(post.location).sort()).toEqual(['latitude', 'longitude', 'name']);
     }
-    const document = await html('map');
+    const document = await html(overviewPath);
     expect(
       [...document.querySelectorAll('[data-hpm-fallback] a')].map((link) =>
         link.getAttribute('href'),
@@ -66,7 +88,7 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
     ).toEqual(envelope.posts.map((post: { url: string }) => post.url));
     expect(document.querySelectorAll('[data-hpm-fallback] img')).toHaveLength(0);
     expect(document.querySelector('[data-hpm-overview] script')?.textContent).toContain(
-      `${root}map/posts.json`,
+      `${root}${overviewPath}/posts.json`,
     );
     expect(document.querySelector('[data-hpm-overview] img[onerror]')).toBeNull();
     expect(document.querySelector('[data-hpm-overview] [data-attack]')).toBeNull();
@@ -100,7 +122,7 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
             ['posts/tracked-geojson/index.html', { detail: 1, overview: 0 }],
           ] as const)
         : []),
-      ['map/index.html', { detail: 0, overview: 1 }],
+      [`${overviewPath}/index.html`, { detail: 0, overview: 1 }],
       // Landscape/NexT render every mapped post; Cactus lists titles only.
       [
         'index.html',
@@ -156,7 +178,7 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
     const ordinary = await html('posts/plain');
     expect(ordinary.querySelector('[data-hpm-detail], [data-hpm-overview]')).toBeNull();
     expect(ordinary.querySelector('link[href*="hexo-post-map/assets/"]')).toBeNull();
-    const overview = await html('map');
+    const overview = await html(overviewPath);
     expect(overview.querySelectorAll('[data-hpm-overview]')).toHaveLength(1);
     for (const name of [
       'runtime.js',
@@ -173,7 +195,9 @@ describe.skipIf(!directory)('installed tarball generated output', () => {
   it.skipIf(!recordedTracks)(
     'publishes content-addressed track JSON without raw authoring data or overview fields',
     async () => {
-      const posts = JSON.parse(await readFile(join(directory!, 'map/posts.json'), 'utf8'));
+      const posts = JSON.parse(
+        await readFile(join(directory!, overviewPath, 'posts.json'), 'utf8'),
+      );
       expect(posts).not.toHaveProperty('track');
       expect(posts.posts.every((post: object) => !Object.hasOwn(post, 'track'))).toBe(true);
 

@@ -52,6 +52,12 @@ it('copies only source inputs and patches YAML and front matter without changing
       expect(config.root).toBe('/blog/');
       expect(config.url).toBe('https://lifeifan.com/blog/');
       expect(config.post_map.enabled).toBe(true);
+      expect(config.post_map.overview).toEqual({
+        enabled: true,
+        path: 'map/',
+        title: '足迹地图',
+        layout: 'page',
+      });
       expect(JSON.stringify(config)).not.toMatch(/build-smoke|security_js_code/);
       expect(parse(await readFile(join(site, 'themes/cactus/_config.yml'), 'utf8')).nav.map).toBe(
         '/map/',

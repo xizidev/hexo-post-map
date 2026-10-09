@@ -20,6 +20,10 @@ post_map:
     path: map/
     title: 足迹地图
     layout: page
+    exploration:
+      restore: true
+      share: true
+      random: false # Optional: true enables previews without automatic navigation
   cluster:
     grid_size: 60
     max_zoom: 18
@@ -46,6 +50,9 @@ For client mode, replace `service_host` with `security_js_code: replace-with-you
 | `overview.path`                  | `map/`     | Safe relative route path, with a trailing slash added if omitted; no leading `/`, traversal, query, or fragment |
 | `overview.title`                 | `足迹地图` | Non-empty string, trimmed                                                                                       |
 | `overview.layout`                | `page`     | `page` or `standalone`; unavailable theme page layout falls back to standalone                                  |
+| `overview.exploration.restore`   | `true`     | Strict boolean; restore the latest valid view and panel in this tab; false clears this scope                    |
+| `overview.exploration.share`     | `true`     | Strict boolean; enable map sharing independently of restoration                                                 |
+| `overview.exploration.random`    | `false`    | Strict boolean; opt in to random post selection                                                                 |
 | `cluster.grid_size`              | `60`       | Finite positive number, in screen pixels (`gridSizePx` inside the browser decision code)                        |
 | `cluster.max_zoom`               | `18`       | Finite number in `[2, 20]`; overview zoom cap and overlap-list threshold                                        |
 | `amap`                           | required   | Object; use `{}` when credentials come entirely from the environment                                            |
@@ -57,6 +64,18 @@ For client mode, replace `service_host` with `security_js_code: replace-with-you
 The default small-screen detail height is `180px` at widths up to 600px. Theme CSS can override `.hpm-detail { --hpm-mobile-height: 200px; }`. A zero or percentage height is accepted but can make a card invisible when its containing block has no usable height; `px` or `rem` is usually easier to size.
 
 ## Environment precedence
+
+Exploration flags reject strings, numbers, nulls, arrays, and unknown keys. Restoration saves the latest valid view and panel, with 200 ms coalesced checkpoints, for two hours in the current tab. Both memory and session storage are bounded to 16 map scopes and 16 KiB per snapshot. It does not replay individual browser history entries, change the address bar, take focus, or scroll the page. Setting `restore: false` clears only the current scope. Blocked storage preserves document-local memory; another full document may retry session storage. Old generated HTML without exploration settings or the overview URL keeps its map usable without reading restoration storage.
+
+Sharing is independent of restoration and is available on both the generated overview and tag-embedded overview after successful initialization with full view capabilities. The **分享地图** control reads the live view and panel on click. Clipboard failure or unavailability provides a root-local labeled read-only field; Escape or Close returns focus without scrolling. `share: false` disables both the control and incoming query parsing. Embedded maps do not consume their host page's query. Sharing always targets the configured overview route at the current origin, for root `/` and subdirectory `/blog/` installations.
+
+Random exploration is optional and defaults to `random: false`. Enable it with `random: true` to show **随机一站** after a capable overview loads with unique, safe article candidates. Selection uses the existing dataset without background article requests; it only centers the map and opens a preview, leaving article navigation to the reader and never starting track playback. Candidates retain their order and receive equal probability; with alternatives, the current unique single preview is excluded before the previous random choice. One candidate may repeat, and zero candidates hide the button. Coordinates stay exact; zoom follows `min(max_zoom, max(current_zoom, 11))`. Reduced motion applies the view immediately. Sharing and restoration remain independent.
+
+The public v1 query whitelist is `hpm_v=1`, `hpm_center=longitude,latitude` (six decimal places maximum in generated links), `hpm_zoom` (two decimal places maximum), and optional `hpm_post`. The latter is an exact, unique, safe dataset reference; group/all panels and unknown/ambiguous posts become view-only. Links are at most 4,096 characters, dropping an oversized article reference. The literal overview route and terminal `index.html` alias accept shares; encoded path separators are not decoded. A fully valid explicit share takes priority over document memory, then session storage, then the normal fitted default. Duplicate/unknown `hpm_` keys or invalid version/view invalidate the share. Sharing does not change browser history, resource fetching, navigation, or map configuration. URLs are public, not a secrecy boundary; see [security](security.md).
+
+中文：三项开关必须为布尔值，默认 `restore: true`、`share: true`、`random: false`。仅恢复当前标签页最近的有效视角及面板，不逐条回放历史；有效期 2 小时，最多 16 个作用域，每份快照 16 KiB。
+
+中文：`random: true` 可选开启“随机一站”，仅使用已有文章数据、无后台文章请求，只定位并预览，不自动跳转或播放轨迹。没有唯一安全候选时隐藏按钮；有多个候选时优先排除当前单篇文章，否则排除上次随机文章。代表坐标不抖动，减少动态效果时立即定位。
 
 These names are case-sensitive:
 

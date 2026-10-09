@@ -63,6 +63,21 @@ function document(routes: HexoRoute[], path = 'map/index.html') {
 }
 
 const temporaryDirectories: string[] = [];
+describe('overview exploration projection', () => {
+  it.each([
+    ['/', 'map/', '/map/'],
+    ['/blog/', 'map/', '/blog/map/'],
+    ['/blog/', '地图/百分%25/', '/blog/%E5%9C%B0%E5%9B%BE/%E7%99%BE%E5%88%86%25/'],
+  ])('uses publicUrl for %s %s', (root, path, expected) => {
+    const routes = generate([post()], instance(root), config({ path }));
+    const settings = JSON.parse(
+      document(routes, `${path}index.html`).querySelector('[data-hpm-data]')!.textContent!,
+    );
+    expect(settings.overviewUrl).toBe(expected);
+    expect(settings.exploration).toEqual({ restore: true, share: true, random: false });
+    expect(Object.keys(data(routes, `${path}posts.json`))).toEqual(['version', 'posts']);
+  });
+});
 afterEach(() =>
   temporaryDirectories
     .splice(0)

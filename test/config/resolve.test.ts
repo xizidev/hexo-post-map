@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ConfigValidationError, resolveConfig } from '../../src/config/resolve';
+import { DEFAULT_CONFIG } from '../../src/config/defaults';
 
 const validConfig = {
   enabled: true,
@@ -25,6 +26,31 @@ function expectConfigError(raw: unknown, fieldPath: string, env: NodeJS.ProcessE
 }
 
 describe('resolveConfig', () => {
+  it('defines strict exploration defaults with deeply frozen flags', () => {
+    const flags = Reflect.get(resolveConfig(validConfig, {})!.overview, 'exploration');
+    expect(flags).toEqual({ restore: true, share: true, random: false });
+    expect(Object.isFrozen(flags)).toBe(true);
+    expect(Object.isFrozen(Reflect.get(DEFAULT_CONFIG.overview, 'exploration'))).toBe(true);
+  });
+  it.each([null, [], 'private-value'])('rejects exploration object %j', (exploration) => {
+    expectConfigError({ ...validConfig, overview: { exploration } }, 'overview.exploration');
+  });
+  it.each(['restore', 'share', 'random'])('requires strict boolean %s', (flag) => {
+    for (const value of ['private-value', 1, null]) {
+      const error = expectConfigError(
+        { ...validConfig, overview: { exploration: { [flag]: value } } },
+        `overview.exploration.${flag}`,
+      );
+      expect(error.message).not.toContain('private-value');
+      expect(error.message).not.toContain('file-key');
+    }
+  });
+  it('rejects unknown exploration fields', () => {
+    expectConfigError(
+      { ...validConfig, overview: { exploration: { extra: true } } },
+      'overview.exploration.extra',
+    );
+  });
   it('is a no-op without explicit enablement', () => {
     expect(resolveConfig(undefined, {})).toBeNull();
     expect(resolveConfig({ enabled: false }, {})).toBeNull();

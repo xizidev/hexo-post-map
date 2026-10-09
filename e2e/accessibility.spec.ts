@@ -3,6 +3,7 @@ import {
   expect,
   fireAnimationFrame,
   installControlledAnimationFrames,
+  installOverviewExplorationFixture,
   installTrackedPage,
   pendingAnimationFrames,
   test,
@@ -18,6 +19,319 @@ async function tabTo(page: Page, target: Locator) {
     if (await target.evaluate((element) => element === document.activeElement)) return;
   }
   await expect(target).toBeFocused();
+}
+
+async function expectCenterReachable(target: Locator) {
+  expect(
+    await target.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      return node.contains(
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+      );
+    }),
+  ).toBe(true);
+}
+
+// Inspect the native screenshot inside each digit's text range, excluding the circular border.
+// A blank glyph or the former solid backplate has no contrasting pixels in this region.
+// Decode in the browser's canvas so this focused check needs no PNG dependency or golden image.
+async function digitPixelContrasts(surface: Locator): Promise<number[]> {
+  const ranges = await surface.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    const text = node.firstChild!;
+    return Array.from({ length: text.textContent!.length }, (_, index) => {
+      const range = document.createRange();
+      range.setStart(text, index);
+      range.setEnd(text, index + 1);
+      const digit = range.getBoundingClientRect();
+      return {
+        left: digit.left - box.left,
+        top: digit.top - box.top,
+        right: digit.right - box.left,
+        bottom: digit.bottom - box.top,
+      };
+    });
+  });
+  const screenshot = await surface.screenshot({ scale: 'css' });
+  return surface.evaluate(
+    async (_node, { png, ranges }) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${png}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const context = canvas.getContext('2d')!;
+      context.drawImage(image, 0, 0);
+      const { data } = context.getImageData(0, 0, image.width, image.height);
+      const linear = (value: number) => {
+        const channel = value / 255;
+        return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+      };
+      return ranges.map((range) => {
+        const luminances: number[] = [];
+        for (let y = Math.ceil(range.top) + 1; y < Math.floor(range.bottom) - 1; y++) {
+          for (let x = Math.ceil(range.left); x < Math.floor(range.right); x++) {
+            const offset = (y * image.width + x) * 4;
+            luminances.push(
+              0.2126 * linear(data[offset]!) +
+                0.7152 * linear(data[offset + 1]!) +
+                0.0722 * linear(data[offset + 2]!),
+            );
+          }
+        }
+        luminances.sort((a, b) => a - b);
+        // Discard isolated antialiasing/noise pixels: both tones must occupy at least 5%.
+        const low = luminances[Math.floor(luminances.length * 0.05)]!;
+        const high = luminances[Math.floor(luminances.length * 0.95)]!;
+        return (high + 0.05) / (low + 0.05);
+      });
+    },
+    { png: screenshot.toString('base64'), ranges },
+  );
+}
+
+for (const viewport of [
+  { width: 1280, height: 900 },
+  { width: 390, height: 844 },
+]) {
+  for (const [count, size] of [
+    [2, 34],
+    [30, 38],
+    [100, 42],
+  ] as const) {
+    test(`forced colors paint readable cluster digits ${count} at ${viewport.width}x${viewport.height}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+      await installOverviewExplorationFixture(page, {
+        count,
+        flags: { restore: true, share: true, random: false },
+      });
+      await page.goto('/blog/map/');
+      const cluster = page.getByRole('button', { name: `查看此处的 ${count} 篇文章`, exact: true });
+      const surface = cluster.locator('.hpm-cluster__surface');
+      await expect(surface).toHaveText(String(count));
+      const target = (await cluster.boundingBox())!;
+      expect(target.width).toBe(44);
+      expect(target.height).toBe(44);
+      const painted = (await surface.boundingBox())!;
+      expect(painted.width).toBe(size);
+      expect(painted.height).toBe(size);
+      if (process.env.HPM_CAPTURE_OVERVIEW === '1') {
+        const folder = '.superpowers/sdd/2026-10-08-overview-exploration/output/playwright';
+        const phase = process.env.HPM_CAPTURE_PHASE ?? 'after';
+        await page.screenshot({
+          path: `${folder}/final-fix-${phase}-${viewport.width}-${count}-forced.png`,
+        });
+        await cluster.screenshot({
+          path: `${folder}/final-fix-${phase}-${viewport.width}-${count}-forced-cluster.png`,
+        });
+      }
+      const contrasts = await digitPixelContrasts(surface);
+      await test.info().attach('digit-pixel-contrasts', {
+        body: JSON.stringify(contrasts),
+        contentType: 'application/json',
+      });
+      for (const [digit, contrast] of contrasts.entries())
+        expect(
+          contrast,
+          `visible digit ${String(count)[digit]} at index ${digit} must contain contrasting ink and background pixels`,
+        ).toBeGreaterThanOrEqual(4.5);
+      await expectCenterReachable(cluster);
+      await cluster.click();
+      await expect(
+        page.getByRole('button', { name: /^预览文章：Exploration article/ }),
+      ).toHaveCount(count);
+    });
+  }
+}
+
+for (const viewport of [
+  { width: 1280, height: 900 },
+  { width: 390, height: 844 },
+  { width: 320, height: 568 },
+  { width: 320, height: 480 },
+]) {
+  for (const mode of ['all', 'single'] as const) {
+    for (const forced of [false, true]) {
+      for (const panelFirst of [false, true]) {
+        test(`manual sharing is visible and operable with an open ${mode} panel at ${viewport.width}x${viewport.height} ${forced ? 'forced colors' : 'normal colors'} ${panelFirst ? 'panel-first' : 'copy-first'}`, async ({
+          page,
+        }) => {
+          await page.setViewportSize(viewport);
+          await page.emulateMedia({
+            forcedColors: forced ? 'active' : 'none',
+            reducedMotion: 'reduce',
+          });
+          await installOverviewExplorationFixture(page, {
+            count: 30,
+            flags: { restore: true, share: true, random: true },
+          });
+          await page.addInitScript(() => {
+            Object.defineProperty(navigator, 'clipboard', { value: undefined });
+            Math.random = () => 0;
+          });
+          await page.goto('/blog/map/');
+          await page
+            .getByRole('button', { name: mode === 'all' ? /^全部文章/ : '随机一站' })
+            .click();
+          const panel = page.getByRole('dialog');
+          await expect(panel).toBeVisible();
+          const preview = await panel.elementHandle();
+          const canvas = page.locator('[data-hpm-canvas]');
+          const before = (await canvas.boundingBox())!;
+          const share = page.getByRole('button', { name: '分享地图' });
+          await share.click();
+          const input = page.getByRole('textbox', { name: '地图分享链接（请手动复制）' });
+          await expect(input).toBeFocused();
+          if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+            await page.screenshot({
+              path: `.superpowers/sdd/2026-10-08-overview-exploration/output/playwright/manual-open-${viewport.width}-${viewport.height}-${mode}${forced ? '-forced' : ''}.png`,
+            });
+          // Native visibility requires the whole input and close target to survive stacking,
+          // not only CSS visibility or programmatic focus behind another surface.
+          for (const target of [input, page.locator('[data-hpm-share-close]')]) {
+            const bounds = (await target.boundingBox())!;
+            expect(bounds.width).toBeGreaterThanOrEqual(44);
+            expect(bounds.height).toBeGreaterThanOrEqual(44);
+            expect(
+              await target.evaluate((node) => {
+                const box = node.getBoundingClientRect();
+                return [
+                  [box.left + 2, box.top + 2],
+                  [box.right - 2, box.top + 2],
+                  [box.left + 2, box.bottom - 2],
+                  [box.right - 2, box.bottom - 2],
+                  [box.x + box.width / 2, box.y + box.height / 2],
+                ].every(([x, y]) => node.contains(document.elementFromPoint(x!, y!)));
+              }),
+            ).toBe(true);
+          }
+          await input.click();
+          await expect(input).toBeFocused();
+          await page.keyboard.press('Tab');
+          await expect(page.locator('[data-hpm-share-close]')).toBeFocused();
+          const panelClose = page.getByRole('button', { name: '关闭文章面板' });
+          if (panelFirst) {
+            const value = await input.inputValue();
+            const manualInput = await input.elementHandle();
+            // The panel close must be physically reachable while manual copy still exists.
+            await expectCenterReachable(panelClose);
+            await panelClose.click();
+            await expect(panel).toHaveCount(0);
+            await expect(input).toBeVisible();
+            await expect(input).toHaveValue(value);
+            expect(
+              await manualInput!.evaluate(
+                (node) => node === document.querySelector('[data-hpm-share-manual] input'),
+              ),
+            ).toBe(true);
+            await expectCenterReachable(input);
+            await input.click();
+            await expect(input).toBeFocused();
+            await page.keyboard.press('Tab');
+            await expect(page.locator('[data-hpm-share-close]')).toBeFocused();
+            await expectCenterReachable(page.locator('[data-hpm-share-close]'));
+            await page.locator('[data-hpm-share-close]').click();
+            await expect(input).toHaveCount(0);
+            await expect(share).toBeFocused();
+            await manualInput!.dispose();
+            await preview!.dispose();
+            return;
+          }
+          await page.locator('[data-hpm-share-close]').click();
+          await expect(input).toHaveCount(0);
+          await expect(share).toBeFocused();
+          await expect(panel).toBeVisible();
+          expect(
+            await preview!.evaluate((node) => node === document.querySelector('.hpm-panel')),
+          ).toBe(true);
+          const after = (await canvas.boundingBox())!;
+          for (const key of ['x', 'y', 'width', 'height'] as const)
+            expect(Math.abs(after[key] - before[key]), key).toBeLessThanOrEqual(1);
+          // Circular close targets have intentionally empty corner pixels: check the center.
+          await expectCenterReachable(panelClose);
+          await panelClose.click();
+          await expect(panel).toHaveCount(0);
+          await preview!.dispose();
+        });
+      }
+    }
+  }
+}
+
+for (const mobile of [false, true]) {
+  test(`exploration targets and manual copy remain usable with forced colors on ${mobile ? 'mobile' : 'desktop'}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 });
+    await installOverviewExplorationFixture(page, {
+      count: 30,
+      flags: { restore: true, share: true, random: true },
+    });
+    await page.addInitScript(() =>
+      Object.defineProperty(navigator, 'clipboard', { value: undefined }),
+    );
+    await page.goto('/blog/map/');
+    const share = page.getByRole('button', { name: '分享地图' });
+    await tabTo(page, share);
+    await expect(share).toHaveCSS('outline-width', '3px');
+    const folder = '.superpowers/sdd/2026-10-08-overview-exploration/output/playwright';
+    if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+      await page.screenshot({ path: `${folder}/${mobile ? 'mobile' : 'desktop'}-overview.png` });
+    await page.keyboard.press('Enter');
+    const input = page.getByRole('textbox', { name: '地图分享链接（请手动复制）' });
+    await expect(input).toBeFocused();
+    if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+      await page.screenshot({ path: `${folder}/${mobile ? 'mobile' : 'desktop'}-manual.png` });
+    await page.emulateMedia({ forcedColors: 'active', reducedMotion: 'reduce' });
+    for (const selector of [
+      '[data-hpm-show-list]',
+      '[data-hpm-share]',
+      '[data-hpm-random]',
+      '[data-hpm-share-close]',
+      '[data-hpm-share-manual] input',
+    ]) {
+      const box = (await page.locator(selector).boundingBox())!;
+      expect(box.width, selector).toBeGreaterThanOrEqual(44);
+      expect(box.height, selector).toBeGreaterThanOrEqual(44);
+    }
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth - innerWidth),
+    ).toBeLessThanOrEqual(0);
+    if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+      await page.screenshot({
+        path: `${folder}/${mobile ? 'mobile' : 'desktop'}-manual-forced-colors.png`,
+      });
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: /^全部文章/ }).click();
+    const close = page.getByRole('button', { name: '关闭文章面板' });
+    await expect(close).toBeFocused();
+    if (process.env.HPM_CAPTURE_OVERVIEW === '1')
+      await page.screenshot({
+        path: `${folder}/${mobile ? 'mobile' : 'desktop'}-panel-forced-colors.png`,
+      });
+    const closeBox = (await close.boundingBox())!;
+    expect(closeBox.width).toBeGreaterThanOrEqual(44);
+    expect(closeBox.height).toBeGreaterThanOrEqual(44);
+    // Check hit testing, which catches an overlapping toolbar even when boxes are large.
+    expect(
+      await close.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        return node.contains(
+          document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+        );
+      }),
+    ).toBe(true);
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: /^全部文章/ })).toBeFocused();
+    // A deterministic SDK does not render vendor attribution; reserve its actual corner footprint.
+    const toolbar = (await page.locator('[data-hpm-toolbar]').boundingBox())!;
+    const canvas = (await page.locator('[data-hpm-canvas]').boundingBox())!;
+    expect(toolbar.y + toolbar.height).toBeLessThan(canvas.y + canvas.height - 20);
+  });
 }
 
 test.describe('without JavaScript', () => {
@@ -302,7 +616,7 @@ test('forced colors preserve theme semantics, visible focus, and 44px controls',
   ).toEqual({
     accent: 'Highlight',
     contrast: 'HighlightText',
-    cluster: 'Highlight',
+    cluster: 'ButtonFace',
     panel: 'Canvas',
     text: 'CanvasText',
     muted: 'GrayText',
