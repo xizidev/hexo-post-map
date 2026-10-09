@@ -2,6 +2,13 @@
 
 Changes are recorded through release pull requests.
 
+## [0.6.0](https://github.com/xizidev/hexo-post-map/compare/v0.5.0...v0.6.0) (2026-10-09)
+
+
+### Features
+
+* add overview restoration, sharing and random exploration ([#24](https://github.com/xizidev/hexo-post-map/issues/24)) ([1c159f2](https://github.com/xizidev/hexo-post-map/commit/1c159f23c22b531d10c17397e67aaeee37c75aab))
+
 ## [0.5.0](https://github.com/xizidev/hexo-post-map/compare/v0.4.0...v0.5.0) (2026-10-08)
 
 
