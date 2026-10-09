@@ -1,4 +1,5 @@
 let nextInputId = 0;
+const COPY_CONFIRMATION_DURATION_MS = 3000;
 
 export function createShareControls(options: {
   root: HTMLElement;
@@ -8,6 +9,7 @@ export function createShareControls(options: {
 }): { readonly button: HTMLButtonElement; isCurrent(): boolean; destroy(): void } {
   const { root, toolbar } = options;
   const document = root.ownerDocument;
+  const view = document.defaultView;
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'hpm-overview__share';
@@ -21,6 +23,7 @@ export function createShareControls(options: {
   toolbar.append(button, status);
   let disposed = false;
   let attempt = 0;
+  let statusTimer: ReturnType<typeof setTimeout> | undefined;
   let manual:
     | {
         box: HTMLDivElement;
@@ -48,11 +51,32 @@ export function createShareControls(options: {
     manual?.box.remove();
     manual = undefined;
   }
+  function cancelStatusTimer() {
+    if (statusTimer === undefined) return;
+    clearTimeout(statusTimer);
+    statusTimer = undefined;
+  }
+  function setStatus(message: string, durationMs?: number) {
+    cancelStatusTimer();
+    status.textContent = message;
+    if (durationMs === undefined) return;
+    const sequence = attempt;
+    statusTimer = setTimeout(() => {
+      statusTimer = undefined;
+      if (current() && sequence === attempt) status.textContent = '';
+    }, durationMs);
+  }
+  function pagehide() {
+    attempt++;
+    const hadConfirmation = statusTimer !== undefined;
+    cancelStatusTimer();
+    if (hadConfirmation && current()) status.textContent = '';
+  }
   function closeManual() {
     if (!current()) return;
     attempt++;
     removeManual();
-    status.textContent = '';
+    setStatus('');
     button.focus({ preventScroll: true });
   }
   function fallback(link: string) {
@@ -87,13 +111,14 @@ export function createShareControls(options: {
     box.append(label, input, close);
     manual = { box, label, input, close };
     root.append(box);
-    status.textContent = '请手动复制链接';
+    setStatus('请手动复制链接');
     input.focus({ preventScroll: true });
     input.select();
   }
   function click() {
     if (!current()) return;
     const sequence = ++attempt;
+    setStatus('');
     let link: string | undefined;
     try {
       link = options.getLink();
@@ -103,7 +128,7 @@ export function createShareControls(options: {
     if (!current()) return;
     if (!link) {
       removeManual();
-      status.textContent = '暂时无法生成分享链接，请重试';
+      setStatus('暂时无法生成分享链接，请重试');
       return;
     }
     try {
@@ -118,7 +143,7 @@ export function createShareControls(options: {
         () => {
           if (!current() || sequence !== attempt) return;
           removeManual();
-          status.textContent = '链接已复制';
+          setStatus('链接已复制', COPY_CONFIRMATION_DURATION_MS);
         },
         () => {
           if (current() && sequence === attempt) fallback(link!);
@@ -129,6 +154,7 @@ export function createShareControls(options: {
     }
   }
   button.addEventListener('click', click);
+  view?.addEventListener('pagehide', pagehide);
   return {
     button,
     isCurrent: current,
@@ -136,6 +162,8 @@ export function createShareControls(options: {
       if (disposed) return;
       disposed = true;
       attempt++;
+      cancelStatusTimer();
+      view?.removeEventListener('pagehide', pagehide);
       button.removeEventListener('click', click);
       removeManual();
       root

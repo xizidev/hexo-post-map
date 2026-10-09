@@ -3,6 +3,129 @@ import { expect, installOverviewExplorationFixture, test } from './fixtures';
 
 const flags = { restore: true, share: true, random: false };
 
+for (const mobile of [false, true]) {
+  for (const fontSize of [16, 32]) {
+    test(`copy confirmation stays compact and dismisses on ${mobile ? 'mobile' : 'desktop'} at ${fontSize}px text`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(
+        mobile ? { width: 390, height: 844 } : { width: 1280, height: 900 },
+      );
+      await installOverviewExplorationFixture(page, {
+        count: 30,
+        flags: { ...flags, random: true },
+      });
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: { writeText: async () => undefined },
+        });
+      });
+      await page.goto('/blog/map/');
+      await page.evaluate((size) => {
+        document.documentElement.style.fontSize = size + 'px';
+      }, fontSize);
+      const share = page.getByRole('button', { name: '分享地图' });
+      await expect(share).toBeVisible();
+      const toolbar = page.locator('[data-hpm-toolbar]');
+      const before = await toolbar.boundingBox();
+      await share.click();
+      const status = page.locator('[data-hpm-share-status]');
+      await expect(status).toHaveText('链接已复制');
+      const toolbarBox = (await toolbar.boundingBox())!;
+      const statusBox = (await status.boundingBox())!;
+      const shareBox = (await share.boundingBox())!;
+      const canvasBox = (await page.locator('[data-hpm-canvas]').boundingBox())!;
+      expect(statusBox.width).toBeLessThan(toolbarBox.width * 0.8);
+      expect(toolbarBox.height).toBeCloseTo(before!.height, 0);
+      expect(statusBox.x + statusBox.width).toBeCloseTo(shareBox.x + shareBox.width, 0);
+      expect(statusBox.y).toBeGreaterThanOrEqual(toolbarBox.y + toolbarBox.height);
+      expect(statusBox.x).toBeGreaterThanOrEqual(canvasBox.x);
+      expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(canvasBox.x + canvasBox.width);
+      await expect(status).toBeEmpty({ timeout: 5000 });
+      await expect(share).toBeFocused();
+    });
+  }
+}
+
+for (const panelMode of ['single', 'all'] as const) {
+  for (const fontSize of [16, 32]) {
+    test(`copy confirmation stays above the ${panelMode} article panel at ${fontSize}px text`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await installOverviewExplorationFixture(page, {
+        count: 30,
+        flags: { ...flags, random: true },
+      });
+      await page.addInitScript(() => {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: { writeText: async () => undefined },
+        });
+      });
+      await page.goto('/blog/map/');
+      await expect(page.getByRole('button', { name: '分享地图' })).toBeVisible();
+      await page.evaluate((size) => {
+        document.documentElement.style.fontSize = size + 'px';
+      }, fontSize);
+      if (panelMode === 'single') {
+        await changeView(page);
+        await page
+          .getByRole('button', { name: '预览文章：Exploration article 7', exact: true })
+          .click();
+      } else {
+        await page.getByRole('button', { name: /^全部文章/ }).click();
+      }
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await page.getByRole('button', { name: '分享地图' }).click();
+      const status = page.locator('[data-hpm-share-status]');
+      await expect(status).toHaveText('链接已复制');
+      expect(
+        await status.evaluate((element) => {
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          const text = range.getBoundingClientRect();
+          const previousPointerEvents = element.style.pointerEvents;
+          // Hit-test the painted text, rather than only checking DOM presence.
+          element.style.pointerEvents = 'auto';
+          try {
+            return [0.2, 0.5, 0.8].every((fraction) => {
+              const topmost = document.elementFromPoint(
+                text.left + text.width * fraction,
+                text.top + text.height / 2,
+              );
+              return topmost === element || (topmost !== null && element.contains(topmost));
+            });
+          } finally {
+            element.style.pointerEvents = previousPointerEvents;
+          }
+        }),
+      ).toBe(true);
+      await page.getByRole('button', { name: '关闭文章面板' }).click();
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(status).toBeEmpty({ timeout: 5000 });
+    });
+  }
+}
+
+test('wrapped toolbar does not block the article panel close button at large text', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 620, height: 900 });
+  await installOverviewExplorationFixture(page, {
+    count: 30,
+    flags: { ...flags, random: true },
+  });
+  await page.goto('/blog/map/');
+  await expect(page.getByRole('button', { name: '分享地图' })).toBeVisible();
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '32px';
+  });
+  await page.getByRole('button', { name: /^全部文章/ }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.getByRole('button', { name: '关闭文章面板' }).click({ timeout: 3000 });
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
 async function clickVisibleArticle(page: Page): Promise<void> {
   const scroller = page.locator('.hpm-panel__scroller');
   const index = await scroller.evaluate((element) => {

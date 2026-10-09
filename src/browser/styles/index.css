@@ -325,7 +325,6 @@
 .hpm-overview__toolbar {
   grid-area: map;
   position: absolute;
-  z-index: 10;
   top: 16px;
   right: 16px;
   display: flex;
@@ -335,14 +334,30 @@
   justify-content: flex-end;
 }
 
+.hpm-overview__toolbar > button {
+  position: relative;
+  z-index: 10;
+}
+
 .hpm-overview__share-status {
-  flex-basis: 100%;
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 8px);
+  right: 0;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
   text-align: right;
+  overflow-wrap: anywhere;
+  font-size: 0.875em;
+  line-height: 1.4;
+  pointer-events: none;
   color: var(--hpm-text);
 }
 
 .hpm-overview__share-status:not(:empty) {
-  padding: 0.25rem 0.5rem;
+  padding: 0.4em 0.7em;
+  border: 1px solid var(--hpm-panel-border);
   border-radius: 0.35rem;
   background: var(--hpm-card-surface);
 }

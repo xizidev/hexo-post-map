@@ -17,7 +17,13 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
   // deterministic preloaded SDK and a CSP that blocks every non-local network request.
   const preload = fakeSdk.replace('window.___onAPILoaded();', '');
   const instrumentation = `window.__hpmCache = { id: Math.random(), restores: 0 };
-    addEventListener('pageshow', event => { if (event.persisted) window.__hpmCache.restores++; });`;
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText: async () => undefined } });
+    addEventListener('pageshow', event => {
+      if (event.persisted) {
+        window.__hpmCache.restores++;
+        window.__hpmShareStatusOnRestore = document.querySelector('[data-hpm-share-status]')?.textContent;
+      }
+    });`;
   const server = createServer(async (request, response) => {
     try {
       const source = await fetch(`http://127.0.0.1:4179${request.url}`);
@@ -83,6 +89,8 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
     await expect(page.getByRole('dialog', { name: '2 篇文章' })).toBeVisible();
 
     for (let visit = 1; visit <= 2; visit++) {
+      await page.getByRole('button', { name: '分享地图' }).click();
+      await expect(page.locator('[data-hpm-share-status]')).toHaveText('链接已复制');
       await page.goBack({ waitUntil: 'commit' });
       await expect(page).toHaveURL(`${origin}/blog/posts/single/`);
       await expect
@@ -112,6 +120,8 @@ test('real Chromium back/forward cache preserves usable detail and overview cont
       await expect
         .poll(() => page.evaluate(() => Reflect.get(window, '__hpmCache')))
         .toEqual({ id: overviewId, restores: visit });
+      expect(await page.evaluate(() => Reflect.get(window, '__hpmShareStatusOnRestore'))).toBe('');
+      await expect(page.locator('[data-hpm-share-status]')).toBeEmpty();
       expect(await page.evaluate(() => Reflect.get(window, '__hpmSdk').maps.length)).toBe(1);
       await expect(page.locator('[data-hpm-activate]')).toHaveCount(0);
       await expect(page.locator('[data-hpm-show-list]')).toHaveCount(1);
