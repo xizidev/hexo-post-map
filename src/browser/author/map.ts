@@ -149,10 +149,18 @@ export async function createAuthorMap(
   }
   function add(overlay: unknown): void {
     owned.add(overlay);
-    map.add([overlay]);
+    try {
+      map.add([overlay]);
+    } catch (error) {
+      cleanup(() => remove(overlay));
+      throw error;
+    }
   }
   function remove(overlay: unknown): void {
-    if (owned.delete(overlay)) map.remove([overlay]);
+    if (owned.has(overlay)) {
+      map.remove([overlay]);
+      owned.delete(overlay);
+    }
   }
   function previewable(coordinate: Coordinate): boolean {
     if (!validCoordinate(coordinate) || Math.abs(coordinate[1]) > MAX_PREVIEW_LATITUDE) {
@@ -215,64 +223,80 @@ export async function createAuthorMap(
         if (draft.zoom !== undefined && (draft.zoom < 2 || draft.zoom > 20))
           options.onWarning(PREVIEW_WARNING);
         const points = new Map(draft.points.map((point) => [point.id, point]));
+        const removed: MarkerEntry[] = [];
         for (const [id, entry] of entries) {
           if (!points.has(id)) {
             entries.delete(id);
-            entry.detach();
-            remove(entry.marker);
+            removed.push(entry);
           }
+        }
+        // Invalidate all removed IDs before any SDK cleanup can interrupt the render.
+        for (const entry of removed) {
+          entry.detach();
+          cleanup(() => remove(entry.marker));
         }
         for (const point of draft.points) {
           const coordinate: Coordinate = [point.longitude, point.latitude];
-          let entry = entries.get(point.id);
+          const previous = entries.get(point.id);
           if (!previewable(coordinate)) {
-            if (entry) {
+            if (previous) {
               entries.delete(point.id);
-              entry.detach();
-              remove(entry.marker);
+              previous.detach();
+              cleanup(() => remove(previous.marker));
             }
             continue;
           }
           const selected = point.id === selectedId;
-          if (!entry) {
-            const content = createAuthorMarker(point.name, selected);
-            const marker = new api.Marker({
-              position: coordinate,
-              content,
-              draggable: selected,
-              bubble: false,
-              anchor: 'bottom-center',
-            });
-            entry = { marker, content, coordinate, label: point.name, selected, detach() {} };
-            entries.set(point.id, entry);
-            bind(point.id, entry);
-            add(marker);
-          } else if (
-            !sameCoordinate(entry.coordinate, coordinate) ||
-            entry.label !== point.name ||
-            entry.selected !== selected
-          ) {
-            entry.detach();
-            // Replace the entry identity so callbacks held before this edit become inert.
-            const previous = entry;
-            const contentChanged = previous.label !== point.name || previous.selected !== selected;
-            const content = contentChanged
-              ? createAuthorMarker(point.name, selected)
-              : previous.content;
-            entry = {
-              marker: previous.marker,
-              content,
-              coordinate,
-              label: point.name,
-              selected,
-              detach() {},
-            };
-            entries.set(point.id, entry);
-            if (!sameCoordinate(previous.coordinate, coordinate))
-              entry.marker.setPosition(coordinate);
-            if (previous.selected !== selected) entry.marker.setDraggable(selected);
-            if (contentChanged) entry.marker.setContent(content);
-            bind(point.id, entry);
+          if (
+            previous &&
+            sameCoordinate(previous.coordinate, coordinate) &&
+            previous.label === point.name &&
+            previous.selected === selected
+          )
+            continue;
+
+          // SDK synchronization is transactional: an incomplete entry is never current.
+          entries.delete(point.id);
+          previous?.detach();
+          let next: MarkerEntry | undefined;
+          try {
+            if (previous) {
+              const contentChanged =
+                previous.label !== point.name || previous.selected !== selected;
+              const content = contentChanged
+                ? createAuthorMarker(point.name, selected)
+                : previous.content;
+              next = {
+                marker: previous.marker,
+                content,
+                coordinate,
+                label: point.name,
+                selected,
+                detach() {},
+              };
+              if (!sameCoordinate(previous.coordinate, coordinate))
+                next.marker.setPosition(coordinate);
+              if (previous.selected !== selected) next.marker.setDraggable(selected);
+              if (contentChanged) next.marker.setContent(content);
+            } else {
+              const content = createAuthorMarker(point.name, selected);
+              const marker = new api.Marker({
+                position: coordinate,
+                content,
+                draggable: selected,
+                bubble: false,
+                anchor: 'bottom-center',
+              });
+              next = { marker, content, coordinate, label: point.name, selected, detach() {} };
+            }
+            bind(point.id, next);
+            if (!previous) add(next.marker);
+            entries.set(point.id, next);
+          } catch {
+            next?.detach();
+            const failedMarker = next?.marker ?? previous?.marker;
+            if (failedMarker) cleanup(() => remove(failedMarker));
+            options.onWarning(SDK_WARNING);
           }
         }
         // An unpreviewable stop must not silently join the two surrounding stops.
@@ -289,13 +313,14 @@ export async function createAuthorMap(
         ) {
           if (line) line.setPath(nextPath);
           else {
-            line = new api.Polyline({
+            const nextLine = new api.Polyline({
               path: nextPath,
               strokeColor: '#2563eb',
               strokeWeight: 4,
               bubble: false,
             });
-            add(line);
+            add(nextLine);
+            line = nextLine;
           }
           path = nextPath;
         }
@@ -329,15 +354,16 @@ export async function createAuthorMap(
         } else if (!candidate) {
           const content = createAuthorMarker('待添加地点', false);
           content.setAttribute('disabled', '');
-          candidate = new api.Marker({
+          const nextCandidate = new api.Marker({
             position: coordinate,
             content,
             draggable: false,
             bubble: false,
             anchor: 'bottom-center',
           });
+          add(nextCandidate);
+          candidate = nextCandidate;
           candidateCoordinate = coordinate;
-          add(candidate);
         } else if (!candidateCoordinate || !sameCoordinate(candidateCoordinate, coordinate)) {
           candidate.setPosition(coordinate);
           candidateCoordinate = coordinate;

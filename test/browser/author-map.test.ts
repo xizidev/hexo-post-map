@@ -8,6 +8,7 @@ import {
   type AuthorMapOptions,
 } from '../../src/browser/author/map';
 import { createAuthorMarker } from '../../src/browser/author/marker';
+import type { Coordinate } from '../../src/domain/types';
 
 const sdk = vi.hoisted(() => ({ load: vi.fn(), reset: vi.fn() }));
 vi.mock('@amap/amap-jsapi-loader', () => ({ default: sdk }));
@@ -53,17 +54,27 @@ class FakeMap extends Events {
   }
 }
 class FakeMarker extends Events {
-  setPosition = vi.fn();
-  setContent = vi.fn();
-  setDraggable = vi.fn();
+  setPosition = vi.fn((position: Coordinate) => {
+    this.options.position = position;
+  });
+  setContent = vi.fn((content: HTMLElement) => {
+    this.options.content = content;
+  });
+  setDraggable = vi.fn((draggable: boolean) => {
+    this.options.draggable = draggable;
+  });
   constructor(readonly options: Record<string, unknown>) {
     super();
     markers.push(this);
   }
 }
 class FakePolyline {
-  setPath = vi.fn();
+  path: readonly Coordinate[];
+  setPath = vi.fn((path: readonly Coordinate[]) => {
+    this.path = path;
+  });
   constructor(readonly options: Record<string, unknown>) {
+    this.path = options.path as readonly Coordinate[];
     lines.push(this);
   }
 }
@@ -397,6 +408,189 @@ describe('author map', () => {
     expect(
       vi.mocked(options.onWarning).mock.calls.every(([message]) => !message.includes('private')),
     ).toBe(true);
+  });
+  it('invalidates every removed ID before an earlier SDK removal can fail', async () => {
+    const { handle, options } = await setup();
+    handle.render(draft(), 'point-2');
+    const removedA = markers[0]!;
+    const removedB = markers[1]!;
+    const lateClick = [...removedB.listeners.get('click')!][0]!;
+    const lateDrag = [...removedB.listeners.get('dragend')!][0]!;
+    map.remove.mockImplementationOnce(() => {
+      throw new Error('private removal failure');
+    });
+    handle.render(createAuthorDraft());
+    lateClick(lnglat(119, 33));
+    lateDrag(lnglat(119.5, 33.5));
+    removedB.emit('click', lnglat(119, 33));
+    removedB.emit('dragend', lnglat(119.5, 33.5));
+    expect(options.onSelect).not.toHaveBeenCalled();
+    expect(options.onMove).not.toHaveBeenCalled();
+    expect(removedA.listeners.size).toBe(0);
+    expect(removedB.listeners.size).toBe(0);
+    expect(map.overlays.has(removedB)).toBe(false);
+    expect(options.onWarning).toHaveBeenCalled();
+  });
+  it.each(['registration', 'add'] as const)(
+    'recovers the same draft after initial marker %s fails',
+    async (failure) => {
+      if (failure === 'registration') {
+        let failRegistration = true;
+        sdk.load.mockResolvedValue({
+          ...api,
+          Marker: class extends FakeMarker {
+            on(event: string, listener: Listener) {
+              super.on(event, listener);
+              if (event === 'dragend' && failRegistration) {
+                failRegistration = false;
+                throw new Error('private registration failure');
+              }
+            }
+          },
+        });
+      }
+      const { handle, options } = await setup();
+      if (failure === 'add')
+        map.add.mockImplementationOnce((items) => {
+          items.forEach((item) => map.overlays.add(item));
+          throw new Error('private add failure');
+        });
+      const input = draft();
+      handle.render(input, 'point-1');
+      const failedMarker = markers[0]!;
+      expect(options.onWarning).toHaveBeenCalled();
+      handle.render(input, 'point-1');
+      const visible = markers.filter((marker) => map.overlays.has(marker));
+      expect(visible).toHaveLength(2);
+      expect(map.overlays.has(failedMarker)).toBe(false);
+      expect(failedMarker.listeners.size).toBe(0);
+      const selected = visible.find((marker) => marker.options.draggable)!;
+      selected.emit('click', lnglat(118, 32));
+      selected.emit('dragend', lnglat(118.5, 32.5));
+      expect(options.onSelect).toHaveBeenCalledExactlyOnceWith('point-1');
+      expect(options.onMove).toHaveBeenCalledExactlyOnceWith('point-1', [118.5, 32.5]);
+      expect(lines[0]!.options.path).toEqual([
+        [118.123456789, 32],
+        [119, 33],
+        [118.123456789, 32],
+      ]);
+    },
+  );
+  it.each(['setPosition', 'setDraggable', 'setContent'] as const)(
+    'recovers the same draft after marker %s fails',
+    async (setter) => {
+      const { handle, options } = await setup();
+      const input = draft();
+      handle.render(input, 'point-2');
+      const failedMarker = markers[0]!;
+      const staleClick = [...failedMarker.listeners.get('click')!][0]!;
+      failedMarker[setter].mockImplementationOnce(() => {
+        throw new Error('private setter failure');
+      });
+      const changed = {
+        ...input,
+        points: [{ ...input.points[0]!, name: 'Edited', longitude: 118.5 }, input.points[1]!],
+      };
+      handle.render(changed, 'point-1');
+      expect(options.onWarning).toHaveBeenCalled();
+      handle.render(changed, 'point-1');
+      expect(map.overlays.has(failedMarker)).toBe(false);
+      expect(failedMarker.listeners.size).toBe(0);
+      const recovered = markers.find(
+        (marker) => marker !== failedMarker && marker.options.draggable && map.overlays.has(marker),
+      )!;
+      expect(recovered.options.position).toEqual([118.5, 32]);
+      expect((recovered.options.content as HTMLElement).getAttribute('aria-label')).toBe('Edited');
+      staleClick(lnglat(118, 32));
+      recovered.emit('click', lnglat(118.5, 32));
+      recovered.emit('dragend', lnglat(118.75, 32.5));
+      expect(options.onSelect).toHaveBeenCalledExactlyOnceWith('point-1');
+      expect(options.onMove).toHaveBeenCalledExactlyOnceWith('point-1', [118.75, 32.5]);
+      expect(map.overlays.has(markers[1]!)).toBe(true);
+      expect(markers[1]!.setPosition).not.toHaveBeenCalled();
+      expect(lines.find((line) => map.overlays.has(line))?.path).toEqual([
+        [118.5, 32],
+        [119, 33],
+        [118.5, 32],
+      ]);
+    },
+  );
+  it.each(['before', 'after'] as const)(
+    'retries route creation when SDK add fails %s adding the overlay',
+    async (timing) => {
+      const { handle, options } = await setup();
+      let failAdd = true;
+      map.add.mockImplementation((items) => {
+        if (items[0] instanceof FakePolyline && failAdd) {
+          failAdd = false;
+          if (timing === 'after') items.forEach((item) => map.overlays.add(item));
+          throw new Error('private route add');
+        }
+        items.forEach((item) => map.overlays.add(item));
+      });
+      const input = draft();
+      handle.render(input);
+      const failedLine = lines[0]!;
+      expect(options.onWarning).toHaveBeenCalled();
+      handle.render(input);
+      expect(map.overlays.has(failedLine)).toBe(false);
+      const visible = lines.filter((line) => map.overlays.has(line));
+      expect(visible).toHaveLength(1);
+      expect(visible[0]!.path).toEqual([
+        [118.123456789, 32],
+        [119, 33],
+        [118.123456789, 32],
+      ]);
+      expect(markers).toHaveLength(2);
+    },
+  );
+  it.each(['before', 'after'] as const)(
+    'retries candidate creation when SDK add fails %s adding the overlay',
+    async (timing) => {
+      const { handle, options } = await setup();
+      map.add.mockImplementationOnce((items) => {
+        if (timing === 'after') items.forEach((item) => map.overlays.add(item));
+        throw new Error('private candidate add');
+      });
+      handle.setCandidate([118.123456789, 32]);
+      const failedCandidate = markers[0]!;
+      expect(options.onWarning).toHaveBeenCalled();
+      handle.setCandidate([118.123456789, 32]);
+      expect(map.overlays.has(failedCandidate)).toBe(false);
+      const visible = markers.filter((marker) => map.overlays.has(marker));
+      expect(visible).toHaveLength(1);
+      expect(visible[0]!.options.position).toEqual([118.123456789, 32]);
+      expect(options.onCandidate).not.toHaveBeenCalled();
+      expect(map.setFitView).not.toHaveBeenCalled();
+    },
+  );
+  it('retries route and candidate setters without publishing failed coordinates', async () => {
+    const { handle, options } = await setup();
+    const input = draft();
+    handle.render(input);
+    handle.setCandidate([120, 30]);
+    const line = lines[0]!;
+    const candidate = markers[2]!;
+    line.setPath.mockImplementationOnce(() => {
+      throw new Error('private path update');
+    });
+    candidate.setPosition.mockImplementationOnce(() => {
+      throw new Error('private candidate position');
+    });
+    const changed = { ...input, route: ['point-2', 'point-1', 'point-2'] };
+    handle.render(changed);
+    handle.setCandidate([121, 31]);
+    expect(options.onWarning).toHaveBeenCalledTimes(2);
+    handle.render(changed);
+    handle.setCandidate([121, 31]);
+    expect(line.path).toEqual([
+      [119, 33],
+      [118.123456789, 32],
+      [119, 33],
+    ]);
+    expect(candidate.options.position).toEqual([121, 31]);
+    expect(markers).toHaveLength(3);
+    expect(lines).toHaveLength(1);
   });
   it('retains only current listeners after repeated edits and stops them on abort', async () => {
     const abort = new AbortController();
