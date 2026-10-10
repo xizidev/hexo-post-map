@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>地图选点助手</title>
+    <link rel="stylesheet" href="/assets/editor.css" />
+    <script type="module" src="/assets/editor.js"></script>
+  </head>
+  <body>
+    <main data-author-root>
+      <header>
+        <h1>地图选点助手</h1>
+        <p>刷新或关闭页面会清空草稿，请导出后保存。</p>
+      </header>
+      <div class="author-layout">
+        <section class="map-panel" aria-label="地点地图预览">
+          <div data-map aria-label="地图"></div>
+          <p data-map-status role="status"></p>
+          <button type="button" data-fit>适配地点视野</button>
+          <p>坐标系：GCJ-02 · 地图数据及署名由高德地图提供</p>
+        </section>
+        <section class="editor-panel" aria-label="草稿编辑">
+          <h2>地点</h2>
+          <div class="actions">
+            <button type="button" data-new>手动新增地点</button
+            ><button type="button" data-import-open>导入 YAML</button>
+          </div>
+          <ol data-point-list class="bounded-list" aria-label="地点列表"></ol>
+          <form data-point-form novalidate>
+            <p data-form-title>新增地点</p>
+            <label for="point-name">地点名称</label
+            ><textarea id="point-name" name="name" rows="2"></textarea>
+            <label for="point-longitude">经度</label
+            ><input
+              id="point-longitude"
+              name="longitude"
+              type="text"
+              inputmode="decimal"
+              autocomplete="off"
+            />
+            <label for="point-latitude">纬度</label
+            ><input
+              id="point-latitude"
+              name="latitude"
+              type="text"
+              inputmode="decimal"
+              autocomplete="off"
+            />
+            <p data-field-error role="status"></p>
+            <button type="submit" data-add>确认添加地点</button>
+          </form>
+          <label for="map-zoom">文章缩放（可选，新增值 2–20）</label
+          ><input id="map-zoom" data-zoom type="text" inputmode="decimal" autocomplete="off" />
+          <p data-zoom-warning></p>
+          <h2>行程示意线</h2>
+          <p>按顺序连接地点，可重复途经。此线不是导航道路。</p>
+          <ol data-route-list class="bounded-list" aria-label="线路顺序"></ol>
+          <p data-track hidden></p>
+          <section data-export aria-label="导出 YAML">
+            <h2>导出</h2>
+            <p data-export-error role="status"></p>
+            <div class="actions">
+              <button type="button" data-copy>复制 YAML</button
+              ><button type="button" data-download>下载 YAML</button>
+            </div>
+            <p data-export-status role="status" aria-live="polite"></p>
+            <label for="copy-fallback" data-copy-label hidden>手动复制 YAML（请选择并复制）</label
+            ><textarea id="copy-fallback" data-copy-fallback readonly hidden></textarea>
+            <details>
+              <summary>YAML 预览</summary>
+              <pre data-yaml></pre>
+            </details>
+          </section>
+          <p data-status role="status" aria-live="polite"></p>
+        </section>
+      </div>
+      <dialog data-import-dialog aria-labelledby="import-title">
+        <h2 id="import-title">导入地图 YAML</h2>
+        <label for="import-source">粘贴完整 map: 配置</label
+        ><textarea id="import-source" data-import-source rows="12"></textarea>
+        <p data-import-error role="status"></p>
+        <p data-import-summary></p>
+        <div class="actions">
+          <button type="button" data-import-validate>校验导入</button
+          ><button type="button" data-import-confirm hidden>确认替换当前草稿</button
+          ><button type="button" data-import-cancel>取消</button>
+        </div>
+      </dialog>
+      <dialog data-delete-dialog aria-labelledby="delete-title">
+        <h2 id="delete-title">删除地点</h2>
+        <p data-delete-summary></p>
+        <div class="actions">
+          <button type="button" data-delete-confirm>确认删除</button
+          ><button type="button" data-delete-cancel>取消</button>
+        </div>
+      </dialog>
+    </main>
+  </body>
+</html>
