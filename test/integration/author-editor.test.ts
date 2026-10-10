@@ -44,6 +44,23 @@ async function freePort() {
   return port;
 }
 describe('packed author supervisor', () => {
+  it('accepts canonical HTTP port 80 readiness but rejects explicit default-port aliases', async () => {
+    const { readAuthorReadyFile } = await supervisor();
+    await site('', async (directory) => {
+      const path = join(directory, 'ready.json');
+      const origin = 'http://127.0.0.1';
+      const handle = { origin, url: `${origin}/#session=${token}` };
+      await writeFile(path, JSON.stringify(handle), { mode: 0o600 });
+      expect(await readAuthorReadyFile(path, origin)).toEqual(handle);
+      await writeFile(
+        path,
+        JSON.stringify({ origin, url: `http://127.0.0.1:80/#session=${token}` }),
+      );
+      await expect(readAuthorReadyFile(path, origin)).rejects.toThrow(
+        'Author readiness unavailable.',
+      );
+    });
+  });
   it.each(['cancel', 'exit'])(
     'drains owned async writes and resource finalization before returning after %s during work',
     async (cause) => {

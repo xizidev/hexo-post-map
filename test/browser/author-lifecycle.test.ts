@@ -109,3 +109,34 @@ it('ignores delayed bootstrap after pagehide until a persisted remount', async (
     'true',
   );
 });
+it('restores pending coordinate and zoom validation across persisted pagehide/pageshow', async () => {
+  page = startAuthorPage(window);
+  await flush();
+  const input = (selector: string, value: string) => {
+    const field = document.querySelector<HTMLInputElement>(selector)!;
+    field.value = value;
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  input('[name=name]', 'A');
+  input('[name=longitude]', '-73.123456789');
+  input('[name=latitude]', '40');
+  document.querySelector<HTMLFormElement>('[data-point-form]')!.requestSubmit();
+  await flush();
+  input('[name=longitude]', '1e+');
+  input('[data-zoom]', '1e');
+  window.dispatchEvent(new Event('pagehide'));
+  const shown = new Event('pageshow');
+  Object.defineProperty(shown, 'persisted', { value: true });
+  window.dispatchEvent(shown);
+  window.dispatchEvent(shown);
+  await flush();
+  expect(document.querySelector<HTMLInputElement>('[name=longitude]')!.value).toBe('1e+');
+  expect(document.querySelector<HTMLInputElement>('[data-zoom]')!.value).toBe('1e');
+  expect(document.querySelector<HTMLButtonElement>('[data-copy]')!.disabled).toBe(true);
+  expect(document.querySelector('[data-yaml]')!.textContent).toContain('过期');
+  input('[name=longitude]', '-74');
+  expect(document.querySelector<HTMLButtonElement>('[data-copy]')!.disabled).toBe(true);
+  input('[data-zoom]', '12');
+  await flush();
+  expect(document.querySelector<HTMLButtonElement>('[data-copy]')!.disabled).toBe(false);
+});

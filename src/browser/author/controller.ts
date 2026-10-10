@@ -10,7 +10,7 @@ import {
 } from '../../author/draft';
 import type { AuthorBootstrap } from '../../author/protocol';
 import type { AuthorDraft, AuthorMapInput } from '../../author/types';
-import { exportAuthorYaml, importAuthorYaml } from '../../author/yaml';
+import { exportAuthorYaml, formatAuthorIssues, importAuthorYaml } from '../../author/yaml';
 import type { Coordinate } from '../../domain/types';
 import { createAuthorExportControls } from './export-controls';
 import { createAuthorMap, type AuthorMapHandle } from './map';
@@ -19,6 +19,16 @@ import { createAuthorView } from './view';
 export interface AuthorEditorSession {
   draft: AuthorDraft;
   selectedId?: string;
+  inputs?: {
+    draft: AuthorDraft;
+    buffers: Map<string, Fields>;
+    newFields: Fields;
+    newDirty: boolean;
+    candidate?: Coordinate;
+    zoomValue: string;
+    zoomInvalid: boolean;
+    fitPending: boolean;
+  };
 }
 export interface AuthorEditorHandle {
   destroy(): void;
@@ -55,8 +65,14 @@ export function mountAuthorEditor(
     latitude: find<HTMLInputElement>('[name=latitude]'),
   };
   const zoom = find<HTMLInputElement>('[data-zoom]');
-  const buffers = new Map<string, Fields>();
-  const invalidPoints = new Set<string>();
+  const restored = session.inputs?.draft === session.draft ? session.inputs : undefined;
+  const buffers = restored?.buffers ?? new Map<string, Fields>();
+  for (const id of buffers.keys()) {
+    if (!session.draft.points.some((point) => point.id === id)) buffers.delete(id);
+  }
+  const invalidPoints = new Set(
+    [...buffers].filter(([, value]) => !complete(value)).map(([id]) => id),
+  );
   const pointRows = new Map<string, HTMLElement>();
   const routeRows: HTMLElement[] = [];
   const routeReferences = new Map<string, number[]>();
@@ -64,11 +80,13 @@ export function mountAuthorEditor(
   let alive = true;
   let generation = 0;
   let queued = false;
-  let newDirty = false;
-  let zoomInvalid = false;
+  let newFields: Fields = restored?.newFields ?? { name: '', longitude: '', latitude: '' };
+  let newDirty = restored?.newDirty ?? false;
+  let zoomInvalid = restored?.zoomInvalid ?? false;
+  let fitPending = restored?.fitPending ?? false;
   let map: AuthorMapHandle | undefined;
   let mapAbort = new AbortController();
-  let candidate: Coordinate | undefined;
+  let candidate: Coordinate | undefined = restored?.candidate;
   let imported: AuthorMapInput | undefined;
   let deleteId: string | undefined;
   let returnFocus: HTMLElement | undefined;
@@ -77,10 +95,7 @@ export function mountAuthorEditor(
     longitude: fields.longitude.value,
     latitude: fields.latitude.value,
   });
-  const pending = () =>
-    zoomInvalid ||
-    invalidPoints.size > 0 ||
-    (!session.selectedId && newDirty && !complete(values()));
+  const pending = () => zoomInvalid || invalidPoints.size > 0 || (newDirty && !complete(newFields));
   let exports = createAuthorExportControls(
     view.export,
     () => exportAuthorYaml(session.draft),
@@ -138,11 +153,7 @@ export function mountAuthorEditor(
           longitude: String(point.longitude),
           latitude: String(point.latitude),
         })
-      : {
-          name: '',
-          longitude: candidate ? String(candidate[0]) : '',
-          latitude: candidate ? String(candidate[1]) : '',
-        };
+      : newFields;
     for (const key of ['name', 'longitude', 'latitude'] as const) fields[key].value = value[key];
     find('[data-form-title]').textContent = point
       ? `编辑地点 ${point.id}`
@@ -164,6 +175,8 @@ export function mountAuthorEditor(
     const point = session.draft.points.find((point) => point.id === id);
     if (!row || !point) return;
     row.querySelector('[data-select]')!.textContent = point.name || '未命名地点';
+    row.querySelector('[data-coordinate-summary]')!.textContent =
+      `经度 ${point.longitude}，纬度 ${point.latitude}`;
     row.setAttribute('aria-current', String(session.selectedId === id));
     row.querySelector<HTMLInputElement>('input')!.checked = session.draft.representativeId === id;
     // Route names update without removing the current row or shifting focus.
@@ -186,6 +199,8 @@ export function mountAuthorEditor(
         row = document.createElement('li');
         row.dataset.pointId = point.id;
         const select = button('', 'data-select');
+        const coordinates = document.createElement('p');
+        coordinates.setAttribute('data-coordinate-summary', '');
         const label = document.createElement('label');
         const radio = document.createElement('input');
         radio.type = 'radio';
@@ -202,7 +217,7 @@ export function mountAuthorEditor(
           route,
           button('删除', 'data-delete'),
         );
-        row.append(select, label, actions);
+        row.append(select, coordinates, label, actions);
         pointRows.set(point.id, row);
       }
       if (view.pointList.children[index] !== row)
@@ -253,9 +268,7 @@ export function mountAuthorEditor(
   function select(id?: string): void {
     const before = session.selectedId;
     session.selectedId = id;
-    candidate = undefined;
-    map?.setCandidate(undefined);
-    newDirty = false;
+    map?.setCandidate(id ? undefined : candidate);
     showFields();
     if (before) updateRow(before);
     if (id) updateRow(id);
@@ -275,10 +288,10 @@ export function mountAuthorEditor(
       signal: mapAbort.signal,
       onCandidate(coordinate) {
         if (!active()) return;
-        select();
         candidate = coordinate;
+        newFields = { name: '', longitude: String(coordinate[0]), latitude: String(coordinate[1]) };
         newDirty = true;
-        showFields();
+        select();
         map?.setCandidate(coordinate);
         disablePending();
         schedule();
@@ -316,8 +329,9 @@ export function mountAuthorEditor(
           return;
         }
         map = handle;
-        map.render(session.draft, session.selectedId);
-        if (candidate) map.setCandidate(candidate);
+        map.render(session.draft, session.selectedId, fitPending ? { fitView: true } : undefined);
+        fitPending = false;
+        if (candidate && !session.selectedId) map.setCandidate(candidate);
       })
       .catch(() => {
         if (active()) find('[data-map-status]').textContent = '地图预览暂不可用，请继续手动编辑。';
@@ -373,7 +387,10 @@ export function mountAuthorEditor(
         if (value !== undefined)
           session.draft = updateAuthorPoint(session.draft, session.selectedId, { [key]: value });
         updateRow(session.selectedId);
-      } else newDirty = true;
+      } else {
+        newDirty = true;
+        newFields = values();
+      }
       disablePending();
       schedule();
     }),
@@ -394,6 +411,9 @@ export function mountAuthorEditor(
         longitude: numberInput(value.longitude, 180)!,
         latitude: numberInput(value.latitude, 90)!,
       });
+      newFields = { name: '', longitude: '', latitude: '' };
+      candidate = undefined;
+      newDirty = false;
       syncPoints();
       select(session.draft.points.at(-1)!.id);
     });
@@ -457,15 +477,34 @@ export function mountAuthorEditor(
       if (!row) return;
       const index = Number(row.dataset.routeIndex);
       const route = [...session.draft.route];
-      if (target.closest('[data-remove]')) route.splice(index, 1);
-      else {
+      const focused = document.activeElement;
+      const keepFocus = focused instanceof owner.HTMLElement && row.contains(focused);
+      const action = target.closest('[data-remove]')
+        ? 'data-remove'
+        : target.closest('[data-up]')
+          ? 'data-up'
+          : 'data-down';
+      let focusIndex = index;
+      if (target.closest('[data-remove]')) {
+        route.splice(index, 1);
+        focusIndex = Math.min(index, route.length - 1);
+      } else {
         const destination =
           index + (target.closest('[data-up]') ? -1 : target.closest('[data-down]') ? 1 : 0);
         if (destination === index || destination < 0 || destination >= route.length) return;
         [route[index], route[destination]] = [route[destination]!, route[index]!];
+        focusIndex = destination;
       }
       session.draft = setAuthorRoute(session.draft, route);
       syncRoute();
+      if (keepFocus) {
+        const destination = routeRows[focusIndex];
+        const control = destination?.querySelector<HTMLButtonElement>(`[${action}]`);
+        const fallback =
+          destination?.querySelector<HTMLButtonElement>('[data-remove]') ??
+          find<HTMLButtonElement>('[data-new]');
+        (control && !control.disabled ? control : fallback).focus({ preventScroll: true });
+      }
       schedule();
     }),
   );
@@ -486,11 +525,13 @@ export function mountAuthorEditor(
       syncPoints();
       if (session.selectedId === id) select(session.draft.points[0]?.id);
       else schedule();
-      if (!returnFocus?.isConnected)
-        pointRows
-          .get(session.selectedId ?? '')
-          ?.querySelector<HTMLButtonElement>('[data-select]')
-          ?.focus();
+      if (!returnFocus?.isConnected) {
+        const fallback =
+          pointRows
+            .get(session.selectedId ?? '')
+            ?.querySelector<HTMLButtonElement>('[data-select]') ?? fields.name;
+        fallback.focus({ preventScroll: true });
+      }
     }),
   );
   on(find('[data-import-open]'), 'click', () => {
@@ -510,7 +551,7 @@ export function mountAuthorEditor(
     imported = result.ok ? result.map : undefined;
     find('[data-import-error]').textContent = result.ok
       ? ''
-      : `导入失败：${result.issues.map((issue) => issue.fieldPath).join('、')}`;
+      : `导入失败：${formatAuthorIssues(result.issues)}`;
     find('[data-import-summary]').textContent = result.ok
       ? `校验通过：${result.map.points.length} 个地点。${session.draft.points.length ? '确认后将替换当前非空草稿。' : '确认后导入草稿。'}`
       : '';
@@ -537,6 +578,9 @@ export function mountAuthorEditor(
       invalidPoints.clear();
       candidate = undefined;
       newDirty = zoomInvalid = false;
+      newFields = { name: '', longitude: '', latitude: '' };
+      session.inputs = undefined;
+      fitPending = true;
       imported = undefined;
       close(view.importDialog);
       syncRoute();
@@ -563,12 +607,23 @@ export function mountAuthorEditor(
   syncPoints();
   showFields();
   metadata();
+  if (restored) zoom.value = restored.zoomValue;
   startMap();
   schedule();
   return {
     destroy() {
       if (!alive) return;
       alive = false;
+      session.inputs = {
+        draft: session.draft,
+        buffers,
+        newFields,
+        newDirty,
+        candidate,
+        zoomValue: zoom.value,
+        zoomInvalid,
+        fitPending,
+      };
       generation += 1;
       queued = false;
       mapAbort.abort();

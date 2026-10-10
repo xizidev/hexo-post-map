@@ -1,4 +1,14 @@
-import { isAlias, isMap, isNode, isPair, isScalar, isSeq, parseDocument, stringify } from 'yaml';
+import {
+  isAlias,
+  isMap,
+  isNode,
+  isPair,
+  isScalar,
+  isSeq,
+  LineCounter,
+  parseDocument,
+  stringify,
+} from 'yaml';
 
 import { normalizePostMapDocument } from '../domain/normalize';
 import { postMapSchema } from '../domain/schema';
@@ -61,6 +71,23 @@ function failure(
   return { ok: false, issues: [{ fieldPath, message }] };
 }
 
+/** Present only trusted diagnostics; values and parser source excerpts never enter UI text. */
+export function formatAuthorIssues(issues: readonly AuthorIssue[]): string {
+  return issues
+    .map(
+      (issue) =>
+        `${issue.fieldPath}：${issue.message}${
+          Number.isInteger(issue.line) &&
+          issue.line! > 0 &&
+          Number.isInteger(issue.column) &&
+          issue.column! > 0
+            ? `（第 ${issue.line} 行，第 ${issue.column} 列）`
+            : ''
+        }`,
+    )
+    .join('；');
+}
+
 function safeFieldPath(path: readonly PropertyKey[]): string {
   let fieldPath = 'map';
   for (const segment of path) {
@@ -73,6 +100,22 @@ function safeFieldPath(path: readonly PropertyKey[]): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function semanticMessage(fieldPath: string): string {
+  if (fieldPath.endsWith('.longitude')) return 'must be a finite longitude from -180 to 180';
+  if (fieldPath.endsWith('.latitude')) return 'must be a finite latitude from -90 to 90';
+  if (fieldPath.endsWith('.name')) return 'must contain a non-empty point name';
+  if (fieldPath.endsWith('.id')) return 'must contain a unique lowercase point identifier';
+  if (fieldPath === 'map.representative')
+    return 'must explicitly select an existing representative point';
+  if (/^map\.route(?:\[\d+\])?$/u.test(fieldPath))
+    return 'must contain at least two existing point references';
+  if (fieldPath === 'map.points') return 'must contain at least one valid point';
+  if (fieldPath === 'map.zoom') return 'must contain a finite zoom value';
+  if (fieldPath === 'map.track.source')
+    return 'must contain a relative local GPX, GeoJSON or JSON path';
+  return 'must satisfy the map field requirements';
 }
 
 /** Inspect containers without recursion, counting repeated aliases as expanded values. */
@@ -149,10 +192,10 @@ function validateMap(raw: unknown): AuthorImportResult {
   if (!result.success) {
     return {
       ok: false,
-      issues: result.error.issues.map((issue) => ({
-        fieldPath: safeFieldPath(issue.path),
-        message: 'must satisfy the map field requirements',
-      })),
+      issues: result.error.issues.map((issue) => {
+        const fieldPath = safeFieldPath(issue.path);
+        return { fieldPath, message: semanticMessage(fieldPath) };
+      }),
     };
   }
   // Validate domain references, but copy the raw input to retain all omitted track defaults.
@@ -167,15 +210,38 @@ export function importAuthorYaml(source: string): AuthorImportResult {
     return failure('map', `YAML must contain at most ${AUTHOR_MAX_YAML_BYTES} UTF-8 bytes`);
   }
   try {
+    const lineCounter = new LineCounter();
     const document = parseDocument(source, {
       strict: true,
       uniqueKeys: true,
       stringKeys: true,
       merge: false,
       prettyErrors: false,
+      lineCounter,
     });
     if (document.errors.length > 0 || document.warnings.length > 0) {
-      return failure('map', 'must contain one valid YAML document without warnings');
+      const error = document.errors[0] ?? document.warnings[0]!;
+      const message =
+        error.code === 'MULTIPLE_DOCS'
+          ? 'YAML must contain only one document'
+          : error.code === 'DUPLICATE_KEY'
+            ? 'YAML mapping keys must be unique'
+            : 'YAML syntax is invalid';
+      const offset = error.pos[0];
+      const location =
+        Number.isInteger(offset) && offset >= 0 && offset <= source.length
+          ? lineCounter.linePos(offset)
+          : undefined;
+      return {
+        ok: false,
+        issues: [
+          {
+            fieldPath: 'map',
+            message,
+            ...(location ? { line: location.line, column: location.col } : {}),
+          },
+        ],
+      };
     }
     const nodes: unknown[] = [document.contents];
     let remaining = AUTHOR_MAX_YAML_BYTES;
@@ -231,10 +297,14 @@ export function exportAuthorYaml(draft: AuthorDraft): AuthorExportResult {
     if (error instanceof AuthorDraftError) {
       return {
         ok: false,
-        issues: error.issues.map((issue) => ({
-          fieldPath: /^map(?:\.[a-z_]+|\[\d+\])*$/.test(issue.fieldPath) ? issue.fieldPath : 'map',
-          message: 'must satisfy the map field requirements',
-        })),
+        issues: error.issues.map((issue) => {
+          const fieldPath =
+            /^map(?:\.[a-z_]+|\[\d+\])*$/u.test(issue.fieldPath) &&
+            (issue.fieldPath.match(/[a-z_]+/gu) ?? []).every((field) => safeFields.has(field))
+              ? issue.fieldPath
+              : 'map';
+          return { fieldPath, message: semanticMessage(fieldPath) };
+        }),
       };
     }
     return failure('map', 'must contain a valid map draft for export');

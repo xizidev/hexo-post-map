@@ -1,9 +1,9 @@
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createConnection } from 'node:net';
+import { createConnection, Server } from 'node:net';
 import { once } from 'node:events';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { AuthorBootstrap } from '../../src/author/protocol';
 import { startAuthorServer, type AuthorServerHandle } from '../../src/author/server';
@@ -62,11 +62,38 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(handles.splice(0).map((handle) => handle.close()));
   await rm(assetDirectory, { recursive: true, force: true });
 });
 
 describe('startAuthorServer', () => {
+  it('authorizes canonical browser Host and Origin at HTTP port 80 without a privileged bind', async () => {
+    const original = Server.prototype.address;
+    let actualPort = 0;
+    vi.spyOn(Server.prototype, 'address').mockImplementation(function (this: Server) {
+      const address = original.call(this);
+      if (address && typeof address !== 'string') {
+        actualPort = address.port;
+        return { ...address, port: 80 };
+      }
+      return address;
+    });
+    const handle = await start();
+    expect(handle.origin).toBe('http://127.0.0.1');
+    for (const [host, origin, status] of [
+      ['127.0.0.1', 'http://127.0.0.1', 200],
+      ['127.0.0.1:80', 'http://127.0.0.1', 403],
+      ['127.0.0.1', 'http://127.0.0.1:80', 403],
+      ['127.0.0.1:080', 'http://127.0.0.1', 403],
+    ] as const) {
+      const response = await rawRequest(
+        { ...handle, origin: `http://127.0.0.1:${actualPort}` },
+        `GET /api/bootstrap HTTP/1.1\r\nHost: ${host}\r\nOrigin: ${origin}\r\nX-HPM-Editor-Session: ${session(handle)}\r\nConnection: close\r\n\r\n`,
+      );
+      expect(response).toContain(`HTTP/1.1 ${status}`);
+    }
+  });
   it('does not expose credentials before authorization', async () => {
     const handle = await start();
     const response = await fetch(handle.origin + '/api/bootstrap');
@@ -289,7 +316,7 @@ describe('startAuthorServer', () => {
     const handle = await start();
     await expect(
       startAuthorServer({ port: Number(new URL(handle.origin).port), assetDirectory, bootstrap }),
-    ).rejects.toThrow();
+    ).rejects.toMatchObject({ code: 'HPM_AUTHOR_PORT_IN_USE' });
     expect((await fetch(handle.origin + '/')).status).toBe(200);
   });
 });

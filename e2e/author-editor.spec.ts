@@ -35,6 +35,128 @@ async function exported(page: Page) {
   };
 }
 
+test('import fits once after map readiness and coordinate summaries retain precision', async ({
+  page,
+  editorUrl,
+}) => {
+  void editorUrl;
+  await expect
+    .poll(() => page.evaluate(() => Reflect.get(window, '__hpmSdk')?.maps.length ?? 0))
+    .toBe(1);
+  await page.evaluate(() => {
+    const prototype = Object.getPrototypeOf(Reflect.get(window, '__hpmSdk').maps[0]);
+    const original = prototype.setFitView;
+    Reflect.set(window, '__authorFitCalls', 0);
+    prototype.setFitView = function (...args: unknown[]) {
+      Reflect.set(window, '__authorFitCalls', Reflect.get(window, '__authorFitCalls') + 1);
+      return original.apply(this, args);
+    };
+  });
+  await importMap(
+    page,
+    stringify({
+      map: {
+        points: [
+          { id: 'a', name: 'Same name', longitude: -73.12345678912345, latitude: 40 },
+          { id: 'b', name: 'Same name', longitude: -74, latitude: 41 },
+        ],
+        representative: 'a',
+        zoom: 21,
+      },
+    }),
+  );
+  await expect.poll(() => page.evaluate(() => Reflect.get(window, '__authorFitCalls'))).toBe(1);
+  await expect(page.locator('[data-point-id=a] [data-coordinate-summary]')).toContainText(
+    '-73.12345678912345',
+  );
+  await page.getByLabel('经度', { exact: true }).fill('-72.12345678912345');
+  await page.evaluate(() =>
+    Reflect.get(window, '__hpmSdk').maps.at(-1).setZoomAndCenter(10, [-70, 42]),
+  );
+  const value = await exported(page);
+  expect(value.map.points[0]?.longitude).toBe(-72.12345678912345);
+  expect(value.map.zoom).toBe(21);
+  expect(await page.evaluate(() => Reflect.get(window, '__authorFitCalls'))).toBe(1);
+});
+
+for (const route of [
+  ['a', 'b', 'c'],
+  ['a', 'b', 'a'],
+]) {
+  test(`route keyboard focus follows the moved occurrence twice for ${route.join(' ')}`, async ({
+    page,
+    editorUrl,
+  }) => {
+    void editorUrl;
+    await importMap(
+      page,
+      stringify({
+        map: {
+          points: ['a', 'b', 'c'].map((id, index) => ({
+            id,
+            name: id.toUpperCase(),
+            longitude: 120 + index,
+            latitude: 31,
+          })),
+          representative: 'a',
+          route,
+        },
+      }),
+    );
+    await page.locator('[data-route-index="0"] [data-down]').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-route-index="1"] [data-down]')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-route-index="2"] [data-remove]')).toBeFocused();
+    expect((await exported(page)).map.route).toEqual([route[1], route[2], route[0]]);
+    await page.keyboard.press('Enter');
+    await expect(page.locator('[data-route-index="1"] [data-remove]')).toBeFocused();
+  });
+}
+
+for (const pending of ['committed', 'candidate']) {
+  test(`persisted lifecycle restores ${pending} pending input and export validation`, async ({
+    page,
+    editorUrl,
+  }) => {
+    void editorUrl;
+    await addManual(page, 'Committed A');
+    if (pending === 'candidate') {
+      await page.locator('[data-map]').click({ position: { x: 20, y: 20 } });
+      await page.getByLabel('地点名称').fill('Unconfirmed candidate');
+    }
+    await page.getByLabel('经度', { exact: true }).fill('1e+');
+    await page.getByLabel('文章缩放（可选，新增值 2–20）').fill('1e');
+    await expect(page.locator('[data-copy]')).toBeDisabled();
+    await page.evaluate(() => {
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+    });
+    await expect(page.locator('[data-point-form]')).toHaveAttribute('data-mounted', 'true');
+    await expect(page.getByLabel('经度', { exact: true })).toHaveValue('1e+');
+    await expect(page.getByLabel('文章缩放（可选，新增值 2–20）')).toHaveValue('1e');
+    await expect(page.locator('[data-copy]')).toBeDisabled();
+    await expect(page.locator('[data-yaml]')).toContainText('过期');
+    await expect(page.locator('[data-point-id]')).toHaveCount(1);
+    if (pending === 'candidate')
+      await expect(page.getByLabel('地点名称')).toHaveValue('Unconfirmed candidate');
+  });
+}
+
+test('deleting the only point restores focus to the labelled new name field', async ({
+  page,
+  editorUrl,
+}) => {
+  void editorUrl;
+  await addManual(page, 'Only point');
+  await page.locator('[data-delete]').focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('button', { name: '确认删除', exact: true }).click();
+  await expect(page.getByLabel('地点名称')).toBeFocused();
+  await expect(page.locator('[data-copy]')).toBeDisabled();
+});
+
 for (const viewport of [
   { width: 1280, height: 800 },
   { width: 390, height: 844 },

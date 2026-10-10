@@ -28,6 +28,27 @@ const mapBootstrap = {
 };
 
 describe('resolveAuthorBootstrap', () => {
+  it.each([
+    [{ ...rawConfig, amap: { ...rawConfig.amap, key: '' } }, 'amap.key'],
+    [
+      {
+        ...rawConfig,
+        amap: {
+          ...rawConfig.amap,
+          security: { service_host: 'https://example.test', security_js_code: 'hostile-value' },
+        },
+      },
+      'amap.security',
+    ],
+    [{ ...rawConfig, post: { default_zoom: 'hostile-value' } }, 'post.default_zoom'],
+  ])('returns trusted field diagnostics without credentials for %j', (raw, field) => {
+    const result = resolveAuthorBootstrap(raw, {});
+    expect(result.mode).toBe('manual');
+    if (result.mode !== 'manual') throw new Error('Expected manual fallback');
+    expect(result.message).toContain(field);
+    expect(JSON.stringify(result)).not.toMatch(/hostile-value|test-key|test-code|example/);
+    expect(Object.keys(result).sort()).toEqual(['message', 'mode', 'version']);
+  });
   it('leaves mutable input and nested objects unfrozen and unchanged', () => {
     const input = structuredClone(rawConfig);
     expect(resolveAuthorBootstrap(input, {})).toEqual(mapBootstrap);
@@ -82,9 +103,8 @@ describe('resolveAuthorBootstrap', () => {
       ...rawConfig,
       amap: { ...rawConfig.amap, security: { service_host: 'http://secret-test-key/' } },
     },
-  ])('returns the same credential-free manual payload for invalid/missing input %j', (raw) => {
+  ])('returns a credential-free manual payload for invalid/missing input %j', (raw) => {
     const result = resolveAuthorBootstrap(raw, {});
-    expect(result).toEqual(resolveAuthorBootstrap(undefined, {}));
     expect(result).toMatchObject({ version: 1, mode: 'manual', message: expect.any(String) });
     expect(Object.keys(result).sort()).toEqual(['message', 'mode', 'version']);
     expect(JSON.stringify(result)).not.toMatch(/test-key|test-code|proxy|secret/);

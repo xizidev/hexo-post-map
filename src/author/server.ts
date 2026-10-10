@@ -143,9 +143,13 @@ export async function startAuthorServer(options: {
   });
   const closed = new Promise<void>((resolve) => server.once('close', resolve));
   await new Promise<void>((resolve, reject) => {
-    const onError = () => {
+    const onError = (error: NodeJS.ErrnoException) => {
       for (const socket of connections) socket.destroy();
-      reject(new Error('Unable to start author server.'));
+      reject(
+        Object.assign(new Error('Unable to start author server.'), {
+          code: error.code === 'EADDRINUSE' ? 'HPM_AUTHOR_PORT_IN_USE' : 'HPM_AUTHOR_START_FAILED',
+        }),
+      );
     };
     server.once('error', onError);
     server.listen(options.port, '127.0.0.1', () => {
@@ -158,8 +162,9 @@ export async function startAuthorServer(options: {
     server.close();
     throw new Error('Unable to start author server.');
   }
-  host = `127.0.0.1:${address.port}`;
-  origin = `http://${host}`;
+  const addressUrl = new URL(`http://127.0.0.1:${address.port}`);
+  host = addressUrl.host;
+  origin = addressUrl.origin;
   return {
     origin,
     url: `${origin}/#session=${token}`,

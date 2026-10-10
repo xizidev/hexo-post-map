@@ -31,6 +31,42 @@ function rejected(source: string): void {
 }
 
 describe('author YAML codec', () => {
+  it('reports semantic coordinate and reference reasons without hostile values', () => {
+    const coordinate = importAuthorYaml(source.replace('118.123456789', '181'));
+    expect(coordinate).toMatchObject({
+      ok: false,
+      issues: [
+        {
+          fieldPath: 'map.points[0].longitude',
+          message: 'must be a finite longitude from -180 to 180',
+        },
+      ],
+    });
+    const reference = importAuthorYaml(`${source}  representative: hostile-value\n`);
+    expect(reference).toMatchObject({
+      ok: false,
+      issues: [
+        {
+          fieldPath: 'map.representative',
+          message: 'must explicitly select an existing representative point',
+        },
+      ],
+    });
+    expect(JSON.stringify(reference)).not.toContain('hostile-value');
+  });
+  it.each([
+    ['map: [hostile-value', 'YAML syntax is invalid', 1, 20],
+    ['map: {}\nmap: hostile-value', 'YAML mapping keys must be unique', 2, 1],
+    ['map: {}\n---\nmap: hostile-value', 'YAML must contain only one document', 2, 1],
+  ])('reports safe reasons and source locations for %s', (input, reason, line, column) => {
+    const result = importAuthorYaml(input);
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error('Expected invalid YAML');
+    expect(result.issues[0]?.message).toBe(reason);
+    expect(result.issues[0]?.line).toBe(line);
+    expect(result.issues[0]?.column).toBe(column);
+    expect(JSON.stringify(result)).not.toContain('hostile-value');
+  });
   it('retains omitted track defaults and repeated route stops', () => {
     const draft = createAuthorDraft({
       points: [{ id: 'a', name: 'A: #一\n二', longitude: 118.123456789, latitude: 32 }],

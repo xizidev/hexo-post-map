@@ -1,12 +1,67 @@
-import { execFileSync } from 'node:child_process';
-import { readFile, readdir } from 'node:fs/promises';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { readFile, readdir, mkdtemp, writeFile, symlink, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import Hexo from 'hexo';
 import { expect, it, vi } from 'vitest';
 import type { AuthorSessionModule } from '../src/hexo/author-command';
 import { normalizeNpmPackJson } from '../scripts/npm-pack-json.mjs';
+
+it.each([
+  [['--port', '4e3'], 2, undefined],
+  [['--port', '0xFA1'], 2, undefined],
+  [['--port', '4001.0'], 2, undefined],
+  [['--port=4e3'], 2, undefined],
+  [['--port', '4001'], 0, 4001],
+  [['--port=00080'], 0, 80],
+] as const)(
+  'validates raw port %j through the installed Hexo CLI parser',
+  async (rawArgs, status, port) => {
+    const site = await mkdtemp(join(tmpdir(), 'hpm-cli-port-'));
+    try {
+      await writeFile(join(site, 'package.json'), JSON.stringify({ hexo: {} }));
+      await symlink(
+        resolve('node_modules'),
+        join(site, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir',
+      );
+      // Keep Hexo's actual CLI entry/parser and console; replace only site initialization
+      // and the listening boundary, so this cannot bind a privileged or unrelated port.
+      const code = `
+      const Hexo = require('hexo');
+      const fs = require('node:fs');
+      const vm = require('node:vm');
+      const realRequire = require('node:module').createRequire(${JSON.stringify(resolve('dist/index.cjs'))});
+      Hexo.prototype.init = async function () {
+        vm.runInNewContext(fs.readFileSync(${JSON.stringify(resolve('dist/index.cjs'))}, 'utf8'), {
+          hexo: this, __dirname: ${JSON.stringify(resolve('dist'))}, process, Buffer, console,
+          require: id => id === './author/server.cjs' ? {
+            startAuthorSession: async options => {
+              console.log('SESSION_STARTED:' + options.port);
+              return {url:'fixture',closed:Promise.resolve(),close:async()=>{}};
+            }
+          } : realRequire(id)
+        });
+      };
+      Hexo.prototype.exit = async function(error) { if (error) console.error(error.message); };
+      process.argv = [process.execPath, ${JSON.stringify(resolve('node_modules/hexo/bin/hexo'))}, 'post-map-editor', ...${JSON.stringify(rawArgs)}];
+      require('hexo-cli')(${JSON.stringify(site)});
+    `;
+      const result = spawnSync(process.execPath, ['-e', code], { cwd: site, encoding: 'utf8' });
+      expect(result.status).toBe(status);
+      if (status === 2) {
+        expect(result.stdout).not.toContain('SESSION_STARTED');
+        expect(result.stderr).toContain('decimal integer');
+      } else {
+        expect(result.stdout).toContain(`SESSION_STARTED:${port}`);
+      }
+    } finally {
+      await rm(site, { recursive: true, force: true });
+    }
+  },
+);
 
 it('publishes only compiled assets, readmes, license, and package metadata', () => {
   const packages = normalizeNpmPackJson(
@@ -121,7 +176,7 @@ it('uses the external sibling require only when the compiled author command runs
   expect(required).not.toContain('./author/server.cjs');
   const running = hexo.extend.console.get('post-map-editor').call(hexo, { _: [] });
   try {
-    await vi.waitFor(() => expect(info).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(info).toHaveBeenCalledTimes(2));
     expect(required.filter((id) => id.includes('author'))).toEqual(['./author/server.cjs']);
     expect(startAuthorSession).toHaveBeenCalledExactlyOnceWith({
       port: 4001,

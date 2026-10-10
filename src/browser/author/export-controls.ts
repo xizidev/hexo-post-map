@@ -1,4 +1,4 @@
-import type { AuthorExportResult } from '../../author/yaml';
+import { formatAuthorIssues, type AuthorExportResult } from '../../author/yaml';
 
 export function createAuthorExportControls(
   root: HTMLElement,
@@ -35,7 +35,7 @@ export function createAuthorExportControls(
       ? '坐标、名称或缩放尚未完成，暂不能导出。'
       : result.ok
         ? ''
-        : `请完成草稿：${result.issues.map((issue) => issue.fieldPath).join('、')}`;
+        : `请完成草稿：${formatAuthorIssues(result.issues)}`;
     preview.textContent =
       !pending && result.ok ? result.yaml : '预览已过期，请完成有效草稿后导出。';
   }

@@ -68,6 +68,173 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 describe('author editor', () => {
+  it('fits imported points once when their asynchronous map becomes ready without changing zoom', async () => {
+    handle.destroy();
+    const resolvers: ((handle: AuthorMapHandle) => void)[] = [];
+    handle = mountAuthorEditor(root, bootstrap, session, {
+      mapFactory: () => new Promise((resolve) => resolvers.push(resolve)),
+    });
+    click('[data-import-open]');
+    input(
+      '[data-import-source]',
+      'map:\n  points:\n    - {id: a, name: Far, longitude: -73, latitude: 40}\n  zoom: 21',
+    );
+    click('[data-import-validate]');
+    click('[data-import-confirm]');
+    const old = { render: vi.fn(), destroy: vi.fn(), setCandidate: vi.fn() };
+    resolvers[0]!(old);
+    await flush();
+    expect(old.render).not.toHaveBeenCalled();
+    const current = { render: vi.fn(), destroy: vi.fn(), setCandidate: vi.fn() };
+    resolvers[1]!(current);
+    await flush();
+    expect(current.render).toHaveBeenCalledExactlyOnceWith(session.draft, 'a', { fitView: true });
+    input('[name=latitude]', '41');
+    await flush();
+    expect(current.render.mock.calls.at(-1)?.[2]).toBeUndefined();
+    expect(session.draft.zoom).toBe(21);
+  });
+  it('retains incomplete coordinate and zoom inputs across memory remount and keeps export blocked', async () => {
+    input('[name=longitude]', '1e+');
+    input('[data-zoom]', '1e');
+    await flush();
+    handle.destroy();
+    handle = mountAuthorEditor(root, bootstrap, session, { mapFactory: factory });
+    await flush();
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('1e+');
+    expect(element<HTMLInputElement>('[data-zoom]').value).toBe('1e');
+    expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(true);
+    expect(element('[data-yaml]').textContent).toContain('过期');
+  });
+  it('retains candidate and unconfirmed new form inputs across memory remount', async () => {
+    maps[0]!.options.onCandidate([119.123456789, 33]);
+    input('[name=name]', 'Unconfirmed');
+    input('[name=latitude]', '1e+');
+    handle.destroy();
+    handle = mountAuthorEditor(root, bootstrap, session, { mapFactory: factory });
+    await flush();
+    expect(element<HTMLInputElement>('[name=name]').value).toBe('Unconfirmed');
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('119.123456789');
+    expect(element<HTMLInputElement>('[name=latitude]').value).toBe('1e+');
+    expect(element('[data-form-title]').textContent).toContain('候选');
+    expect(session.draft.points).toHaveLength(1);
+    expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(true);
+  });
+  it('keeps unconfirmed invalid form state across selection but replaces all pending state on import', async () => {
+    click('[data-new]');
+    input('[name=name]', 'Pending');
+    input('[name=longitude]', '1e+');
+    input('[data-zoom]', '1e+');
+    click('[data-point-id="a"] [data-select]');
+    await flush();
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('118.123456789');
+    expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(true);
+    click('[data-new]');
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('1e+');
+    click('[data-import-open]');
+    input(
+      '[data-import-source]',
+      'map:\n  points:\n    - {id: a, name: Replacement, longitude: 120, latitude: 35}\n  zoom: 21',
+    );
+    click('[data-import-validate]');
+    click('[data-import-confirm]');
+    await flush();
+    handle.destroy();
+    handle = mountAuthorEditor(root, bootstrap, session, { mapFactory: factory });
+    await flush();
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('120');
+    expect(element<HTMLInputElement>('[data-zoom]').value).toBe('21');
+    expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(false);
+  });
+  it('shows the safe import reason and numeric syntax location', () => {
+    click('[data-import-open]');
+    input('[data-import-source]', 'map: [hostile-value');
+    click('[data-import-validate]');
+    const error = element('[data-import-error]').textContent;
+    expect(error).toContain('YAML syntax is invalid');
+    expect(error).toMatch(/第\s*\d+\s*行.*第\s*\d+\s*列/u);
+    expect(error).not.toContain('hostile-value');
+  });
+  it('shows byte overflow and semantic export reasons instead of only a field', async () => {
+    input('[name=name]', '一'.repeat(45000));
+    await flush();
+    expect(element('[data-export-error]').textContent).toContain('UTF-8 bytes');
+    click('[data-import-open]');
+    input('[data-import-source]', 'x'.repeat(131073));
+    click('[data-import-validate]');
+    expect(element('[data-import-error]').textContent).toContain('UTF-8 bytes');
+  });
+  it.each([[['a', 'b', 'c']], [['a', 'b', 'a']]])(
+    'moves the focused route occurrence twice in %j',
+    async (route) => {
+      handle.destroy();
+      session.draft = createAuthorDraft({
+        points: ['a', 'b', 'c'].map((id, index) => ({
+          id,
+          name: id.toUpperCase(),
+          longitude: 118 + index,
+          latitude: 32,
+        })),
+        representative: 'a',
+        route,
+      });
+      handle = mountAuthorEditor(root, bootstrap, session, { mapFactory: factory });
+      const down = element<HTMLButtonElement>('[data-route-index="0"] [data-down]');
+      down.focus();
+      down.click();
+      expect(document.activeElement).toBe(element('[data-route-index="1"] [data-down]'));
+      (document.activeElement as HTMLButtonElement).click();
+      await flush();
+      expect(session.draft.route).toEqual([route[1], route[2], route[0]]);
+      expect(document.activeElement).toBe(element('[data-route-index="2"] [data-remove]'));
+      (document.activeElement as HTMLButtonElement).click();
+      expect(document.activeElement).toBe(element('[data-route-index="1"] [data-remove]'));
+    },
+  );
+  it('locally updates coordinate summaries without rounding editor or exported values', async () => {
+    const row = element('[data-point-id="a"]');
+    expect(row.textContent).toContain('118.123456789');
+    input('[name=longitude]', '119.12345678912345');
+    await flush();
+    expect(element('[data-point-id="a"]')).toBe(row);
+    expect(row.textContent).toContain('119.12345678912345');
+    expect(element('[data-yaml]').textContent).toContain('119.12345678912345');
+  });
+  it('focuses the named new point field after deleting the only point', async () => {
+    element<HTMLButtonElement>('[data-delete]').focus();
+    click('[data-delete]');
+    click('[data-delete-confirm]');
+    await flush();
+    expect(session.draft.points).toHaveLength(0);
+    expect(document.activeElement).toBe(element('[name=name]'));
+  });
+  it('drops confirmed deleted ID buffers without reusing them in another selected point', async () => {
+    input('[name=longitude]', '1e+');
+    click('[data-new]');
+    input('[name=name]', 'B');
+    input('[name=longitude]', '120');
+    input('[name=latitude]', '35');
+    element<HTMLFormElement>('[data-point-form]').requestSubmit();
+    click('[data-point-id="a"] [data-delete]');
+    click('[data-delete-confirm]');
+    click('[data-point-id="point-1"] input[type=radio]');
+    await flush();
+    handle.destroy();
+    handle = mountAuthorEditor(root, bootstrap, session, { mapFactory: factory });
+    await flush();
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('120');
+    expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(false);
+    expect(session.inputs?.buffers.has('a')).toBe(false);
+  });
+  it('does not move unrelated editing focus when a route action is invoked', async () => {
+    click('[data-route-add="a"]');
+    click('[data-route-add="a"]');
+    const name = element<HTMLTextAreaElement>('[name=name]');
+    name.focus();
+    click('[data-route-index="0"] [data-down]');
+    await flush();
+    expect(document.activeElement).toBe(name);
+  });
   it('cannot export old valid coordinates while an input is incomplete', async () => {
     input('[name=longitude]', '');
     expect(session.draft.points[0]?.longitude).toBe(118.123456789);

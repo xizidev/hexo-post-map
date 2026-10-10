@@ -49,6 +49,18 @@ export function registerAuthorCommand(
       ],
     },
     async (args) => {
+      // Hexo CLI's minimist coerces exponent/hex/dotted values before our callback.
+      // Inspect argv only for this actual host invocation, never for internal calls.
+      if (instance.env.cmd === 'post-map-editor' && instance.env.args === args) {
+        const rawArgs = process.argv.slice(2);
+        if (rawArgs.includes('post-map-editor')) {
+          for (let index = 0; index < rawArgs.length && rawArgs[index] !== '--'; index += 1) {
+            const raw = rawArgs[index]!;
+            if (raw === '--port') parseAuthorPort({ port: rawArgs[++index] });
+            else if (raw.startsWith('--port=')) parseAuthorPort({ port: raw.slice(7) });
+          }
+        }
+      }
       const port = parseAuthorPort(args);
       let session: AuthorServerHandle;
       try {
@@ -59,8 +71,13 @@ export function registerAuthorCommand(
           rawConfig: instance.config.post_map,
           env: process.env,
         });
-      } catch {
+      } catch (error) {
         // Underlying config/network errors can contain credentials; never forward them.
+        if (error instanceof Error && 'code' in error && error.code === 'HPM_AUTHOR_PORT_IN_USE') {
+          throw new Error(
+            `[hexo-post-map] Port ${port} is already in use; choose another port with --port.`,
+          );
+        }
         throw new Error(`[hexo-post-map] Unable to start map editor on 127.0.0.1:${port}.`);
       }
       let closing: Promise<void> | undefined;
@@ -73,6 +90,7 @@ export function registerAuthorCommand(
       // Hexo owns SIGINT and calls before_exit; preserve its handler and all other listeners.
       try {
         instance.log.info(session.url);
+        instance.log.info('Press Ctrl+C to stop the map editor.');
         await session.closed;
       } finally {
         process.removeListener('SIGTERM', terminate);

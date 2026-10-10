@@ -124,7 +124,7 @@ describe('author command lifecycle', () => {
       rawConfig: hexo.config.post_map,
       env: process.env,
     });
-    expect(info.mock.calls).toEqual([[active.handle.url]]);
+    expect(info.mock.calls).toEqual([[active.handle.url], [expect.stringContaining('Ctrl+C')]]);
     expect(ended).toBe(false);
     for (const operation of operations) expect(operation).not.toHaveBeenCalled();
     await active.handle.close();
@@ -176,12 +176,13 @@ describe('author command lifecycle', () => {
     const int = process.listeners('SIGINT');
     const kill = vi.spyOn(process, 'kill');
     const startAuthorSession = vi.fn(async () => {
-      throw Object.assign(new Error('private-key'), { code: 'EADDRINUSE' });
+      throw Object.assign(new Error('private-key'), { code: 'HPM_AUTHOR_PORT_IN_USE' });
     });
     const load = vi.fn(async () => ({ startAuthorSession }));
     registerAuthorCommand(hexo, load);
     const running = hexo.extend.console.get('post-map-editor').call(hexo, { _: [], port: '4567' });
     await expect(running).rejects.toThrow('4567');
+    await expect(running).rejects.toThrow('another port');
     await expect(running).rejects.not.toThrow('private-key');
     expect(startAuthorSession).toHaveBeenCalledOnce();
     expect(startAuthorSession.mock.calls[0]).toEqual([

@@ -9,7 +9,8 @@ import { parse, stringify } from 'yaml';
 function validate(handle, expectedOrigin) {
   assert.deepEqual(Object.keys(handle).sort(), ['origin', 'url']);
   assert.equal(handle.origin, expectedOrigin);
-  assert.match(handle.url, /^http:\/\/127\.0\.0\.1:\d+\/#session=[A-Za-z0-9_-]{43}$/u);
+  assert.match(handle.url, /^http:\/\/127\.0\.0\.1(?::[1-9]\d*)?\/#session=[A-Za-z0-9_-]{43}$/u);
+  assert.equal(new URL(handle.url).href, handle.url);
   assert.equal(new URL(handle.url).origin, expectedOrigin);
   return handle;
 }
@@ -32,7 +33,7 @@ export async function withPackedAuthorServer({ site, port, env }, work) {
   const controller = new AbortController();
   let ownedWork, unexpectedExit;
   assert.ok(Number.isInteger(port) && port >= 1 && port <= 65535);
-  const origin = `http://127.0.0.1:${port}`;
+  const origin = new URL(`http://127.0.0.1:${port}`).origin;
   const child = spawn(
     process.execPath,
     ['node_modules/hexo/bin/hexo', 'post-map-editor', '--port', String(port)],
@@ -90,7 +91,9 @@ export async function withPackedAuthorServer({ site, port, env }, work) {
   child.stdout.on('data', (chunk) => {
     if (received) return;
     buffer = (buffer + chunk).slice(-4096);
-    const match = buffer.match(/http:\/\/127\.0\.0\.1:\d+\/#session=[A-Za-z0-9_-]{43}(?=\s|$)/u);
+    const match = buffer.match(
+      /http:\/\/127\.0\.0\.1(?::[1-9]\d*)?\/#session=[A-Za-z0-9_-]{43}(?=\s|$)/u,
+    );
     if (!match) return;
     try {
       const handle = validate({ origin, url: match[0] }, origin);
