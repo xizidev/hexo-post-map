@@ -48,7 +48,7 @@
     "test:integration": "node test/integration/pack-and-build.mjs",
     "test:e2e": "npm run build && playwright test --project=chromium",
     "test:amap-smoke": "npm run build && playwright test --project=amap-smoke",
-    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:run && npm run build"
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run build && npm run test:run"
   },
   "publishConfig": {
     "access": "public",

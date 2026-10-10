@@ -1,6 +1,7 @@
 import type Hexo from 'hexo';
 import { ConfigValidationError, resolveConfig } from '../config/resolve';
 import { createTrackCompiler } from '../tracks/compiler';
+import { registerAuthorCommand } from './author-command';
 import { createOverviewRoutes } from './generator';
 import { injectBrowserRuntime } from './injector';
 import { createPostFilter } from './post-filter';
@@ -8,6 +9,7 @@ import { postMapTag } from './tag';
 import { createTrackAssetGuard } from './track-assets';
 
 export function registerPlugin(instance: Hexo): void {
+  registerAuthorCommand(instance);
   let config: ReturnType<typeof resolveConfig>;
   try {
     config = resolveConfig(instance.config.post_map, process.env);
