@@ -723,9 +723,17 @@ async function addAuthorExports(site, environment) {
   await new Promise((done) => reservation.close(done));
   const env = { ...environment };
   delete env.HPM_AUTHOR_READY_FILE;
-  await withPackedAuthorServer({ site, port, env }, async ({ url }) => {
+  await withPackedAuthorServer({ site, port, env }, async ({ url }, signal) => {
+    signal.throwIfAborted();
     const browser = await chromium.launch({ channel: 'chromium' });
+    let closed;
+    const closeBrowser = () => (closed ??= browser.close());
+    const cancelBrowser = () => {
+      void closeBrowser().catch(() => {});
+    };
+    signal.addEventListener('abort', cancelBrowser, { once: true });
     try {
+      signal.throwIfAborted();
       const context = await browser.newContext({ serviceWorkers: 'block' });
       await context.route('**/*', (route) =>
         new URL(route.request().url()).origin === `http://127.0.0.1:${port}`
@@ -784,6 +792,7 @@ async function addAuthorExports(site, environment) {
           body: trackedText.slice(front[0].length),
         },
       ]) {
+        signal.throwIfAborted();
         await page.getByRole('button', { name: '导入 YAML', exact: true }).click();
         await page.getByLabel('粘贴完整 map: 配置').fill(stringify({ map: fixture.map }));
         await page.getByRole('button', { name: '校验导入' }).click();
@@ -795,13 +804,16 @@ async function addAuthorExports(site, environment) {
           fixture.map,
           'Packed codec did not preserve authored map fields',
         );
+        signal.throwIfAborted();
         await writeFile(
           fixture.path,
           `---\n${stringify({ ...fixture.metadata, map: exported.map })}---\n${fixture.body}`,
+          { signal },
         );
       }
     } finally {
-      await browser.close();
+      signal.removeEventListener('abort', cancelBrowser);
+      await closeBrowser();
     }
   });
 }

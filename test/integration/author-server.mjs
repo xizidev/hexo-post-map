@@ -29,6 +29,8 @@ export async function readAuthorReadyFile(path, expectedOrigin) {
 /** Own exactly one installed Hexo process group; never forward child diagnostics or URLs. */
 export async function withPackedAuthorServer({ site, port, env }, work) {
   class AuthorCancelled extends Error {}
+  const controller = new AbortController();
+  let ownedWork, unexpectedExit;
   assert.ok(Number.isInteger(port) && port >= 1 && port <= 65535);
   const origin = `http://127.0.0.1:${port}`;
   const child = spawn(
@@ -77,6 +79,7 @@ export async function withPackedAuthorServer({ site, port, env }, work) {
     timer.unref();
   };
   const cancel = () => {
+    controller.abort(new AuthorCancelled('Packed author cancelled.'));
     stop();
     resolveCancelled();
     rejectReady(new AuthorCancelled('Packed author cancelled.'));
@@ -103,6 +106,10 @@ export async function withPackedAuthorServer({ site, port, env }, work) {
   const closed = new Promise((resolve) =>
     child.once('close', () => {
       clearTimeout(timer);
+      if (!stopping) {
+        unexpectedExit = new Error('Packed author stopped unexpectedly.');
+        controller.abort(unexpectedExit);
+      }
       if (stopping && process.platform !== 'win32') kill(true);
       rejectReady(new Error('Packed author exited before readiness.'));
       resolve();
@@ -119,18 +126,24 @@ export async function withPackedAuthorServer({ site, port, env }, work) {
       });
       bridgeCreated = true;
     }
+    ownedWork = Promise.resolve().then(() => work(handle, controller.signal));
     await Promise.race([
-      work(handle),
+      ownedWork,
       cancelled,
       closed.then(() => {
-        if (!stopping) throw new Error('Packed author stopped unexpectedly.');
+        if (unexpectedExit) throw unexpectedExit;
       }),
     ]);
+    if (unexpectedExit) throw unexpectedExit;
   } catch (error) {
     if (!(error instanceof AuthorCancelled)) throw error;
   } finally {
     clearTimeout(timeout);
+    controller.abort(new AuthorCancelled('Packed author finished.'));
     stop();
+    // Promise.race never cancels its losers: drain callback-owned writes/browser cleanup
+    // before the outer runner can audit or delete the disposable workspace.
+    await ownedWork?.catch(() => {});
     await closed;
     if (bridgeCreated) await rm(env.HPM_AUTHOR_READY_FILE, { force: true });
     process.removeListener('SIGINT', cancel);

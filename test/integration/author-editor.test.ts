@@ -29,7 +29,10 @@ async function site(code: string, work: (site: string) => Promise<void>) {
 }
 const child = `const http = require('node:http');
 const port = Number(process.argv.at(-1));
-const server = http.createServer((req, res) => res.end('alive'));
+const server = http.createServer((req, res) => {
+  if (req.url === '/exit') res.once('finish', () => process.exit(0));
+  res.end('alive');
+});
 server.on('error', () => { console.error('secret diagnostic #session=${token}'); process.exit(1); });
 server.listen(port, '127.0.0.1', () => console.log('INFO http://127.0.0.1:' + port + '/#session=${token}'));
 process.on('SIGTERM', () => server.close());`;
@@ -41,6 +44,75 @@ async function freePort() {
   return port;
 }
 describe('packed author supervisor', () => {
+  it.each(['cancel', 'exit'])(
+    'drains owned async writes and resource finalization before returning after %s during work',
+    async (cause) => {
+      const { withPackedAuthorServer } = await supervisor();
+      const port = await freePort();
+      await site(child, async (site) => {
+        const bridge = join(site, 'ready.json');
+        const written = join(site, 'work.txt');
+        const actions: string[] = [];
+        let release: () => void = () => {};
+        const paused = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let notifyStarted: () => void = () => {};
+        const started = new Promise<void>((resolve) => {
+          notifyStarted = resolve;
+        });
+        const pending = withPackedAuthorServer(
+          { site, port, env: { ...process.env, HPM_AUTHOR_READY_FILE: bridge } },
+          async (_handle: unknown, signal?: AbortSignal) => {
+            notifyStarted();
+            try {
+              await paused;
+              if (!signal?.aborted) {
+                await writeFile(written, 'late write');
+                actions.push('write');
+              }
+            } finally {
+              // Model an asynchronous browser/resource close owned by the callback.
+              await new Promise((resolve) => setTimeout(resolve, 30));
+              actions.push('resource closed');
+            }
+          },
+        );
+        // Observe rejection immediately so an unexpected exit is not unhandled.
+        const outcome = pending.then(
+          () => undefined,
+          (error: Error) => error.message,
+        );
+        await started;
+        if (cause === 'cancel') process.emit('SIGTERM');
+        else {
+          // Ask this test's server process to exit, not a global/unknown owner.
+          await fetch(`http://127.0.0.1:${port}/exit`);
+        }
+        let returned = false;
+        void outcome.then(() => {
+          returned = true;
+        });
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          expect(returned, 'wrapper must wait for its paused callback finalization').toBe(false);
+        } finally {
+          release();
+          await outcome;
+        }
+        expect(await outcome).toBe(
+          cause === 'exit' ? 'Packed author stopped unexpectedly.' : undefined,
+        );
+        expect(actions).toEqual(['resource closed']);
+        expect(await stat(written).catch(() => undefined)).toBeUndefined();
+        const completed = [...actions];
+        await new Promise((resolve) => setTimeout(resolve, 60));
+        expect(actions).toEqual(completed);
+        expect(await stat(bridge).catch(() => undefined)).toBeUndefined();
+        await expect(fetch(`http://127.0.0.1:${port}`)).rejects.toThrow();
+      });
+    },
+  );
   it.skipIf(process.platform === 'win32')(
     'startup cancellation returns quietly, stops its child and creates no bridge',
     async () => {
@@ -53,7 +125,7 @@ describe('packed author supervisor', () => {
           [
             '--input-type=module',
             '-e',
-            `import { withPackedAuthorServer } from ${JSON.stringify(modulePath)}; const pending = withPackedAuthorServer({ site: ${JSON.stringify(site)}, port: ${port}, env: {...process.env, HPM_AUTHOR_READY_FILE: ${JSON.stringify(ready)}} }, () => new Promise(() => {})); console.log('supervisor pending'); await pending; console.log('clean cancellation');`,
+            `import { withPackedAuthorServer } from ${JSON.stringify(modulePath)}; const pending = withPackedAuthorServer({ site: ${JSON.stringify(site)}, port: ${port}, env: {...process.env, HPM_AUTHOR_READY_FILE: ${JSON.stringify(ready)}} }, (_handle, signal) => new Promise(resolve => signal.aborted ? resolve() : signal.addEventListener('abort', resolve, {once:true}))); console.log('supervisor pending'); await pending; console.log('clean cancellation');`,
           ],
           { stdio: 'pipe' },
         );
@@ -102,7 +174,7 @@ describe('packed author supervisor', () => {
           [
             '--input-type=module',
             '-e',
-            `import { withPackedAuthorServer } from ${JSON.stringify(modulePath)}; await withPackedAuthorServer({site: ${JSON.stringify(site)}, port: ${port}, env: {...process.env, HPM_AUTHOR_READY_FILE: ${JSON.stringify(ready)}}}, () => new Promise(() => {}));`,
+            `import { withPackedAuthorServer } from ${JSON.stringify(modulePath)}; await withPackedAuthorServer({site: ${JSON.stringify(site)}, port: ${port}, env: {...process.env, HPM_AUTHOR_READY_FILE: ${JSON.stringify(ready)}}}, (_handle, signal) => new Promise(resolve => signal.aborted ? resolve() : signal.addEventListener('abort', resolve, {once:true})));`,
           ],
           { stdio: 'pipe' },
         );

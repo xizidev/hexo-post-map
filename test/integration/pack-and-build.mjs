@@ -34,7 +34,7 @@ const dummyCode = 'hpm-build-only-security';
 const environment = { ...process.env, npm_config_ignore_scripts: 'true' };
 for (const key of Object.keys(environment))
   if (key.startsWith('HEXO_POST_MAP_')) delete environment[key];
-await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellation }) => {
+await withTemporaryWorkspace(async ({ temporary, run: runChild }) => {
   const run = (command, arguments_, cwd, env = {}) =>
     runChild(command, arguments_, cwd, { ...environment, ...env });
   function success(result, label) {
@@ -385,7 +385,10 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
                   HEXO_POST_MAP_AMAP_SECURITY_JS_CODE: dummyCode,
                 },
               },
-              async () => waitForCancellation(),
+              async (_handle, signal) => {
+                if (signal.aborted) return;
+                await new Promise((done) => signal.addEventListener('abort', done, { once: true }));
+              },
             );
           }
         }
