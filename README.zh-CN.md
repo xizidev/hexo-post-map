@@ -389,3 +389,30 @@ if (window.HexoPostMap?.apiVersion === 1) {
 [贡献指南](https://github.com/xizidev/hexo-post-map/blob/main/CONTRIBUTING.md)包含构建、npm 打包安装兼容测试、确定性浏览器测试及可选高德实网 smoke 的方法。普通问题使用 [GitHub Issues](https://github.com/xizidev/hexo-post-map/issues)，安全问题按 [SECURITY](https://github.com/xizidev/hexo-post-map/blob/main/SECURITY.md) 私下报告。
 
 Front Matter、站点配置、文档列出的主题变量，以及带版本号的 `window.HexoPostMap` 生命周期 API 是公开契约；内部模块与地图适配器不是公开扩展 API。插件使用 MIT 许可证，高德服务另有自己的条款与使用要求。
+
+# 本地地图选点助手 — UNRELEASED 开发候选
+
+作者命令仅存在于本开发候选包，当前 npm 已发布的 0.6.1 **不包含** `post-map-editor`。请在临时 Hexo 站点安装经过审查的候选 tgz 体验；开发期间版本号仍为 0.6.1。
+
+在站点中执行 `npx hexo post-map-editor --port 4001`，打开命令输出的本次会话地址。默认端口为 4001，仅绑定 `127.0.0.1`，不支持 `--host`；端口占用时失败，不停止其他服务。沿用已有 Web Key 与客户端 `security_js_code` 或自有 `service_host` 代理，详见[配置](docs/configuration.md)。客户端安全码对浏览器可见，不是秘密。
+
+点击地图或手动输入 GCJ-02 坐标、命名地点、选择代表点，按顺序加入线路（可以 A → B → A）。复制或下载的内容仅为 `map:` YAML，可粘贴到文章 Front Matter：
+
+```yaml test=author-map
+map:
+  representative: b
+  points:
+    - id: a
+      name: 起点
+      longitude: 121.4737
+      latitude: 31.2304
+    - id: b
+      name: 目的地
+      longitude: 121.4837
+      latitude: 31.2404
+  route: [a, b, a]
+```
+
+助手不保存文章，不生成或部署博客；草稿只在页面内存中，**刷新或关闭页面会清空草稿，请先导出保存**。配置缺失、无效或地图网络失败时仍可手动编辑和导出。删除代表地点后必须明确选择新代表地点，才能导出。
+
+导入限制为单个 YAML 文档、仅含 `map` 根字段、UTF-8 输入输出各 128 KiB、最多 200 地点、1000 线路引用和 50 次别名展开；失败导入保留现状。新建缩放可省略，新增值限 2–20；导入的有限值（如 21）原样保留并提示预览限制。`track` 为只读配置，助手不会请求轨迹文件，相对路径必须在目标文章后续构建时仍有效。详见[安全](docs/security.md)与[兼容性](docs/compatibility.md)。

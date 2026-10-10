@@ -19,13 +19,13 @@ export const fakeSdk = String.raw`
       this.container = container; this.options = options; this.zoom = options.zoom;
       this.center = [...(options.center ?? [104, 35])]; this.destroyed = false;
       this.events = {}; this.bounds = []; this.status = options; this.overlays = []; maps.push(this);
-      this.onCanvasClick = event => { if (event.target === container) this.emit('click'); };
+      this.onCanvasClick = event => { if (event.target === container) this.emit('click', { lnglat: { getLng: () => 121.4737, getLat: () => 31.2304 }, originEvent: event }); };
       container.addEventListener('click', this.onCanvasClick);
       setTimeout(() => this.emit('complete'), 0);
     }
     on(event, callback) { (this.events[event] ??= new Set()).add(callback); }
     off(event, callback) { this.events[event]?.delete(callback); }
-    emit(event) { if (!this.destroyed) this.events[event]?.forEach(callback => callback()); }
+    emit(event, payload) { if (!this.destroyed) this.events[event]?.forEach(callback => callback(payload)); }
     add(overlays) { this.overlays.push(...overlays); overlays.forEach((overlay, index) => {
       if (!overlay.options.content) return;
       const content = overlay.options.content;
@@ -37,7 +37,7 @@ export const fakeSdk = String.raw`
       content.style.position = 'relative';
       wrapper.append(content); this.container.append(wrapper);
     }); }
-    remove(overlays) { this.overlays = this.overlays.filter(overlay => !overlays.includes(overlay)); }
+    remove(overlays) { this.overlays = this.overlays.filter(overlay => !overlays.includes(overlay)); overlays.forEach(overlay => overlay.element?.remove()); }
     setFitView(overlays, immediately, padding) { this.fitted = true; this.fitPadding = padding; }
     setStatus(status) { this.status = status; }
     destroy() {
@@ -65,11 +65,16 @@ export const fakeSdk = String.raw`
   }
   class Marker {
     constructor(options) {
-      this.options = options; this.top = false; this.element = document.createElement('div');
+      this.options = options; this.events = {}; this.top = false; this.element = document.createElement('div');
       this.element.className = 'amap-marker'; this.element.style.zIndex = '0';
       window.__hpmSdk.markers.push(this);
     }
     setTop(top) { this.top = top; this.element.style.zIndex = top ? '1000' : '0'; }
+    on(event, callback) { (this.events[event] ??= new Set()).add(callback); }
+    off(event, callback) { this.events[event]?.delete(callback); }
+    emit(event, payload) { this.events[event]?.forEach(callback => callback(payload)); }
+    setContent(content) { this.options.content = content; this.element.replaceChildren(content); }
+    setDraggable(enabled) { this.options.draggable = enabled; }
     setPosition(position) {
       this.options.position = [...position];
       window.__hpmSdk.markerPositions.push([...position]);

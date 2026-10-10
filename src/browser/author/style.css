@@ -167,7 +167,8 @@ dialog::backdrop {
     min-height: 0;
   }
   .map-panel {
-    height: 440px;
+    height: auto;
+    min-height: 440px;
   }
   .editor-panel {
     max-height: 85dvh;

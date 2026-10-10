@@ -7,6 +7,8 @@ import { parseGeoJson } from '../../src/tracks/geojson';
 import { parseGpx } from '../../src/tracks/gpx';
 import { trimTrack } from '../../src/tracks/privacy';
 import { calculateTrackStats } from '../../src/tracks/statistics';
+import { importAuthorYaml, exportAuthorYaml } from '../../src/author/yaml';
+import { createAuthorDraft } from '../../src/author/draft';
 
 const visualThemeVariables = [
   '--hpm-accent',
@@ -47,6 +49,20 @@ function sourceExamples(file: string, language: string, marker: string): string[
 }
 
 describe.each(['README.md', 'README.zh-CN.md'])('%s authoring examples', (file) => {
+  it('round-trips the local editor example through its real codec and publishing domain', () => {
+    const sources = sourceExamples(file, 'yaml', 'author-map');
+    expect(sources).toHaveLength(1);
+    const imported = importAuthorYaml(sources[0]!);
+    expect(imported.ok).toBe(true);
+    if (!imported.ok) throw new Error('Invalid documented author map');
+    const exported = exportAuthorYaml(createAuthorDraft(imported.map));
+    expect(exported.ok).toBe(true);
+    if (!exported.ok) throw new Error('Invalid exported author map');
+    expect(importAuthorYaml(exported.yaml)).toEqual(imported);
+    const normalized = normalizePostMapDocument(imported.map, file);
+    expect(normalized?.map.representative.id).toBe('b');
+    expect(normalized?.map.route.map((point) => point.id)).toEqual(['a', 'b', 'a']);
+  });
   it('documents every supported visual theme variable', () => {
     const markdown = markdownFile(file);
     for (const variable of visualThemeVariables) expect(markdown).toContain(`\`${variable}\``);

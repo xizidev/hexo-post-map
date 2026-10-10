@@ -24,6 +24,7 @@ interface Step {
   env?: Record<string, string>;
 }
 interface Job {
+  needs?: string | string[];
   'runs-on': string;
   permissions?: Record<string, string>;
   environment?: string;
@@ -76,11 +77,34 @@ describe('GitHub workflow publication and compatibility boundaries', () => {
       for (const step of job.steps.filter((step) =>
         step.uses?.startsWith('actions/upload-artifact@'),
       )) {
-        expect(step.if).toBe('failure()');
-        expect(step.with?.path).toBe('test-results/**/trace.zip');
+        if (step.with?.name === 'packed-candidate') {
+          expect(job).toBe(checks);
+          expect(step.if).toBeUndefined();
+          expect(step.with?.path).toBe('${{ runner.temp }}/*.tgz');
+          expect(step.with?.['if-no-files-found']).toBe('error');
+        } else {
+          expect(step.with?.name).toBe('chromium-failure-traces');
+          expect(step.if).toBe('failure()');
+          expect(step.with?.path).toBe('test-results/**/trace.zip');
+        }
       }
     }
     expect(action(browser!, 'actions/upload-artifact')).toBeDefined();
+    expect(action(checks!, 'actions/upload-artifact')?.with?.name).toBe('packed-candidate');
+    expect(checks!.steps.filter((step) => step.run?.includes('npm pack'))).toHaveLength(1);
+    for (const job of [integration!, browser!]) {
+      expect(job.needs).toBe('checks');
+      expect(action(job, 'actions/download-artifact')?.with).toEqual({
+        name: 'packed-candidate',
+        path: '${{ runner.temp }}/hpm-candidate',
+      });
+      expect(job.steps.some((step) => step.run?.includes('npm pack'))).toBe(false);
+      expect(
+        job.steps.some(
+          (step) => step.run?.includes('HPM_PACKED_TARBALL=') && step.run.includes('hpm-candidate'),
+        ),
+      ).toBe(true);
+    }
   });
 
   it('publishes only tagged GitHub Releases with OIDC, clean builds, and exact verified bytes', () => {

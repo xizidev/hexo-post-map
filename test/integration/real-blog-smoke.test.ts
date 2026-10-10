@@ -279,3 +279,23 @@ it.skipIf(process.platform === 'win32')(
   },
   10000,
 );
+it('uses the supplied sealed tarball without building or packing a replacement', async () => {
+  const source = await fixture();
+  try {
+    const tarball = join(source, 'candidate.tgz');
+    await writeFile(tarball, 'sealed candidate');
+    const { resolveSmokeTarball } = await import(runner);
+    expect(typeof resolveSmokeTarball).toBe('function');
+    const result = await resolveSmokeTarball(
+      source,
+      () => {
+        throw new Error('Hidden repack');
+      },
+      tarball,
+    );
+    expect(result).toBe(tarball);
+    expect(await readFile(result, 'utf8')).toBe('sealed candidate');
+  } finally {
+    await rm(source, { recursive: true, force: true });
+  }
+});

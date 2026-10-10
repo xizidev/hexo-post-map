@@ -389,3 +389,30 @@ Read [security, CSP, and privacy](https://github.com/xizidev/hexo-post-map/blob/
 See [CONTRIBUTING](https://github.com/xizidev/hexo-post-map/blob/main/CONTRIBUTING.md) for clean builds, packed-artifact theme tests, deterministic browser tests, and the optional live AMap smoke test. Report bugs via [GitHub Issues](https://github.com/xizidev/hexo-post-map/issues); disclose security issues using [SECURITY](https://github.com/xizidev/hexo-post-map/blob/main/SECURITY.md).
 
 The Front Matter, site configuration, documented theme variables, and versioned `window.HexoPostMap` lifecycle API are public contracts. Internal modules and provider adapters are not an extension API. The project is MIT licensed; AMap's service has its own terms and requirements.
+
+# Local map authoring — UNRELEASED development candidate
+
+The local editor is available only in this development candidate. The published npm 0.6.1 package does **not** include `post-map-editor`; install the reviewed candidate tarball in a disposable Hexo site to try it. Version 0.6.1 remains unchanged during development.
+
+Run `npx hexo post-map-editor --port 4001` in that site, then open the session URL printed by the command. It binds only to `127.0.0.1`; the default port is 4001, `--host` is unsupported, and a port conflict fails without stopping its owner. Use your existing Web Key with either client `security_js_code` or your own `service_host` proxy as described in [configuration](docs/configuration.md). A client security code is browser-visible, not a secret.
+
+Click the map or manually enter GCJ-02 coordinates, name points, choose the representative point, and add repeated route stops (A → B → A). Copy or download only the `map:` YAML block into your article's front matter:
+
+```yaml test=author-map
+map:
+  representative: b
+  points:
+    - id: a
+      name: Start
+      longitude: 121.4737
+      latitude: 31.2304
+    - id: b
+      name: Destination
+      longitude: 121.4837
+      latitude: 31.2404
+  route: [a, b, a]
+```
+
+The editor never saves articles or generates/deploys the blog. Drafts live only in page memory: **refreshing or closing the page clears the draft; export first**. A missing/invalid map configuration or failed SDK still permits manual editing and export. Deleting the representative point requires explicitly selecting another before export.
+
+Import accepts one YAML document with only the `map` root field, up to 128 KiB UTF-8, 200 points, 1000 route references and 50 alias expansions; invalid imports preserve the current draft. New optional zoom is 2–20; imported finite values such as 21 are retained with a preview warning. Existing `track` configuration is read-only and never fetched by the editor: preserve its relative source path for the target article's later build. See [security](docs/security.md) and [compatibility](docs/compatibility.md).

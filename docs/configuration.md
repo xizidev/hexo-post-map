@@ -135,3 +135,11 @@ The plugin message portion is shown below; Hexo may wrap it with its own log pre
 These errors identify a field, never its credential value. For post diagnostics see [Front Matter](front-matter.md). For provider failure, SDK conflicts, CSP, and privacy see [security](security.md).
 
 中文要点：启用后配置严格校验；空值不是“未配置”；环境变量的安全模式整体覆盖文件中的模式。路径不含 Hexo `root` 前缀，导航需按主题单独设置。
+
+# Local author command (UNRELEASED development candidate)
+
+Published npm 0.6.1 does not yet include this command. In a site with the candidate tarball installed, use `npx hexo post-map-editor --port 4001`; only `127.0.0.1` is supported, with integer ports 1–65535 and default 4001. Open the complete URL printed for this launch; every restart creates a new session. Stop with Ctrl+C before reusing the port. A conflict does not terminate another process or choose another port.
+
+The editor reuses existing `post_map.amap` configuration independently of `post_map.enabled`. Select exactly one security mode: the browser-visible client code (`HEXO_POST_MAP_AMAP_SECURITY_JS_CODE` / `security_js_code`) or an existing controlled proxy (`HEXO_POST_MAP_AMAP_SERVICE_HOST` / `service_host`), together with the Web Key (`HEXO_POST_MAP_AMAP_KEY` / `key`). A client code is not a server secret. Do not put credentials in exported YAML. Missing or invalid settings fall back to manual editing; SDK/network failure also leaves manual editing and export available.
+
+Drafts are memory-only and are cleared by refresh or closing. The command does not read or write articles, call generate/deploy/watch, or save a draft. Copy/download the `map:` block into front matter yourself. Import only that block (not full front matter): one document, at most 128 KiB UTF-8 input/output, 200 points, 1000 route stops, and 50 alias expansions. Invalid imports preserve the draft. Deleting a representative requires selecting a replacement. Optional new zoom is 2–20, while any finite imported zoom is preserved with preview limits. Existing track fields remain read-only, with omitted defaults preserved; relative `track.source` paths are resolved only when the target article is built, never by the editor.

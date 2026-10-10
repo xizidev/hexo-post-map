@@ -4,12 +4,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { cp, lstat, mkdir, readFile, writeFile, readdir, realpath, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseDocument, stringify } from 'yaml';
 import { Window } from 'happy-dom';
 import { normalizeNpmPackJson } from '../../scripts/npm-pack-json.mjs';
 import { withTemporaryWorkspace } from './runner-lifecycle.mjs';
+import { withPackedAuthorServer } from './author-server.mjs';
 
 const filename = fileURLToPath(import.meta.url);
 const repository = resolve(dirname(filename), '../..');
@@ -19,6 +20,8 @@ const smokeCode = 'build-smoke-' + 'code';
 const imageUrl = 'https://oss.qiuchang.cc/img_p/shanghai/DSCF9176.JPG';
 const articleRoute = 'archives/shanghai-230304/';
 const trackArticleRoute = 'archives/hpm-track-smoke/';
+const multiArticleRoute = 'archives/hpm-author-multi/';
+const routeArticleRoute = 'archives/hpm-author-route/';
 const privateTrackName = 'private-smoke.gpx';
 const privateTrackMarker = 'DO_NOT_PUBLISH_REAL_BLOG_TRACK';
 const privateTrackTimestamp = '2024-01-02T03:04:05Z';
@@ -378,7 +381,7 @@ async function verifyGenerated(site, root) {
   await trackedWindow.happyDOM.close();
   const data = JSON.parse(await readFile(join(output, 'map/posts.json'), 'utf8'));
   assert.equal(data.version, 1);
-  assert.equal(data.posts.length, 2, 'Only Shanghai and the temporary track should be mapped');
+  assert.equal(data.posts.length, 4, 'Only four temporary author map shapes should be mapped');
   assert.ok(!Object.hasOwn(data, 'track'), 'Overview envelope must stay track-free');
   assert.ok(
     data.posts.every((post) => !Object.hasOwn(post, 'track')),
@@ -400,6 +403,30 @@ async function verifyGenerated(site, root) {
     longitude: 118.7977,
     latitude: 32.0872,
   });
+  for (const route of [multiArticleRoute, routeArticleRoute]) {
+    const post = data.posts.find((post) => post.url === `${root}${route}`);
+    assert.equal(post?.location.name, '代表终点');
+    const window = new Window({
+      settings: {
+        disableJavaScriptEvaluation: true,
+        disableJavaScriptFileLoading: true,
+        disableCSSFileLoading: true,
+      },
+    });
+    window.document.write(await readFile(join(output, route, 'index.html'), 'utf8'));
+    const map = JSON.parse(window.document.querySelector('[data-hpm-data]').textContent).map;
+    assert.equal(map.representative.id, 'b');
+    assert.deepEqual(
+      map.points.map((point) => point.id),
+      ['a', 'b'],
+    );
+    assert.deepEqual(
+      map.route.map((point) => point.id),
+      route === routeArticleRoute ? ['a', 'b', 'a'] : [],
+    );
+    assert.equal(map.zoom, route === routeArticleRoute ? 21 : undefined);
+    await window.happyDOM.close();
+  }
   for (const asset of [
     'runtime.js',
     'style.css',
@@ -413,6 +440,8 @@ async function verifyGenerated(site, root) {
   const expectedFeatures = new Map([
     [`${articleRoute}index.html`, 'detail'],
     [`${trackArticleRoute}index.html`, 'detail'],
+    [`${multiArticleRoute}index.html`, 'detail'],
+    [`${routeArticleRoute}index.html`, 'detail'],
     ['map/index.html', 'overview'],
   ]);
   const htmlPaths = await filesWithExtension(output, '.html');
@@ -653,8 +682,8 @@ async function browserSmoke(site, root, ordinaryRoute, trackUrl) {
     assert.ok(!shared.href.includes(smokeKey) && !shared.href.includes(smokeCode));
     assert.deepEqual(local, beforeShare, 'Sharing must not request article or track data');
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: '全部文章 2', exact: true }).click();
-    const preview = page.getByRole('dialog', { name: '2 篇文章' });
+    await page.getByRole('button', { name: '全部文章 4', exact: true }).click();
+    const preview = page.getByRole('dialog', { name: '4 篇文章' });
     const shanghaiCard = preview.locator('a').filter({ hasText: '魔都' });
     await expect(shanghaiCard.locator('img')).toHaveAttribute('src', imageUrl);
     await expect
@@ -667,7 +696,7 @@ async function browserSmoke(site, root, ordinaryRoute, trackUrl) {
     await expect(page.locator('[data-hpm-detail]')).toHaveAttribute('data-hpm-active', 'true');
     assert.equal(sdkRequests, 5, 'One SDK request per full document, shared by PJAX roots');
     await page.goBack();
-    await expect(page.getByRole('dialog', { name: '2 篇文章' })).toBeVisible();
+    await expect(page.getByRole('dialog', { name: '4 篇文章' })).toBeVisible();
     await expect(page.getByRole('button', { name: '关闭文章面板' })).not.toBeFocused();
     assert.deepEqual(
       await page.evaluate(() => {
@@ -684,6 +713,128 @@ async function browserSmoke(site, root, ordinaryRoute, trackUrl) {
   }
 }
 
+/** Produce real editor codec output from the installed tarball, then write only its disposable copy. */
+async function addAuthorExports(site, environment) {
+  const { chromium } = await import('playwright');
+  const { expect } = await import('playwright/test');
+  const reservation = createServer();
+  await new Promise((ready) => reservation.listen(0, '127.0.0.1', ready));
+  const port = reservation.address().port;
+  await new Promise((done) => reservation.close(done));
+  const env = { ...environment };
+  delete env.HPM_AUTHOR_READY_FILE;
+  await withPackedAuthorServer({ site, port, env }, async ({ url }) => {
+    const browser = await chromium.launch({ channel: 'chromium' });
+    try {
+      const context = await browser.newContext({ serviceWorkers: 'block' });
+      await context.route('**/*', (route) =>
+        new URL(route.request().url()).origin === `http://127.0.0.1:${port}`
+          ? route.continue()
+          : route.abort(),
+      );
+      const page = await context.newPage();
+      try {
+        await page.goto(url, { waitUntil: 'domcontentloaded' });
+      } catch {
+        throw new Error('Packed author export fixture could not load.');
+      }
+      await expect(page.locator('[data-point-form]')).toHaveAttribute('data-mounted', 'true');
+      await page.evaluate(() => history.replaceState(null, '', '/'));
+      const a = { id: 'a', name: '起点', longitude: 121.45, latitude: 31.22 };
+      const b = { id: 'b', name: '代表终点', longitude: 121.49, latitude: 31.25 };
+      const trackedPath = join(site, 'source/_posts/hpm-track-smoke.md');
+      const trackedText = await readFile(trackedPath, 'utf8');
+      const front = /^---\n([\s\S]*?)\n---\n/u.exec(trackedText);
+      const tracked = yamlObject(front[1]);
+      const shanghaiPath = join(site, 'source/_posts/魔都.md');
+      const shanghaiText = await readFile(shanghaiPath, 'utf8');
+      const shanghaiFront = /^---\n([\s\S]*?)\n---\n/u.exec(shanghaiText);
+      const shanghai = yamlObject(shanghaiFront[1]);
+      for (const fixture of [
+        {
+          map: shanghai.map,
+          path: shanghaiPath,
+          metadata: shanghai,
+          body: shanghaiText.slice(shanghaiFront[0].length),
+        },
+        {
+          map: { representative: 'b', points: [a, b] },
+          path: join(site, 'source/_posts/hpm-author-multi.md'),
+          metadata: {
+            title: '临时作者多点',
+            urlname: 'hpm-author-multi',
+            date: '2026-01-02 12:00:00',
+          },
+          body: 'Temporary author multi-point fixture.',
+        },
+        {
+          map: { representative: 'b', points: [a, b], route: ['a', 'b', 'a'], zoom: 21 },
+          path: join(site, 'source/_posts/hpm-author-route.md'),
+          metadata: {
+            title: '临时作者往返线',
+            urlname: 'hpm-author-route',
+            date: '2026-01-02 12:00:00',
+          },
+          body: 'Temporary author return-route fixture.',
+        },
+        {
+          map: tracked.map,
+          path: trackedPath,
+          metadata: tracked,
+          body: trackedText.slice(front[0].length),
+        },
+      ]) {
+        await page.getByRole('button', { name: '导入 YAML', exact: true }).click();
+        await page.getByLabel('粘贴完整 map: 配置').fill(stringify({ map: fixture.map }));
+        await page.getByRole('button', { name: '校验导入' }).click();
+        await page.getByRole('button', { name: '确认替换当前草稿' }).click();
+        await expect(page.locator('[data-copy]')).toBeEnabled();
+        const exported = yamlObject(await page.locator('[data-yaml]').textContent());
+        assert.deepEqual(
+          exported.map,
+          fixture.map,
+          'Packed codec did not preserve authored map fields',
+        );
+        await writeFile(
+          fixture.path,
+          `---\n${stringify({ ...fixture.metadata, map: exported.map })}---\n${fixture.body}`,
+        );
+      }
+    } finally {
+      await browser.close();
+    }
+  });
+}
+
+export async function resolveSmokeTarball(
+  temporary,
+  run,
+  supplied = process.env.HPM_PACKED_TARBALL,
+) {
+  if (supplied) {
+    assert.ok(isAbsolute(supplied), 'HPM_PACKED_TARBALL must be absolute');
+    assert.ok((await stat(supplied)).isFile(), 'Supplied tarball must be a file');
+    return supplied;
+  }
+  success(await run('npm', ['run', 'build'], repository), 'plugin build');
+  const packs = normalizeNpmPackJson(
+    JSON.parse(
+      success(
+        await run(
+          'npm',
+          ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
+          repository,
+        ),
+        'npm pack',
+      ),
+    ),
+  );
+  assert.equal(packs.length, 1);
+  const tarball = resolve(temporary, packs[0].filename);
+  assert.equal(dirname(tarball), temporary);
+  return tarball;
+}
+
 export async function runRealBlogSmoke(blog = defaultBlog) {
   const environment = { ...process.env, npm_config_ignore_scripts: 'true' };
   for (const key of Object.keys(environment))
@@ -694,23 +845,7 @@ export async function runRealBlogSmoke(blog = defaultBlog) {
       child(command, args, cwd, { ...environment, ...env });
     await copyBlog(blog, site);
     await configureCopy(site, '/');
-    success(await run('npm', ['run', 'build'], repository), 'plugin build');
-    const packs = normalizeNpmPackJson(
-      JSON.parse(
-        success(
-          await run(
-            'npm',
-            ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary],
-            repository,
-          ),
-          'npm pack',
-        ),
-      ),
-    );
-    assert.equal(packs.length, 1);
-    const packed = packs[0];
-    const tarball = resolve(temporary, packed.filename);
-    assert.equal(dirname(tarball), temporary);
+    const tarball = await resolveSmokeTarball(temporary, run);
     const integrity = `sha512-${createHash('sha512')
       .update(await readFile(tarball))
       .digest('base64')}`;
@@ -726,7 +861,7 @@ export async function runRealBlogSmoke(blog = defaultBlog) {
     assert.ok(!(await lstat(installedPath)).isSymbolicLink());
     const lock = JSON.parse(await readFile(join(site, 'node_modules/.package-lock.json'), 'utf8'));
     assert.equal(lock.packages['node_modules/hexo-post-map'].integrity, integrity);
-    assert.ok(lock.packages['node_modules/hexo-post-map'].resolved.endsWith(packed.filename));
+    assert.ok(lock.packages['node_modules/hexo-post-map'].resolved.endsWith(basename(tarball)));
     // Hexo discovers plugins from dependencies, even when npm installed them --no-save.
     // Declare the already-installed tarball only in this disposable site's manifest.
     const manifestPath = join(site, 'package.json');
@@ -738,6 +873,7 @@ export async function runRealBlogSmoke(blog = defaultBlog) {
     );
     for (const root of ['/', '/blog/']) {
       await configureCopy(site, root);
+      await addAuthorExports(site, environment);
       for (const path of ['_config.yml', 'themes/cactus/_config.yml']) {
         const contents = await readFile(join(site, path), 'utf8');
         assert.ok(!contents.includes(smokeKey) && !contents.includes(smokeCode));

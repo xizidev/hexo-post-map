@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { parse, stringify } from 'yaml';
 import { normalizeNpmPackJson } from '../../scripts/npm-pack-json.mjs';
 import { withTemporaryWorkspace } from './runner-lifecycle.mjs';
+import { withPackedAuthorServer, verifyPackedAuthorCommand } from './author-server.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const trackFixture = join(repository, 'test/integration/fixtures/track/source');
@@ -226,6 +227,12 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
             },
           );
           success(generated, 'hexo generate');
+          if (!serve) {
+            await verifyPackedAuthorCommand({ site, env: environment, run });
+            console.log(
+              `PASS packed author / unchanged bytes: Hexo ${version} / ${theme} / ${root}`,
+            );
+          }
           success(
             await run(
               process.execPath,
@@ -364,7 +371,22 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
               server.listen(4179, '127.0.0.1', ready);
             });
             console.log(`Packed fixture ready on http://127.0.0.1:4179${root}map/`);
-            await waitForCancellation();
+            assert.ok(
+              process.env.HPM_AUTHOR_READY_FILE,
+              'Author browser bridge must be configured',
+            );
+            await withPackedAuthorServer(
+              {
+                site,
+                port: 4180,
+                env: {
+                  ...environment,
+                  HEXO_POST_MAP_AMAP_KEY: dummyKey,
+                  HEXO_POST_MAP_AMAP_SECURITY_JS_CODE: dummyCode,
+                },
+              },
+              async () => waitForCancellation(),
+            );
           }
         }
       }

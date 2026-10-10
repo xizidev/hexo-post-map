@@ -68,3 +68,11 @@ The plugin can reuse an already initialized compatible AMap 2.x SDK. It will not
 Follow [SECURITY.md](../SECURITY.md) for vulnerability disclosure. General rendering problems belong in a sanitized issue, including versions and a minimal reproduction without credentials or private coordinates.
 
 中文要点：环境变量不等于客户端保密；精确坐标、处理后的轨迹、Web Key、客户端安全码都会公开。轨迹源必须位于 `source_dir`，逃逸符号链接和超限输入会失败，引用的原始轨迹不会作为文章资源发布。首尾距离裁剪先于统计和哈希，但不是匿名化，CDN 缓存也可能长期保留已发布哈希。生产环境建议 HTTPS 代理，交互激活按钮不是第三方加载同意开关。CSP 必须在真实部署上先以 Report-Only 验证；上述官方端点不是完整来源清单。SDK 加载超时后需要刷新页面。
+
+# Local author security (UNRELEASED development candidate)
+
+The npm 0.6.1 release does not contain the author command. The candidate's author server binds only to `127.0.0.1`, validates exact Host and Origin, exposes a fixed resource allowlist without CORS or a general proxy, and uses a fresh 256-bit session token per launch. The fragment `#session=` is sent only as `X-HPM-Editor-Session` to the local bootstrap endpoint; it never belongs in a query, YAML, SDK request, storage, screenshot, or CI log. The explicit launch URL is intended only for the current local user. Responses are `no-store`, `strict-origin`, `nosniff`, and `DENY`.
+
+HTML/scripts contain no Web Key or client security code; an authorized bootstrap supplies browser map settings. The client security code is browser-visible, **not a secret**; use existing domain restrictions and a controlled service-host proxy where appropriate. Test fake SDK success does not verify real AMap domain restrictions, proxy availability, credentials, or external connectivity. Real SDK acceptance is a separate credential-gated check.
+
+Drafts stay in page memory, with no automatic article writes or persistence. Refresh/close clears them. YAML imports reject extra root fields, unsafe prototypes/merges/custom tags, duplicate keys, and bounded alias expansion; invalid input cannot replace a valid draft. Imported track metadata is read-only and cannot cause file/network reads. Exported relative track paths still require the target article's ordinary build and privacy pipeline.
