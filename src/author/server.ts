@@ -21,8 +21,8 @@ const SAFETY_HEADERS = {
 };
 const ASSETS: Readonly<Record<string, { filename: string; contentType: string }>> = {
   '/': { filename: 'editor.html', contentType: 'text/html; charset=utf-8' },
-  '/editor.js': { filename: 'editor.js', contentType: 'text/javascript; charset=utf-8' },
-  '/editor.css': { filename: 'editor.css', contentType: 'text/css; charset=utf-8' },
+  '/assets/editor.js': { filename: 'editor.js', contentType: 'text/javascript; charset=utf-8' },
+  '/assets/editor.css': { filename: 'editor.css', contentType: 'text/css; charset=utf-8' },
 };
 
 function rawValues(request: IncomingMessage, name: string): string[] {
@@ -120,6 +120,13 @@ export async function startAuthorServer(options: {
       );
     },
   );
+  // No author route consumes request bodies; suppress Node's automatic Expect responses.
+  const rejectExpectation = (request: IncomingMessage, response: ServerResponse) => {
+    response.setHeader('Connection', 'close');
+    respond(request, response, 417, 'Expectation not supported.');
+  };
+  server.on('checkExpectation', rejectExpectation);
+  server.on('checkContinue', rejectExpectation);
   server.on('connection', (socket) => {
     connections.add(socket);
     socket.once('close', () => connections.delete(socket));

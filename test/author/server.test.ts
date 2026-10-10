@@ -168,7 +168,7 @@ describe('startAuthorServer', () => {
     expect(response).not.toMatch(/test-key|test-code/);
   });
 
-  it.each(['/', '/editor.js', '/editor.css'])(
+  it.each(['/', '/assets/editor.js', '/assets/editor.css'])(
     'serves only fixed credential-free assets at %s',
     async (path) => {
       const handle = await start();
@@ -207,9 +207,11 @@ describe('startAuthorServer', () => {
   it.each([
     '/private.txt',
     '/editor.html',
+    '/editor.js',
+    '/editor.css',
     '/%2e%2e/private.txt',
     '/%2feditor.js',
-    '/editor.js?secret-test-key',
+    '/assets/editor.js?secret-test-key',
     '/api/bootstrap?session=test-key',
   ])('rejects unknown or encoded path %s without exposing data', async (path) => {
     const handle = await start();
@@ -225,7 +227,7 @@ describe('startAuthorServer', () => {
   it('sanitizes missing-asset failures', async () => {
     const handle = await start();
     await rm(join(assetDirectory, 'editor.js'));
-    const response = await fetch(handle.origin + '/editor.js');
+    const response = await fetch(handle.origin + '/assets/editor.js');
     expect(response.status).toBe(500);
     expectSafe(response.headers);
     expect(await response.text()).not.toContain(assetDirectory);
@@ -244,6 +246,26 @@ describe('startAuthorServer', () => {
     expect(response.toLowerCase()).toContain('x-frame-options: deny');
     expect(response).not.toContain('secret-test-key');
   });
+
+  it.each(['secret-test-key', '100-continue'])(
+    'rejects Expect %s with safe final response without accepting a request body',
+    async (expectation) => {
+      const handle = await start();
+      const response = await rawRequest(
+        handle,
+        `POST /api/bootstrap HTTP/1.1\r\nHost: ${new URL(handle.origin).host}\r\nExpect: ${expectation}\r\nContent-Length: 9\r\n\r\n`,
+      );
+      expect(response).not.toContain('100 Continue');
+      expect(response.toLowerCase()).toContain('cache-control: no-store');
+      expect(response.toLowerCase()).toContain('referrer-policy: strict-origin');
+      expect(response.toLowerCase()).toContain('x-content-type-options: nosniff');
+      expect(response.toLowerCase()).toContain('x-frame-options: deny');
+      expect(response.toLowerCase()).toContain('connection: close');
+      expect(response.toLowerCase()).not.toContain('access-control-allow-origin');
+      expect(response).toContain('417 Expectation Failed');
+      expect(response).not.toMatch(/test-key|test-code/);
+    },
+  );
 
   it('closes idempotently, destroys owned partial clients, and releases its port', async () => {
     const handle = await start();
