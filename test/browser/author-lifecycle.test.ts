@@ -7,6 +7,10 @@ const flush = async () => {
 };
 let page: ReturnType<typeof startAuthorPage>;
 let fetcher: ReturnType<typeof vi.fn>;
+// Same 32-byte, unpadded base64url wire format emitted by the local author server.
+const sessionToken = Buffer.from(
+  Array.from({ length: 32 }, (_, index) => (251 + index * 19) % 256),
+).toString('base64url');
 beforeEach(() => {
   const template = document.createElement('template');
   template.innerHTML = readFileSync('src/author/editor.html', 'utf8');
@@ -24,15 +28,31 @@ afterEach(() => {
   vi.restoreAllMocks();
   document.body.replaceChildren();
 });
-it('mounts credential-free manual mode when the fragment is missing or malformed', async () => {
-  location.hash = '#session=bad&extra=x';
+it.each([
+  '',
+  '#session=bad&extra=x',
+  '#session=' + 'a'.repeat(64),
+  '#session=' + sessionToken + '&extra=x',
+  '#session=' + sessionToken + '=',
+])('mounts credential-free manual mode for missing or malformed fragment %s', async (fragment) => {
+  location.hash = fragment;
   page = startAuthorPage(window);
   await flush();
   expect(fetcher).not.toHaveBeenCalled();
   expect(document.querySelector('[data-point-form]')?.getAttribute('data-mounted')).toBe('true');
 });
+it('fetches bootstrap using the 32-byte base64url token in the generated editor URL', async () => {
+  const editorUrl = new URL(`http://127.0.0.1:4001/#session=${sessionToken}`);
+  location.hash = editorUrl.hash;
+  page = startAuthorPage(window);
+  await flush();
+  expect(fetcher).toHaveBeenCalledOnce();
+  expect(fetcher.mock.calls[0]?.[0]).toBe('/api/bootstrap');
+  expect(fetcher.mock.calls[0]?.[1].headers).toEqual({ 'X-HPM-Editor-Session': sessionToken });
+  expect(document.querySelector('[data-point-form]')?.getAttribute('data-mounted')).toBe('true');
+});
 it.each(['forbidden', 'network', 'invalid'])('falls back to manual mode on %s', async (cause) => {
-  location.hash = '#session=' + 'a'.repeat(64);
+  location.hash = '#session=' + sessionToken;
   if (cause === 'forbidden') fetcher.mockResolvedValue({ ok: false, status: 403 });
   if (cause === 'network') fetcher.mockRejectedValue(new Error('network'));
   if (cause === 'invalid')
@@ -44,7 +64,7 @@ it.each(['forbidden', 'network', 'invalid'])('falls back to manual mode on %s', 
   await flush();
   expect(document.querySelector('[data-map-status]')?.textContent).toContain('手动');
   const options = fetcher.mock.calls[0]?.[1];
-  expect(options.headers).toEqual({ 'X-HPM-Editor-Session': 'a'.repeat(64) });
+  expect(options.headers).toEqual({ 'X-HPM-Editor-Session': sessionToken });
   expect(fetcher.mock.calls[0]?.[0]).toBe('/api/bootstrap');
 });
 it('remounts the same memory session once after persisted pageshow', async () => {
@@ -74,7 +94,7 @@ it('remounts the same memory session once after persisted pageshow', async () =>
   expect(document.querySelectorAll('[data-route-index]')).toHaveLength(1);
 });
 it('ignores delayed bootstrap after pagehide until a persisted remount', async () => {
-  location.hash = '#session=' + 'a'.repeat(64);
+  location.hash = '#session=' + sessionToken;
   let resolve!: (value: unknown) => void;
   fetcher.mockReturnValue(
     new Promise((yes) => {

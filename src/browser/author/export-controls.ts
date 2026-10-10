@@ -73,8 +73,10 @@ export function createAuthorExportControls(
       fallback.value = result.yaml;
       fallback.hidden = label.hidden = false;
       status.textContent = '无法自动复制，请使用下方文本框手动复制。';
-      fallback.focus();
-      fallback.select();
+      if (root.ownerDocument.activeElement === copy) {
+        fallback.focus();
+        fallback.select();
+      }
     }
   }
   function onDownload(): void {

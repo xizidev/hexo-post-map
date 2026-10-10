@@ -72,6 +72,7 @@ it('disables actions immediately for pending input and never uses stale YAML', (
 });
 it('offers a labelled readonly fallback after clipboard rejection', async () => {
   write.mockRejectedValue(new Error('denied'));
+  button('[data-copy]').focus();
   button('[data-copy]').click();
   await flush();
   const area = root.querySelector<HTMLTextAreaElement>('[data-copy-fallback]')!;
@@ -79,6 +80,25 @@ it('offers a labelled readonly fallback after clipboard rejection', async () => 
   expect(area.value).toBe('map: 当前中文\n');
   expect(area.hidden).toBe(false);
   expect(area.labels?.length).toBe(1);
+  expect(document.activeElement).toBe(area);
+  expect(area.selectionStart).toBe(0);
+  expect(area.selectionEnd).toBe(area.value.length);
+});
+it('shows delayed clipboard fallback without stealing focus from a form field', async () => {
+  let reject!: (reason: Error) => void;
+  write.mockReturnValue(
+    new Promise((_resolve, no) => {
+      reject = no;
+    }),
+  );
+  button('[data-copy]').focus();
+  button('[data-copy]').click();
+  const name = document.querySelector<HTMLTextAreaElement>('[name=name]')!;
+  name.focus();
+  reject(new Error('late denial'));
+  await flush();
+  expect(root.querySelector<HTMLTextAreaElement>('[data-copy-fallback]')!.hidden).toBe(false);
+  expect(document.activeElement).toBe(name);
 });
 it('downloads UTF-8 YAML only on click and revokes its URL', () => {
   const create = vi.fn().mockReturnValue('blob:fixture');

@@ -12,7 +12,7 @@ export function startAuthorPage(owner: Window): { destroy(): void } {
   const root = owner.document.querySelector<HTMLElement>('[data-author-root]');
   if (!root) return { destroy() {} };
   const session: AuthorEditorSession = { draft: createAuthorDraft() };
-  const token = /^#session=([a-f0-9]{64})$/u.exec(owner.location.hash)?.[1];
+  const token = /^#session=([A-Za-z0-9_-]{43})$/u.exec(owner.location.hash)?.[1];
   let alive = true;
   let visible = true;
   let generation = 0;
