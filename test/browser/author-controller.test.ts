@@ -65,9 +65,75 @@ beforeEach(async () => {
 });
 afterEach(() => {
   handle?.destroy();
+  vi.restoreAllMocks();
   document.body.replaceChildren();
 });
 describe('author editor', () => {
+  it('abandons an unwanted candidate without changing an existing valid draft', async () => {
+    const before = session.draft;
+    maps[0]!.options.onCandidate([119, 33]);
+    await flush();
+    expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(true);
+    click('[data-point-id=a] [data-select]');
+    await flush();
+    const cancel = element<HTMLButtonElement>('[data-candidate-cancel]');
+    expect(cancel).not.toBeNull();
+    expect(cancel.hidden).toBe(false);
+    cancel.click();
+    await flush();
+    expect(session.draft).toBe(before);
+    expect(session.selectedId).toBe('a');
+    expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(false);
+    expect(cancel.hidden).toBe(true);
+    click('[data-new]');
+    expect(element<HTMLInputElement>('[name=name]').value).toBe('');
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('');
+  });
+  it('abandons only new-point input and keeps a committed incomplete coordinate blocked', async () => {
+    input('[name=longitude]', '1e+');
+    maps[0]!.options.onCandidate([119, 33]);
+    await flush();
+    const cancel = element<HTMLButtonElement>('[data-candidate-cancel]');
+    expect(cancel).not.toBeNull();
+    cancel.click();
+    await flush();
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('1e+');
+    expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(true);
+    expect(session.draft.points).toHaveLength(1);
+  });
+  it('asks before replacing raw candidate inputs with another map click and preserves them on cancel', async () => {
+    click('[data-new]');
+    input('[name=name]', '未确认的名称');
+    input('[name=longitude]', '1e+');
+    input('[name=latitude]', '33');
+    const before = session.draft;
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    maps[0]!.options.onCandidate([119.5, 33.5]);
+    await flush();
+    expect(element<HTMLInputElement>('[name=name]').value).toBe('未确认的名称');
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('1e+');
+    expect(element<HTMLInputElement>('[name=latitude]').value).toBe('33');
+    expect(session.draft).toBe(before);
+    expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(true);
+    confirm.mockReturnValue(true);
+    maps[0]!.options.onCandidate([119.5, 33.5]);
+    await flush();
+    expect(element<HTMLInputElement>('[name=name]').value).toBe('');
+    expect(element<HTMLInputElement>('[name=longitude]').value).toBe('119.5');
+    expect(session.draft).toBe(before);
+  });
+  it('does not adopt a map candidate after its replacement confirmation destroys the editor', async () => {
+    click('[data-new]');
+    input('[name=name]', '未确认的名称');
+    vi.spyOn(window, 'confirm').mockImplementation(() => {
+      handle.destroy();
+      return true;
+    });
+    maps[0]!.options.onCandidate([119, 33]);
+    await flush();
+    expect(session.inputs?.newFields.name).toBe('未确认的名称');
+    expect(element<HTMLInputElement>('[name=name]').value).toBe('未确认的名称');
+  });
   it('fits imported points once when their asynchronous map becomes ready without changing zoom', async () => {
     handle.destroy();
     const resolvers: ((handle: AuthorMapHandle) => void)[] = [];
@@ -104,7 +170,7 @@ describe('author editor', () => {
     expect(element<HTMLInputElement>('[name=longitude]').value).toBe('1e+');
     expect(element<HTMLInputElement>('[data-zoom]').value).toBe('1e');
     expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(true);
-    expect(element('[data-yaml]').textContent).toContain('过期');
+    expect(element('[data-yaml]').textContent).toContain('请完成地点信息');
   });
   it('retains candidate and unconfirmed new form inputs across memory remount', async () => {
     maps[0]!.options.onCandidate([119.123456789, 33]);
@@ -151,18 +217,18 @@ describe('author editor', () => {
     input('[data-import-source]', 'map: [hostile-value');
     click('[data-import-validate]');
     const error = element('[data-import-error]').textContent;
-    expect(error).toContain('YAML syntax is invalid');
+    expect(error).toContain('格式');
     expect(error).toMatch(/第\s*\d+\s*行.*第\s*\d+\s*列/u);
     expect(error).not.toContain('hostile-value');
   });
   it('shows byte overflow and semantic export reasons instead of only a field', async () => {
     input('[name=name]', '一'.repeat(45000));
     await flush();
-    expect(element('[data-export-error]').textContent).toContain('UTF-8 bytes');
+    expect(element('[data-export-error]').textContent).toContain('内容过长');
     click('[data-import-open]');
     input('[data-import-source]', 'x'.repeat(131073));
     click('[data-import-validate]');
-    expect(element('[data-import-error]').textContent).toContain('UTF-8 bytes');
+    expect(element('[data-import-error]').textContent).toContain('内容过长');
   });
   it.each([[['a', 'b', 'c']], [['a', 'b', 'a']]])(
     'moves the focused route occurrence twice in %j',
@@ -241,7 +307,8 @@ describe('author editor', () => {
     expect(element<HTMLButtonElement>('[data-copy]').disabled).toBe(true);
     expect(element<HTMLButtonElement>('[data-download]').disabled).toBe(true);
     await flush();
-    expect(element('[data-status]').textContent).toContain('坐标');
+    expect(element('[data-export-hint]').textContent).not.toBe('');
+    expect(element('[data-longitude-error]').textContent).toBe('');
   });
   it.each([' ', '1e', '1e+', 'Infinity', '0x10'])(
     'keeps incomplete coordinate %s separate',

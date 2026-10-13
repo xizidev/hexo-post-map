@@ -133,7 +133,7 @@ it('restores pending coordinate and zoom validation across persisted pagehide/pa
   expect(document.querySelector<HTMLInputElement>('[name=longitude]')!.value).toBe('1e+');
   expect(document.querySelector<HTMLInputElement>('[data-zoom]')!.value).toBe('1e');
   expect(document.querySelector<HTMLButtonElement>('[data-copy]')!.disabled).toBe(true);
-  expect(document.querySelector('[data-yaml]')!.textContent).toContain('过期');
+  expect(document.querySelector('[data-yaml]')!.textContent).toContain('请完成地点信息');
   input('[name=longitude]', '-74');
   expect(document.querySelector<HTMLButtonElement>('[data-copy]')!.disabled).toBe(true);
   input('[data-zoom]', '12');

@@ -137,6 +137,21 @@ afterEach(() => {
 });
 
 describe('author map', () => {
+  it('focuses only an explicitly chosen search candidate without rewriting the draft zoom', async () => {
+    const { handle } = await setup();
+    const input = draft();
+    handle.render(input);
+    handle.setCandidate([118.8, 32]);
+    expect(map.setZoomAndCenter).not.toHaveBeenCalled();
+    handle.setCandidate([118.8, 32], { focus: true });
+    expect(map.setZoomAndCenter).toHaveBeenCalledExactlyOnceWith(15, [118.8, 32], true);
+    handle.render(input);
+    expect(map.setZoomAndCenter).toHaveBeenCalledTimes(1);
+    expect(input.zoom).toBe(8.25);
+    handle.destroy();
+    handle.setCandidate([120, 30], { focus: true });
+    expect(map.setZoomAndCenter).toHaveBeenCalledTimes(1);
+  });
   it('starts empty at fixed center and zoom without location plugin', async () => {
     const { handle } = await setup();
     handle.render(createAuthorDraft());

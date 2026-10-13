@@ -35,6 +35,7 @@ beforeEach(() => {
     root,
     () => result,
     () => invalid,
+    () => 1,
   );
 });
 afterEach(() => {

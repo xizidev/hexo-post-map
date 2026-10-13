@@ -11,7 +11,7 @@ Requires Node.js **20 or newer** and Hexo **7 or 8**. The plugin uses AMap JS AP
 Run in your Hexo site:
 
 ```sh
-npm install hexo-post-map
+npm install hexo-post-map@latest
 ```
 
 Installing alone changes nothing. Add this configuration to the site's `_config.yml` (not the theme's configuration):
@@ -390,13 +390,31 @@ See [CONTRIBUTING](https://github.com/xizidev/hexo-post-map/blob/main/CONTRIBUTI
 
 The Front Matter, site configuration, documented theme variables, and versioned `window.HexoPostMap` lifecycle API are public contracts. Internal modules and provider adapters are not an extension API. The project is MIT licensed; AMap's service has its own terms and requirements.
 
-# Local map authoring — UNRELEASED development candidate
+# Local map authoring (0.7.0+)
 
-The local editor is available only in this development candidate. The published npm 0.6.1 package does **not** include `post-map-editor`; install the reviewed candidate tarball in a disposable Hexo site to try it. Version 0.6.1 remains unchanged during development.
+Version 0.7.0 and newer include the local editor. Version 0.6.x does not include `post-map-editor`; upgrade the installed plugin before using it. Run in your Hexo blog directory:
 
-Run `npx hexo post-map-editor --port 4001` in that site, then open the session URL printed by the command. It binds only to `127.0.0.1`; the default port is 4001, `--host` is unsupported, and a port conflict fails without stopping its owner. Use your existing Web Key with either client `security_js_code` or your own `service_host` proxy as described in [configuration](docs/configuration.md). A client security code is browser-visible, not a secret.
+```sh
+npm install hexo-post-map@latest
+npx hexo post-map-editor --open --port 4001
+```
 
-Click the map or manually enter GCJ-02 coordinates, name points, choose the representative point, and add repeated route stops (A → B → A). Copy or download only the `map:` YAML block into your article's front matter:
+The editor starts its own local service; the blog's development or production server does not need to be running. Upgrading from 0.6.x adds authoring tools without changing public maps or article schemas. Using only the editor requires no blog build, deployment or OSS upload.
+
+Omit `--open` to open the complete session URL printed by the command yourself. Opening is opt-in; a failed launch leaves the server and printed URL available for manual use. It binds only to `127.0.0.1`; the default port is 4001, `--host` is unsupported, and a port conflict fails without stopping its owner. Choose an available port with, for example, `--port 4003`. Use the existing `post_map.amap` Web Key in your site's `_config.yml`, with either client `security_js_code` or your own `service_host` proxy as described in [configuration](https://github.com/xizidev/hexo-post-map/blob/main/docs/configuration.md). The editor also accepts the existing environment overrides. A client security code is browser-visible, not a secret.
+
+`--open` hands the URL to the operating system; it does not verify that a browser page loaded. A handler that stays running without reporting an error is acknowledged after five seconds. Stopping the editor cancels observation, not the browser application. The printed URL always remains the manual fallback.
+
+The side panel separates two tabs rather than assigning a place a mutually exclusive point/route type:
+
+- **Places** manages named article places and the representative used by the overview. Coordinates and article zoom live in an expandable editor, opened automatically for manual additions. Reordering places does not reorder the route.
+- **Route** references those places in stop order and labels the start, end and repeated visits. A place can occur repeatedly, such as A → B → A. Removing a stop does not delete its place or change the representative.
+
+Tabs show place and stop counts and support arrow keys, Home and End. Switching preserves unconfirmed candidates and incomplete input. The export footer sits below either tab. Search or map selection reveals the place editor; adding still requires explicit confirmation.
+
+An empty draft is a normal starting state: a subdued “添加地点后即可导出” hint appears, while copy, download and YAML preview stay hidden until a place is added. Incomplete or invalid fields keep export unavailable and cannot expose an older valid YAML block. Typing does not immediately mark fields red; leaving a field or confirming an addition shows nearby Chinese validation feedback. Actual errors, such as a missing representative or a route with only one stop, give specific Chinese guidance. Copy/download still require the current draft and inputs to pass strict validation; selecting a search candidate does not add it automatically.
+
+Search for a place, click the map, or manually enter GCJ-02 coordinates. Name points, choose the representative point, and add repeated route stops (A → B → A). Copy or download only the `map:` YAML block into your article's front matter:
 
 ```yaml test=author-map
 map:
@@ -413,6 +431,16 @@ map:
   route: [a, b, a]
 ```
 
-The editor never saves articles or generates/deploys the blog. Drafts live only in page memory: **refreshing or closing the page clears the draft; export first**. A missing/invalid map configuration or failed SDK still permits manual editing and export. Deleting the representative point requires explicitly selecting another before export.
+Use the **搜索地点** field above the map and press Enter or click **搜索**. An empty city searches nationwide; specify a city to restrict results. Up to ten results show name, city and address in a bounded scrolling list. Choosing one centers the preview and fills a **candidate**, not an already saved point: use **确认添加地点**, then select its pin to drag it if needed. Searching never replaces committed points, their representative, the route or the article's zoom. Typing alone sends no request, and old results are discarded when the query changes or the draft is imported.
 
-Import accepts one YAML document with only the `map` root field, up to 128 KiB UTF-8, 200 points, 1000 route references and 50 alias expansions; invalid imports preserve the current draft. New optional zoom is 2–20; imported finite values such as 21 are retained with a preview warning. Existing `track` configuration is read-only and never fetched by the editor: preserve its relative source path for the target article's later build. See [security](docs/security.md) and [compatibility](docs/compatibility.md).
+If a new point has unconfirmed inputs, replacing them with a different search result asks first. Cancel keeps the exact inputs and search results; confirm replaces only that candidate, not committed points. Choosing a result brings the name field into view, including on mobile.
+
+Use **放弃新增地点** to discard a mistaken candidate or unfinished new-place input, even after switching back to an existing place. It clears only that candidate, its new-place inputs and feedback; committed places, route, representative, zoom and existing-place inputs stay intact. Invalid edits to existing places still block export. Map clicks use the same replacement confirmation as search when they would overwrite different unconfirmed new-place inputs; cancelling preserves the exact original text.
+
+The editor lazily uses `AMap.PlaceSearch` with your existing Web Key/security mode, without a new key or dependency. Search terms and the requested city go to AMap only on explicit submission. Its [account permissions and quotas](https://lbs.amap.com/pages/base_service_price) still apply; unlimited free search is not promised. Empty results, permission errors, quota limits and timeouts leave map/manual editing available. More precise keywords or a city help disambiguate results. This search is author-only and adds no reader-side search API or article YAML field.
+
+The editor never saves articles or generates/deploys the blog. Drafts, raw form inputs and feedback state live only in page memory: **refreshing or closing the page clears the draft; export first**. A missing/invalid map configuration or failed SDK still permits manual editing and export. Open the complete session URL printed by the command: the bare `http://127.0.0.1:4001/` URL cannot retrieve map settings and falls back to manual mode. Deleting the representative point requires explicitly selecting another before export.
+
+The `#session=…` fragment is a local configuration-access credential, not a login or draft store. Each launch creates a new random value; the plugin does not persist it in a database, cookies, localStorage or sessionStorage. It lasts only while that server runs, with no fixed two-hour expiry. Refreshing the complete URL can authorize again but starts a new draft; closing the page does not stop the server. Ctrl+C invalidates the old credential, and a restart requires its new URL. An already loaded page may still hold its configuration and draft; stopping the server does not forcibly erase browser memory. Browsers may retain the URL in history, so do not share it. No manual session storage or management is required.
+
+Import accepts one YAML document with only the `map` root field, up to 128 KiB UTF-8, 200 points, 1000 route references and 50 alias expansions; invalid imports preserve the current draft. New optional zoom is 2–20; imported finite values such as 21 are retained with a preview warning. Existing `track` configuration is read-only and never fetched by the editor: preserve its relative source path for the target article's later build. See [security](https://github.com/xizidev/hexo-post-map/blob/main/docs/security.md) and [compatibility](https://github.com/xizidev/hexo-post-map/blob/main/docs/compatibility.md).

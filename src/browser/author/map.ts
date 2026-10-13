@@ -16,7 +16,7 @@ export interface AuthorMapOptions {
 
 export interface AuthorMapHandle {
   render(draft: AuthorDraft, selectedId?: string, options?: { fitView?: boolean }): void;
-  setCandidate(coordinate: Coordinate | undefined): void;
+  setCandidate(coordinate: Coordinate | undefined, options?: { focus?: boolean }): void;
   destroy(): void;
 }
 
@@ -344,7 +344,7 @@ export async function createAuthorMap(
         options.onWarning(SDK_WARNING);
       }
     },
-    setCandidate(coordinate) {
+    setCandidate(coordinate, candidateOptions) {
       if (!active()) return;
       try {
         if (coordinate === undefined || !previewable(coordinate)) {
@@ -368,6 +368,8 @@ export async function createAuthorMap(
           candidate.setPosition(coordinate);
           candidateCoordinate = coordinate;
         }
+        if (candidate && coordinate && candidateOptions?.focus)
+          map.setZoomAndCenter(15, coordinate, true);
       } catch {
         options.onWarning(SDK_WARNING);
       }

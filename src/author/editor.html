@@ -15,64 +15,192 @@
       </header>
       <div class="author-layout">
         <section class="map-panel" aria-label="地点地图预览">
+          <div class="author-search">
+            <form data-search-form aria-label="搜索地点" novalidate>
+              <div>
+                <label for="search-keyword">搜索地点</label
+                ><input
+                  id="search-keyword"
+                  data-search-keyword
+                  type="search"
+                  placeholder="地名、景点或车站"
+                  maxlength="100"
+                  autocomplete="off"
+                />
+              </div>
+              <div>
+                <label for="search-city">城市（可选）</label
+                ><input
+                  id="search-city"
+                  data-search-city
+                  type="text"
+                  placeholder="全国"
+                  maxlength="60"
+                  autocomplete="off"
+                />
+              </div>
+              <button type="submit" data-search-submit>搜索</button>
+            </form>
+            <p data-search-status role="status" aria-live="polite"></p>
+            <ul data-search-results class="search-results" aria-label="地点搜索结果" hidden></ul>
+          </div>
           <div data-map aria-label="地图"></div>
           <p data-map-status role="status"></p>
           <button type="button" data-fit>适配地点视野</button>
           <p>坐标系：GCJ-02 · 地图数据及署名由高德地图提供</p>
         </section>
         <section class="editor-panel" aria-label="草稿编辑">
-          <h2>地点</h2>
-          <div class="actions">
-            <button type="button" data-new>手动新增地点</button
-            ><button type="button" data-import-open>导入 YAML</button>
+          <div class="editor-header">
+            <div class="workspace-tabs" role="tablist" aria-label="地图编辑分区">
+              <button
+                type="button"
+                id="places-tab"
+                role="tab"
+                aria-controls="places-panel"
+                aria-selected="true"
+                data-workspace-tab="places"
+              >
+                地点 <span class="tab-count" data-place-count>0</span>
+              </button>
+              <button
+                type="button"
+                id="route-tab"
+                role="tab"
+                aria-controls="route-panel"
+                aria-selected="false"
+                tabindex="-1"
+                data-workspace-tab="route"
+              >
+                线路 <span class="tab-count" data-route-count>0站</span>
+              </button>
+            </div>
+            <div class="actions editor-tools">
+              <button type="button" data-new>手动新增地点</button
+              ><button type="button" data-import-open>导入 YAML</button>
+              <button type="button" data-candidate-cancel hidden>放弃新增地点</button>
+            </div>
           </div>
-          <ol data-point-list class="bounded-list" aria-label="地点列表"></ol>
-          <form data-point-form novalidate>
-            <p data-form-title>新增地点</p>
-            <label for="point-name">地点名称</label
-            ><textarea id="point-name" name="name" rows="2"></textarea>
-            <label for="point-longitude">经度</label
-            ><input
-              id="point-longitude"
-              name="longitude"
-              type="text"
-              inputmode="decimal"
-              autocomplete="off"
-            />
-            <label for="point-latitude">纬度</label
-            ><input
-              id="point-latitude"
-              name="latitude"
-              type="text"
-              inputmode="decimal"
-              autocomplete="off"
-            />
-            <p data-field-error role="status"></p>
-            <button type="submit" data-add>确认添加地点</button>
-          </form>
-          <label for="map-zoom">文章缩放（可选，新增值 2–20）</label
-          ><input id="map-zoom" data-zoom type="text" inputmode="decimal" autocomplete="off" />
-          <p data-zoom-warning></p>
-          <h2>行程示意线</h2>
-          <p>按顺序连接地点，可重复途经。此线不是导航道路。</p>
-          <ol data-route-list class="bounded-list" aria-label="线路顺序"></ol>
-          <p data-track hidden></p>
-          <section data-export aria-label="导出 YAML">
-            <h2>导出</h2>
+          <div class="editor-content" data-editor-scroll>
+            <section
+              id="places-panel"
+              role="tabpanel"
+              aria-labelledby="places-tab"
+              data-workspace-panel="places"
+            >
+              <form data-point-form novalidate>
+                <h2 data-form-title>新增地点</h2>
+                <label for="point-name">地点名称</label
+                ><textarea
+                  id="point-name"
+                  name="name"
+                  rows="2"
+                  aria-describedby="point-name-error"
+                ></textarea>
+                <p
+                  id="point-name-error"
+                  data-name-error
+                  class="field-error"
+                  role="status"
+                  hidden
+                ></p>
+                <details data-coordinate-details class="coordinate-details">
+                  <summary>坐标与地图设置</summary>
+                  <label for="point-longitude">经度</label
+                  ><input
+                    id="point-longitude"
+                    name="longitude"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    aria-describedby="point-longitude-error"
+                  />
+                  <p
+                    id="point-longitude-error"
+                    data-longitude-error
+                    class="field-error"
+                    role="status"
+                    hidden
+                  ></p>
+                  <label for="point-latitude">纬度</label
+                  ><input
+                    id="point-latitude"
+                    name="latitude"
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    aria-describedby="point-latitude-error"
+                  />
+                  <p
+                    id="point-latitude-error"
+                    data-latitude-error
+                    class="field-error"
+                    role="status"
+                    hidden
+                  ></p>
+                  <label for="map-zoom">文章缩放（可选，新增值 2–20）</label
+                  ><input
+                    id="map-zoom"
+                    data-zoom
+                    type="text"
+                    inputmode="decimal"
+                    autocomplete="off"
+                    aria-describedby="map-zoom-warning map-zoom-error"
+                  />
+                  <p id="map-zoom-warning" data-zoom-warning></p>
+                  <p
+                    id="map-zoom-error"
+                    data-zoom-error
+                    class="field-error"
+                    role="status"
+                    hidden
+                  ></p>
+                </details>
+                <p data-field-error role="status"></p>
+                <button type="submit" data-add>确认添加地点</button>
+              </form>
+              <div class="section-heading">
+                <h2>已选地点</h2>
+                <span>代表地点用于全国地图</span>
+              </div>
+              <p class="empty-state" data-empty-places>搜索地点或点击地图，再确认添加。</p>
+              <p data-representative-error class="field-error" role="status" hidden></p>
+              <ol data-point-list class="place-list" aria-label="地点列表"></ol>
+            </section>
+            <section
+              id="route-panel"
+              role="tabpanel"
+              aria-labelledby="route-tab"
+              data-workspace-panel="route"
+              hidden
+            >
+              <h2>行程示意线</h2>
+              <p class="workspace-hint">按途经顺序连接已选地点，可重复途经。此线不是导航道路。</p>
+              <p class="empty-state" data-empty-route>还没有线路。在“地点”页签中将地点加入线路。</p>
+              <p data-route-error class="field-error" role="status" hidden></p>
+              <ol data-route-list class="route-list" aria-label="线路顺序"></ol>
+              <p data-track hidden></p>
+            </section>
+          </div>
+          <section data-export class="export-footer" aria-label="导出 YAML">
+            <div class="section-heading">
+              <h2>导出</h2>
+              <span data-editor-count>0 个地点 · 0 次途经</span>
+            </div>
+            <p data-export-hint class="export-hint" role="status"></p>
             <p data-export-error role="status"></p>
-            <div class="actions">
-              <button type="button" data-copy>复制 YAML</button
-              ><button type="button" data-download>下载 YAML</button>
+            <div class="actions" data-export-actions hidden>
+              <button type="button" data-copy disabled>复制 YAML</button
+              ><button type="button" data-download disabled>下载 YAML</button>
             </div>
             <p data-export-status role="status" aria-live="polite"></p>
             <label for="copy-fallback" data-copy-label hidden>手动复制 YAML（请选择并复制）</label
             ><textarea id="copy-fallback" data-copy-fallback readonly hidden></textarea>
-            <details>
+            <details data-yaml-preview hidden>
               <summary>YAML 预览</summary>
               <pre data-yaml></pre>
             </details>
+            <p data-status role="status" aria-live="polite"></p>
           </section>
-          <p data-status role="status" aria-live="polite"></p>
         </section>
       </div>
       <dialog data-import-dialog aria-labelledby="import-title">

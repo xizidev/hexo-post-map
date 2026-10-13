@@ -1,6 +1,7 @@
 import { lstat, readFile } from 'node:fs/promises';
 import { test as base, expect } from 'playwright/test';
 import { fakeSdk } from './fake-sdk';
+import { authorSearchSdk } from './author-search-sdk';
 
 const origin = 'http://127.0.0.1:4180';
 export const test = base.extend<{
@@ -20,7 +21,11 @@ export const test = base.extend<{
         } else if (url.origin === 'https://webapi.amap.com' && url.pathname === '/maps') {
           network.sdkRequests++;
           if (sdkUnavailable) await route.abort();
-          else await route.fulfill({ contentType: 'text/javascript', body: fakeSdk });
+          else
+            await route.fulfill({
+              contentType: 'text/javascript',
+              body: fakeSdk + authorSearchSdk,
+            });
         } else {
           network.denied.push(url.origin);
           await route.abort();
@@ -72,6 +77,4 @@ export const test = base.extend<{
     await use(url);
   },
 });
-// Test-local override takes precedence over CLI retain-on-failure; reader tests keep their setting.
-test.use({ trace: 'off' });
 export { expect };

@@ -4,6 +4,10 @@ import type { Page } from 'playwright/test';
 import { test, expect } from './author-fixtures';
 import { importAuthorYaml } from '../src/author/yaml';
 import { normalizePostMapDocument } from '../src/domain/normalize';
+import { showAuthorCoordinates, showAuthorTab, showPlaceActions } from './author-workspace-helpers';
+
+// Per-file override: shared fixture modules must not register test.use() options.
+test.use({ trace: 'off' });
 
 async function addManual(page: Page, name: string, longitude = '121.4737', latitude = '31.2304') {
   await page.getByRole('button', { name: '手动新增地点' }).click();
@@ -16,8 +20,10 @@ async function importMap(page: Page, yaml: string, valid = true) {
   await page.getByRole('button', { name: '导入 YAML', exact: true }).click();
   await page.getByLabel('粘贴完整 map: 配置').fill(yaml);
   await page.getByRole('button', { name: '校验导入' }).click();
-  if (valid) await page.getByRole('button', { name: '确认替换当前草稿' }).click();
-  else {
+  if (valid) {
+    await page.getByRole('button', { name: '确认替换当前草稿' }).click();
+    await showAuthorCoordinates(page);
+  } else {
     await expect(page.locator('[data-import-error]')).not.toBeEmpty();
     await page.getByRole('button', { name: '取消', exact: true }).click();
   }
@@ -103,6 +109,7 @@ for (const route of [
         },
       }),
     );
+    await showAuthorTab(page, 'route');
     await page.locator('[data-route-index="0"] [data-down]').focus();
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-route-index="1"] [data-down]')).toBeFocused();
@@ -137,7 +144,7 @@ for (const pending of ['committed', 'candidate']) {
     await expect(page.getByLabel('经度', { exact: true })).toHaveValue('1e+');
     await expect(page.getByLabel('文章缩放（可选，新增值 2–20）')).toHaveValue('1e');
     await expect(page.locator('[data-copy]')).toBeDisabled();
-    await expect(page.locator('[data-yaml]')).toContainText('过期');
+    await expect(page.locator('[data-yaml]')).toContainText('请完成地点信息');
     await expect(page.locator('[data-point-id]')).toHaveCount(1);
     if (pending === 'candidate')
       await expect(page.getByLabel('地点名称')).toHaveValue('Unconfirmed candidate');
@@ -150,6 +157,7 @@ test('deleting the only point restores focus to the labelled new name field', as
 }) => {
   void editorUrl;
   await addManual(page, 'Only point');
+  await showPlaceActions(page, 'point-1');
   await page.locator('[data-delete]').focus();
   await page.keyboard.press('Enter');
   await page.getByRole('button', { name: '确认删除', exact: true }).click();
@@ -173,6 +181,7 @@ for (const viewport of [
         .poll(() => page.evaluate(() => Reflect.get(window, '__hpmSdk')?.maps.length ?? 0))
         .toBe(1);
       await page.locator('[data-map]').click({ position: { x: 20, y: 20 } });
+      await showAuthorCoordinates(page);
       await expect(page.getByLabel('经度', { exact: true })).toHaveValue('121.4737');
       await page.getByLabel('地点名称').fill('A');
       await page.getByRole('button', { name: '确认添加地点' }).click();
@@ -251,6 +260,7 @@ for (const viewport of [
         expect(attributionBounds!.y + attributionBounds!.height).toBeLessThanOrEqual(
           editorBounds!.y,
         );
+      await showPlaceActions(page, 'point-2');
       await points.nth(1).getByRole('button', { name: '删除', exact: true }).click();
       await page.getByRole('button', { name: '确认删除', exact: true }).click();
       await expect(page.locator('[data-copy]')).toBeDisabled();
@@ -258,7 +268,7 @@ for (const viewport of [
       await points.first().getByRole('radio').check();
       await expect(page.locator('[data-copy]')).toBeEnabled();
     });
-    test('200 points scroll inside the list, keyboard reorder and 44px targets remain usable', async ({
+    test('200 points scroll inside the active editor, keyboard reorder and 44px targets remain usable', async ({
       page,
       editorUrl,
     }) => {
@@ -280,22 +290,27 @@ for (const viewport of [
       const list = page.getByRole('list', { name: '地点列表', exact: true });
       await expect(list.locator('li')).toHaveCount(200);
       expect(
-        await list.evaluate(
-          (element) =>
-            element.scrollHeight > element.clientHeight &&
-            getComputedStyle(element).overflowY === 'auto',
-        ),
+        await page
+          .locator('[data-editor-scroll]')
+          .evaluate(
+            (element) =>
+              element.scrollHeight > element.clientHeight &&
+              getComputedStyle(element).overflowY === 'auto',
+          ),
       ).toBe(true);
-      await list.locator('li').first().getByRole('button', { name: '下移', exact: true }).focus();
+      await showPlaceActions(page, 'p0');
+      await list.locator('[data-point-id=p0] [data-down]').focus();
       await page.keyboard.press('Enter');
       await expect(list.locator('li').first()).toHaveAttribute('data-point-id', 'p1');
       await expect(list.locator('[data-point-id=p0] [data-down]')).toBeFocused();
       await list.locator('li').last().scrollIntoViewIfNeeded();
-      expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      expect(
+        await page.locator('[data-editor-scroll]').evaluate((element) => element.scrollTop),
+      ).toBeGreaterThan(0);
       expect(
         await page
           .locator(
-            '[data-author-root] button, [data-author-root] input, [data-author-root] textarea, [data-author-root] summary',
+            '[data-author-root] button, [data-author-root] input:not([type=radio]), [data-author-root] [data-representative-control], [data-author-root] textarea, [data-author-root] summary',
           )
           .evaluateAll((elements) =>
             elements

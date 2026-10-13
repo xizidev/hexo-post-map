@@ -1,16 +1,21 @@
-import { formatAuthorIssues, type AuthorExportResult } from '../../author/yaml';
+import type { AuthorExportResult } from '../../author/yaml';
+import { friendlyAuthorIssues } from './feedback';
 
 export function createAuthorExportControls(
   root: HTMLElement,
   getCurrent: () => AuthorExportResult,
   isPendingInvalid: () => boolean,
-): { refresh(): void; destroy(): void } {
+  getPointCount: () => number,
+): { refresh(): void; invalidatePending(): void; destroy(): void } {
   const owner = root.ownerDocument.defaultView!;
   const find = <T extends HTMLElement>(selector: string) => root.querySelector<T>(selector)!;
   const copy = find<HTMLButtonElement>('[data-copy]');
   const download = find<HTMLButtonElement>('[data-download]');
   const status = find('[data-export-status]');
   const error = find('[data-export-error]');
+  const hint = find('[data-export-hint]');
+  const actions = find('[data-export-actions]');
+  const previewSection = find('[data-yaml-preview]');
   const preview = find('[data-yaml]');
   const fallback = find<HTMLTextAreaElement>('[data-copy-fallback]');
   const label = find('[data-copy-label]');
@@ -31,13 +36,19 @@ export function createAuthorExportControls(
     const result = getCurrent();
     const pending = isPendingInvalid();
     copy.disabled = download.disabled = pending || !result.ok;
-    error.textContent = pending
-      ? '坐标、名称或缩放尚未完成，暂不能导出。'
-      : result.ok
-        ? ''
-        : `请完成草稿：${formatAuthorIssues(result.issues)}`;
-    preview.textContent =
-      !pending && result.ok ? result.yaml : '预览已过期，请完成有效草稿后导出。';
+    const empty = getPointCount() === 0;
+    actions.hidden = previewSection.hidden = empty;
+    hint.textContent = empty
+      ? '添加地点后即可导出。'
+      : pending
+        ? '地点信息正在填写，暂不能导出。'
+        : '';
+    error.textContent = empty || pending || result.ok ? '' : friendlyAuthorIssues(result.issues);
+    preview.textContent = empty
+      ? ''
+      : !pending && result.ok
+        ? result.yaml
+        : '请完成地点信息后查看预览。';
   }
   function current(): Extract<AuthorExportResult, { ok: true }> | undefined {
     if (!alive || isPendingInvalid()) return;
@@ -113,6 +124,15 @@ export function createAuthorExportControls(
   refresh();
   return {
     refresh,
+    invalidatePending() {
+      if (!alive || !isPendingInvalid()) return;
+      clearFeedback();
+      copy.disabled = download.disabled = true;
+      error.textContent = '';
+      hint.textContent =
+        getPointCount() === 0 ? '添加地点后即可导出。' : '地点信息正在填写，暂不能导出。';
+      preview.textContent = getPointCount() === 0 ? '' : '请完成地点信息后查看预览。';
+    },
     destroy() {
       if (!alive) return;
       alive = false;

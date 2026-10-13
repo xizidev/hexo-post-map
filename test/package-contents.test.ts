@@ -10,15 +10,19 @@ import type { AuthorSessionModule } from '../src/hexo/author-command';
 import { normalizeNpmPackJson } from '../scripts/npm-pack-json.mjs';
 
 it.each([
-  [['--port', '4e3'], 2, undefined],
-  [['--port', '0xFA1'], 2, undefined],
-  [['--port', '4001.0'], 2, undefined],
-  [['--port=4e3'], 2, undefined],
-  [['--port', '4001'], 0, 4001],
-  [['--port=00080'], 0, 80],
+  [['--port', '4e3'], 2, undefined, 'decimal integer'],
+  [['--port', '0xFA1'], 2, undefined, 'decimal integer'],
+  [['--port', '4001.0'], 2, undefined, 'decimal integer'],
+  [['--port=4e3'], 2, undefined, 'decimal integer'],
+  [['--port', '4001'], 0, 4001, undefined],
+  [['--port=00080'], 0, 80, undefined],
+  [['--open=true'], 2, undefined, '--open'],
+  [['--open', 'true'], 2, undefined, '--open'],
+  [['--open', '--open'], 2, undefined, '--open'],
+  [['--no-open=true'], 2, undefined, '--open'],
 ] as const)(
-  'validates raw port %j through the installed Hexo CLI parser',
-  async (rawArgs, status, port) => {
+  'validates raw author arguments %j through the installed Hexo CLI parser',
+  async (rawArgs, status, port, error) => {
     const site = await mkdtemp(join(tmpdir(), 'hpm-cli-port-'));
     try {
       await writeFile(join(site, 'package.json'), JSON.stringify({ hexo: {} }));
@@ -36,7 +40,7 @@ it.each([
       const realRequire = require('node:module').createRequire(${JSON.stringify(resolve('dist/index.cjs'))});
       Hexo.prototype.init = async function () {
         vm.runInNewContext(fs.readFileSync(${JSON.stringify(resolve('dist/index.cjs'))}, 'utf8'), {
-          hexo: this, __dirname: ${JSON.stringify(resolve('dist'))}, process, Buffer, console,
+          hexo: this, __dirname: ${JSON.stringify(resolve('dist'))}, process, Buffer, console, AbortController,
           require: id => id === './author/server.cjs' ? {
             startAuthorSession: async options => {
               console.log('SESSION_STARTED:' + options.port);
@@ -53,7 +57,7 @@ it.each([
       expect(result.status).toBe(status);
       if (status === 2) {
         expect(result.stdout).not.toContain('SESSION_STARTED');
-        expect(result.stderr).toContain('decimal integer');
+        expect(result.stderr).toContain(error);
       } else {
         expect(result.stdout).toContain(`SESSION_STARTED:${port}`);
       }
@@ -129,6 +133,7 @@ it('requires the compiled reader plugin and generates only public routes without
     process,
     Buffer,
     console,
+    AbortController,
     require(id: string) {
       required.push(id);
       if (id.includes('author')) throw new Error('Author bundle loaded during ordinary generation');
@@ -168,6 +173,7 @@ it('uses the external sibling require only when the compiled author command runs
     process,
     Buffer,
     console,
+    AbortController,
     require(id: string) {
       required.push(id);
       return id === './author/server.cjs' ? { startAuthorSession } : realRequire(id);

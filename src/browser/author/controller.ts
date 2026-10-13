@@ -10,15 +10,21 @@ import {
 } from '../../author/draft';
 import type { AuthorBootstrap } from '../../author/protocol';
 import type { AuthorDraft, AuthorMapInput } from '../../author/types';
-import { exportAuthorYaml, formatAuthorIssues, importAuthorYaml } from '../../author/yaml';
+import { exportAuthorYaml, importAuthorYaml } from '../../author/yaml';
 import type { Coordinate } from '../../domain/types';
 import { createAuthorExportControls } from './export-controls';
+import { friendlyAuthorIssues } from './feedback';
+import { createAuthorFieldFeedback, type AuthorFieldFeedbackState } from './field-feedback';
 import { createAuthorMap, type AuthorMapHandle } from './map';
+import { searchAuthorPlaces, type AuthorPlaceSearch } from './search';
+import { createAuthorSearchControls } from './search-controls';
 import { createAuthorView } from './view';
+import { createAuthorWorkspace, type AuthorWorkspaceState } from './workspace';
 
 export interface AuthorEditorSession {
   draft: AuthorDraft;
   selectedId?: string;
+  workspace?: AuthorWorkspaceState;
   inputs?: {
     draft: AuthorDraft;
     buffers: Map<string, Fields>;
@@ -28,6 +34,7 @@ export interface AuthorEditorSession {
     zoomValue: string;
     zoomInvalid: boolean;
     fitPending: boolean;
+    feedback?: AuthorFieldFeedbackState;
   };
 }
 export interface AuthorEditorHandle {
@@ -53,7 +60,7 @@ export function mountAuthorEditor(
   root: HTMLElement,
   bootstrap: AuthorBootstrap,
   session: AuthorEditorSession,
-  options?: { mapFactory?: typeof createAuthorMap },
+  options?: { mapFactory?: typeof createAuthorMap; searchPlaces?: AuthorPlaceSearch },
 ): AuthorEditorHandle {
   const view = createAuthorView(root);
   const document = root.ownerDocument;
@@ -65,6 +72,7 @@ export function mountAuthorEditor(
     latitude: find<HTMLInputElement>('[name=latitude]'),
   };
   const zoom = find<HTMLInputElement>('[data-zoom]');
+  const workspace = createAuthorWorkspace(root, session.workspace);
   const restored = session.inputs?.draft === session.draft ? session.inputs : undefined;
   const buffers = restored?.buffers ?? new Map<string, Fields>();
   for (const id of buffers.keys()) {
@@ -87,6 +95,7 @@ export function mountAuthorEditor(
   let map: AuthorMapHandle | undefined;
   let mapAbort = new AbortController();
   let candidate: Coordinate | undefined = restored?.candidate;
+  let candidateFocusPending = false;
   let imported: AuthorMapInput | undefined;
   let deleteId: string | undefined;
   let returnFocus: HTMLElement | undefined;
@@ -96,10 +105,28 @@ export function mountAuthorEditor(
     latitude: fields.latitude.value,
   });
   const pending = () => zoomInvalid || invalidPoints.size > 0 || (newDirty && !complete(newFields));
+  const feedback = createAuthorFieldFeedback(
+    root,
+    () => session.selectedId,
+    () => ({
+      name: fields.name.value.trim() ? '' : '请填写地点名称。',
+      longitude:
+        numberInput(fields.longitude.value, 180) === undefined
+          ? '请填写 −180 到 180 之间的有效经度。'
+          : '',
+      latitude:
+        numberInput(fields.latitude.value, 90) === undefined
+          ? '请填写 −90 到 90 之间的有效纬度。'
+          : '',
+      zoom: zoomInvalid ? '文章缩放请填写 2–20 之间的数字，或留空使用默认值。' : '',
+    }),
+    restored?.feedback,
+  );
   let exports = createAuthorExportControls(
     view.export,
     () => exportAuthorYaml(session.draft),
     pending,
+    () => session.draft.points.length,
   );
   function on(target: EventTarget, event: string, action: EventListener): void {
     target.addEventListener(event, action);
@@ -121,28 +148,26 @@ export function mountAuthorEditor(
       if (!alive || ticket !== generation) return;
       queued = false;
       exports.refresh();
-      view.status.textContent = pending()
-        ? '名称、坐标或缩放尚未完成，请检查输入。'
-        : session.draft.representativeMode === 'pending'
-          ? '请明确选择新的代表地点。'
-          : session.draft.route.length === 1
-            ? '线路至少需要两个途经项。'
-            : '';
-      find('[data-field-error]').textContent = session.selectedId
-        ? buffers.has(session.selectedId) && !complete(values())
-          ? '请输入非空名称及完整有限坐标（经度 ±180、纬度 ±90）。'
-          : ''
-        : newDirty && !complete(values())
-          ? '请输入非空名称及完整有限坐标（经度 ±180、纬度 ±90）。'
+      find<HTMLButtonElement>('[data-candidate-cancel]').hidden = !newDirty && !candidate;
+      view.status.textContent = '';
+      feedback.refresh();
+      const representativeError = find('[data-representative-error]');
+      representativeError.textContent =
+        session.draft.points.length > 0 && session.draft.representativeMode === 'pending'
+          ? '请选择全国地图代表地点，可在下方地点卡片中设置。'
           : '';
+      representativeError.hidden = !representativeError.textContent;
+      const routeError = find('[data-route-error]');
+      routeError.textContent =
+        session.draft.route.length === 1
+          ? '再添加一个途经地点即可组成线路；不需要线路时可移除此途经项。'
+          : '';
+      routeError.hidden = !routeError.textContent;
       map?.render(session.draft, session.selectedId);
     });
   }
   function disablePending(): void {
-    if (!pending()) return;
-    find<HTMLButtonElement>('[data-copy]').disabled = true;
-    find<HTMLButtonElement>('[data-download]').disabled = true;
-    find('[data-yaml]').textContent = '预览已过期，请完成有效草稿后导出。';
+    exports.invalidatePending();
   }
   function showFields(): void {
     const point = session.draft.points.find((point) => point.id === session.selectedId);
@@ -156,12 +181,13 @@ export function mountAuthorEditor(
       : newFields;
     for (const key of ['name', 'longitude', 'latitude'] as const) fields[key].value = value[key];
     find('[data-form-title]').textContent = point
-      ? `编辑地点 ${point.id}`
+      ? `编辑地点：${point.name || '未命名地点'}`
       : candidate
         ? '确认候选地点'
         : '新增地点';
     find<HTMLButtonElement>('[data-add]').hidden = !!point;
     find('[data-field-error]').textContent = '';
+    feedback.refresh();
   }
   function button(text: string, attribute: string): HTMLButtonElement {
     const item = document.createElement('button');
@@ -179,9 +205,22 @@ export function mountAuthorEditor(
       `经度 ${point.longitude}，纬度 ${point.latitude}`;
     row.setAttribute('aria-current', String(session.selectedId === id));
     row.querySelector<HTMLInputElement>('input')!.checked = session.draft.representativeId === id;
+    row.querySelector<HTMLElement>('[data-representative-badge]')!.hidden =
+      session.draft.representativeId !== id;
+    const uses = session.draft.route.filter((stop) => stop === id).length;
+    row.querySelector('[data-route-uses]')!.textContent = uses
+      ? `线路中 ${uses} 次途经`
+      : '尚未加入线路';
+    row
+      .querySelector<HTMLButtonElement>('[data-up]')!
+      .setAttribute('aria-label', `上移地点：${point.name}`);
+    row
+      .querySelector<HTMLButtonElement>('[data-down]')!
+      .setAttribute('aria-label', `下移地点：${point.name}`);
     // Route names update without removing the current row or shifting focus.
     routeReferences.get(id)?.forEach((index) => {
-      routeRows[index]!.querySelector('span')!.textContent = `${index + 1}. ${point.name}`;
+      routeRows[index]!.querySelector('[data-route-name]')!.textContent =
+        `${index + 1}. ${point.name}`;
     });
   }
   function syncPoints(): void {
@@ -199,25 +238,44 @@ export function mountAuthorEditor(
         row = document.createElement('li');
         row.dataset.pointId = point.id;
         const select = button('', 'data-select');
+        const heading = document.createElement('div');
+        heading.className = 'place-heading';
+        const badge = document.createElement('span');
+        badge.className = 'representative-badge';
+        badge.setAttribute('data-representative-badge', '');
+        badge.textContent = '全国地图代表';
+        heading.append(select, badge);
         const coordinates = document.createElement('p');
         coordinates.setAttribute('data-coordinate-summary', '');
         const label = document.createElement('label');
+        label.className = 'representative-control';
+        label.setAttribute('data-representative-control', '');
         const radio = document.createElement('input');
         radio.type = 'radio';
         radio.name = 'representative';
         radio.value = point.id;
-        label.append(radio, document.createTextNode('代表地点'));
+        label.append(radio, document.createTextNode('设为全国地图代表地点'));
+        const routeUses = document.createElement('p');
+        routeUses.className = 'route-uses';
+        routeUses.setAttribute('data-route-uses', '');
         const actions = document.createElement('div');
         actions.className = 'actions';
         const route = button('加入线路', 'data-route-add');
         route.dataset.routeAdd = point.id;
-        actions.append(
+        actions.append(route);
+        const more = document.createElement('details');
+        more.className = 'place-more';
+        const summary = document.createElement('summary');
+        summary.textContent = '地点排序与删除';
+        const extras = document.createElement('div');
+        extras.className = 'actions';
+        extras.append(
           button('上移', 'data-up'),
           button('下移', 'data-down'),
-          route,
           button('删除', 'data-delete'),
         );
-        row.append(select, coordinates, label, actions);
+        more.append(summary, extras);
+        row.append(heading, coordinates, label, routeUses, actions, more);
         pointRows.set(point.id, row);
       }
       if (view.pointList.children[index] !== row)
@@ -227,6 +285,7 @@ export function mountAuthorEditor(
         index === session.draft.points.length - 1;
       updateRow(point.id);
     });
+    workspace.counts(session.draft.points.length, session.draft.route.length);
     if (focusRow?.isConnected && focused?.isConnected && document.activeElement !== focused) {
       const target =
         focused instanceof owner.HTMLButtonElement && focused.disabled
@@ -237,6 +296,7 @@ export function mountAuthorEditor(
   }
   function syncRoute(): void {
     routeReferences.clear();
+    const visited = new Set<string>();
     while (routeRows.length > session.draft.route.length) routeRows.pop()!.remove();
     session.draft.route.forEach((id, index) => {
       const references = routeReferences.get(id) ?? [];
@@ -246,6 +306,10 @@ export function mountAuthorEditor(
       if (!row) {
         row = document.createElement('li');
         const text = document.createElement('span');
+        text.setAttribute('data-route-name', '');
+        const badges = document.createElement('div');
+        badges.className = 'stop-badges';
+        badges.setAttribute('data-stop-badges', '');
         const actions = document.createElement('div');
         actions.className = 'actions';
         actions.append(
@@ -253,28 +317,104 @@ export function mountAuthorEditor(
           button('下移', 'data-down'),
           button('移除途经项', 'data-remove'),
         );
-        row.append(text, actions);
+        row.append(text, badges, actions);
         routeRows.push(row);
         view.routeList.append(row);
       }
       row.dataset.routeIndex = String(index);
-      row.querySelector('span')!.textContent =
+      row.dataset.routeId = id;
+      row.querySelector('[data-route-name]')!.textContent =
         `${index + 1}. ${session.draft.points.find((point) => point.id === id)!.name}`;
+      const badges = row.querySelector('[data-stop-badges]')!;
+      badges.replaceChildren();
+      for (const label of [
+        index === 0 ? '起点' : '',
+        index === session.draft.route.length - 1 ? '终点' : '',
+        visited.has(id) ? '再次途经' : '',
+      ].filter(Boolean)) {
+        const badge = document.createElement('span');
+        badge.textContent = label;
+        badges.append(badge);
+      }
+      visited.add(id);
+      row
+        .querySelector<HTMLButtonElement>('[data-up]')!
+        .setAttribute('aria-label', `上移第 ${index + 1} 个途经项`);
+      row
+        .querySelector<HTMLButtonElement>('[data-down]')!
+        .setAttribute('aria-label', `下移第 ${index + 1} 个途经项`);
+      row
+        .querySelector<HTMLButtonElement>('[data-remove]')!
+        .setAttribute('aria-label', `移除第 ${index + 1} 个途经项`);
       row.querySelector<HTMLButtonElement>('[data-up]')!.disabled = index === 0;
       row.querySelector<HTMLButtonElement>('[data-down]')!.disabled =
         index === session.draft.route.length - 1;
     });
+    for (const id of pointRows.keys()) updateRow(id);
+    workspace.counts(session.draft.points.length, session.draft.route.length);
   }
-  function select(id?: string): void {
-    const before = session.selectedId;
-    session.selectedId = id;
-    map?.setCandidate(id ? undefined : candidate);
-    showFields();
-    if (before) updateRow(before);
-    if (id) updateRow(id);
+  function select(id?: string, focusName = false, resetCandidateFeedback = false): void {
+    feedback.changeContext(() => {
+      const before = session.selectedId;
+      if (resetCandidateFeedback) feedback.resetCandidate();
+      session.selectedId = id;
+      workspace.show('places');
+      if (id) candidateFocusPending = false;
+      map?.setCandidate(id ? undefined : candidate);
+      showFields();
+      if (focusName) {
+        // Focus alone does not scroll a field that already owns focus back into view.
+        fields.name.scrollIntoView({ block: 'nearest' });
+        fields.name.focus();
+        workspace.reveal(fields.name);
+      }
+      if (before) updateRow(before);
+      if (id) updateRow(id);
+    });
     disablePending();
     schedule();
   }
+  function acceptsReplacement(nextFields: Fields): boolean {
+    const ticket = generation;
+    const replacing =
+      newDirty &&
+      (Object.keys(nextFields) as (keyof Fields)[]).some(
+        (key) => nextFields[key] !== newFields[key],
+      );
+    if (
+      replacing &&
+      !owner.confirm('当前有尚未确认添加的地点。替换它的名称与坐标？取消将保留原输入。')
+    )
+      return false;
+    // A native confirmation can outlive this editor or an imported draft.
+    return alive && ticket === generation;
+  }
+  const search = createAuthorSearchControls(
+    root,
+    bootstrap.mode === 'map'
+      ? (options?.searchPlaces ??
+          ((query, signal) => searchAuthorPlaces(bootstrap.mapConfig, query, signal)))
+      : undefined,
+    (place) => {
+      let adopted = false;
+      safe(() => {
+        const nextFields = {
+          name: place.name,
+          longitude: String(place.coordinate[0]),
+          latitude: String(place.coordinate[1]),
+        };
+        if (!acceptsReplacement(nextFields)) return;
+        candidate = place.coordinate;
+        newFields = nextFields;
+        newDirty = true;
+        select(undefined, true, true);
+        candidateFocusPending = !map;
+        map?.setCandidate(candidate, { focus: true });
+        adopted = true;
+      });
+      return adopted;
+    },
+  );
   function startMap(): void {
     if (bootstrap.mode === 'manual') {
       find('[data-map-status]').textContent = bootstrap.message;
@@ -288,16 +428,25 @@ export function mountAuthorEditor(
       signal: mapAbort.signal,
       onCandidate(coordinate) {
         if (!active()) return;
-        candidate = coordinate;
-        newFields = { name: '', longitude: String(coordinate[0]), latitude: String(coordinate[1]) };
-        newDirty = true;
-        select();
-        map?.setCandidate(coordinate);
-        disablePending();
-        schedule();
+        safe(() => {
+          const nextFields = {
+            name: '',
+            longitude: String(coordinate[0]),
+            latitude: String(coordinate[1]),
+          };
+          if (!acceptsReplacement(nextFields) || !active()) return;
+          candidate = coordinate;
+          candidateFocusPending = false;
+          newFields = nextFields;
+          newDirty = true;
+          select(undefined, true, true);
+          map?.setCandidate(coordinate);
+          disablePending();
+          schedule();
+        });
       },
       onSelect(id) {
-        if (active() && session.draft.points.some((point) => point.id === id)) select(id);
+        if (active() && session.draft.points.some((point) => point.id === id)) select(id, true);
       },
       onMove(id, coordinate) {
         if (!active() || id !== session.selectedId) return;
@@ -331,7 +480,9 @@ export function mountAuthorEditor(
         map = handle;
         map.render(session.draft, session.selectedId, fitPending ? { fitView: true } : undefined);
         fitPending = false;
-        if (candidate && !session.selectedId) map.setCandidate(candidate);
+        if (candidate && !session.selectedId)
+          map.setCandidate(candidate, candidateFocusPending ? { focus: true } : undefined);
+        candidateFocusPending = false;
       })
       .catch(() => {
         if (active()) find('[data-map-status]').textContent = '地图预览暂不可用，请继续手动编辑。';
@@ -401,6 +552,7 @@ export function mountAuthorEditor(
       if (session.selectedId) return;
       newDirty = true;
       const value = values();
+      feedback.submit();
       if (!complete(value)) {
         disablePending();
         schedule();
@@ -413,12 +565,30 @@ export function mountAuthorEditor(
       });
       newFields = { name: '', longitude: '', latitude: '' };
       candidate = undefined;
+      candidateFocusPending = false;
       newDirty = false;
       syncPoints();
-      select(session.draft.points.at(-1)!.id);
+      select(session.draft.points.at(-1)!.id, false, true);
     });
   });
-  on(find('[data-new]'), 'click', () => select());
+  on(find('[data-new]'), 'click', () => {
+    select(undefined, true);
+    workspace.show('places', { coordinates: true });
+  });
+  on(find('[data-candidate-cancel]'), 'click', () =>
+    safe(() => {
+      if (!newDirty && !candidate) return;
+      newFields = { name: '', longitude: '', latitude: '' };
+      newDirty = false;
+      candidate = undefined;
+      candidateFocusPending = false;
+      select(
+        session.selectedId ?? session.draft.representativeId ?? session.draft.points[0]?.id,
+        true,
+        true,
+      );
+    }),
+  );
   on(find('[data-fit]'), 'click', () =>
     map?.render(session.draft, session.selectedId, { fitView: true }),
   );
@@ -438,7 +608,7 @@ export function mountAuthorEditor(
       const row = target.closest<HTMLElement>('[data-point-id]');
       if (!row) return;
       const id = row.dataset.pointId!;
-      if (target.closest('[data-select]')) select(id);
+      if (target.closest('[data-select]')) select(id, true);
       else if (target.closest('[data-up], [data-down]')) {
         session.draft = moveAuthorPoint(
           session.draft,
@@ -502,7 +672,7 @@ export function mountAuthorEditor(
         const control = destination?.querySelector<HTMLButtonElement>(`[${action}]`);
         const fallback =
           destination?.querySelector<HTMLButtonElement>('[data-remove]') ??
-          find<HTMLButtonElement>('[data-new]');
+          find<HTMLButtonElement>('[data-workspace-tab=route]');
         (control && !control.disabled ? control : fallback).focus({ preventScroll: true });
       }
       schedule();
@@ -520,9 +690,11 @@ export function mountAuthorEditor(
       session.draft = deleteAuthorPoint(session.draft, id);
       buffers.delete(id);
       invalidPoints.delete(id);
+      feedback.forget(id);
       close(view.deleteDialog);
       syncRoute();
       syncPoints();
+      workspace.show('places');
       if (session.selectedId === id) select(session.draft.points[0]?.id);
       else schedule();
       if (!returnFocus?.isConnected) {
@@ -551,7 +723,7 @@ export function mountAuthorEditor(
     imported = result.ok ? result.map : undefined;
     find('[data-import-error]').textContent = result.ok
       ? ''
-      : `导入失败：${formatAuthorIssues(result.issues)}`;
+      : `导入失败：${friendlyAuthorIssues(result.issues)}`;
     find('[data-import-summary]').textContent = result.ok
       ? `校验通过：${result.map.points.length} 个地点。${session.draft.points.length ? '确认后将替换当前非空草稿。' : '确认后导入草稿。'}`
       : '';
@@ -565,6 +737,7 @@ export function mountAuthorEditor(
     safe(() => {
       if (!imported) return;
       const next = createAuthorDraft(imported);
+      search.reset();
       generation += 1;
       queued = false;
       mapAbort.abort();
@@ -576,7 +749,9 @@ export function mountAuthorEditor(
       session.selectedId = next.points[0]?.id;
       buffers.clear();
       invalidPoints.clear();
+      feedback.reset();
       candidate = undefined;
+      candidateFocusPending = false;
       newDirty = zoomInvalid = false;
       newFields = { name: '', longitude: '', latitude: '' };
       session.inputs = undefined;
@@ -585,12 +760,14 @@ export function mountAuthorEditor(
       close(view.importDialog);
       syncRoute();
       syncPoints();
+      workspace.show('places');
       showFields();
       metadata();
       exports = createAuthorExportControls(
         view.export,
         () => exportAuthorYaml(session.draft),
         pending,
+        () => session.draft.points.length,
       );
       startMap();
       schedule();
@@ -608,12 +785,15 @@ export function mountAuthorEditor(
   showFields();
   metadata();
   if (restored) zoom.value = restored.zoomValue;
+  feedback.refresh();
+  workspace.restoreFocus();
   startMap();
   schedule();
   return {
     destroy() {
       if (!alive) return;
       alive = false;
+      session.workspace = workspace.snapshot();
       session.inputs = {
         draft: session.draft,
         buffers,
@@ -623,12 +803,16 @@ export function mountAuthorEditor(
         zoomValue: zoom.value,
         zoomInvalid,
         fitPending,
+        feedback: feedback.snapshot(),
       };
       generation += 1;
       queued = false;
       mapAbort.abort();
       map?.destroy();
+      search.destroy();
       exports.destroy();
+      feedback.destroy();
+      workspace.destroy();
       removers.forEach((remove) => remove());
       if (view.importDialog.open) view.importDialog.close();
       if (view.deleteDialog.open) view.deleteDialog.close();
