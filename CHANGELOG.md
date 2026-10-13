@@ -2,6 +2,13 @@
 
 Changes are recorded through release pull requests.
 
+## [0.7.0](https://github.com/xizidev/hexo-post-map/compare/v0.6.1...v0.7.0) (2026-10-13)
+
+
+### Features
+
+* add local map authoring and place search ([#28](https://github.com/xizidev/hexo-post-map/issues/28)) ([3985e87](https://github.com/xizidev/hexo-post-map/commit/3985e87440ac216de796a2384678bb06094fedf8))
+
 ## [0.6.1](https://github.com/xizidev/hexo-post-map/compare/v0.6.0...v0.6.1) (2026-10-09)
 
 
