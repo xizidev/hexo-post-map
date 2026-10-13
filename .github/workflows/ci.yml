@@ -23,8 +23,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Seal shared candidate tarball
+        run: npm pack --json --ignore-scripts --pack-destination "$RUNNER_TEMP"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packed-candidate
+          path: ${{ runner.temp }}/*.tgz
+          if-no-files-found: error
+          retention-days: 7
 
   integration:
+    needs: checks
     name: Node ${{ matrix.node }} / Hexo ${{ matrix.hexo }}
     runs-on: ubuntu-latest
     strategy:
@@ -40,11 +49,19 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - uses: actions/download-artifact@v4
+        with:
+          name: packed-candidate
+          path: ${{ runner.temp }}/hpm-candidate
+      - name: Select shared candidate tarball
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import path from "node:path"; import assert from "node:assert/strict"; const directory = path.join(process.env.RUNNER_TEMP, "hpm-candidate"); const files = fs.readdirSync(directory).filter(name => name.endsWith(".tgz")); assert.equal(files.length, 1); fs.appendFileSync(process.env.GITHUB_ENV, "HPM_PACKED_TARBALL=" + path.join(directory, files[0]) + "\n");'
       - run: npm run test:integration -- --hexo="$HEXO_VERSION"
         env:
           HEXO_VERSION: ${{ matrix.hexo }}
 
   browser:
+    needs: checks
     name: Chromium browser tests
     runs-on: ubuntu-latest
     steps:
@@ -55,6 +72,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - uses: actions/download-artifact@v4
+        with:
+          name: packed-candidate
+          path: ${{ runner.temp }}/hpm-candidate
+      - name: Select shared browser candidate tarball
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import path from "node:path"; import assert from "node:assert/strict"; const directory = path.join(process.env.RUNNER_TEMP, "hpm-candidate"); const files = fs.readdirSync(directory).filter(name => name.endsWith(".tgz")); assert.equal(files.length, 1); fs.appendFileSync(process.env.GITHUB_ENV, "HPM_PACKED_TARBALL=" + path.join(directory, files[0]) + "\n");'
       - run: npm run test:e2e -- --trace=retain-on-failure
       - uses: actions/upload-artifact@v4
         if: failure()

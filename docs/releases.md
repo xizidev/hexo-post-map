@@ -1,5 +1,19 @@
 # Maintainer release guide
 
+## v0.7 local map authoring boundary
+
+The additive author command provides local map/POI selection, named places, a representative point, ordered and repeated schematic route stops, and safe `map:` YAML import/export. `npx hexo post-map-editor --open --port 4001` runs inside the Hexo site without starting its public server. The existing Web Key and exactly one client-code/proxy security mode are reused. Optional browser opening never replaces the complete printed URL as a fallback.
+
+The service binds only to `127.0.0.1`, validates Host/Origin and a per-process authorization fragment, and exposes a fixed resource allowlist. Drafts, incomplete inputs and feedback live only in page memory: refresh or closing clears them. No article is automatically read, saved or overwritten, and the command never generates/deploys the blog or uploads to a Bucket. A missing configuration or SDK failure keeps manual editing usable.
+
+Search requests are explicit, not autocomplete. Choosing a result prepares a candidate until Confirm Add. Places and Route have independent ordering; repeated visits do not duplicate places. Empty drafts show neutral guidance without unusable export controls, while unfinished inputs immediately block stale export. Blur or Confirm Add displays nearby Chinese feedback. These display rules do not relax import/export validation or create persistent sessions.
+
+Node >=20, Hexo >=7 <9, article schemas, overview JSON, existing AMap configuration and lifecycle API remain compatible. Author resources are separately bundled under `dist/author/` and must never enter generated public routes. The five reader assets must remain byte-identical to the reviewed 0.6.1 baseline. Do not add a paid provider, new runtime installation requirement, publish credential, CORS relaxation or production proxy.
+
+Verify the reviewed implementation and final release PR with full checks, the exact packed artifact across all declared Hexo/theme/root combinations, Chromium desktop/mobile regressions and an audited temporary-copy real-blog smoke. Required CI covers Node 20/22/24 independently; local Node 22/24 results do not substitute for Node 20 or a missing CI job. Fake SDK results do not prove every real key/domain/proxy/quota combination. A successful live search is a bounded account-specific check, not a universal provider guarantee.
+
+Use the existing Conventional Commit implementation PR → protected `main` → Release Please version/changelog PR → published GitHub Release → protected `npm` environment and OIDC publication path. The feature branch keeps 0.6.1 package/manifest metadata; Release Please advances it to 0.7.0. Do not hand-bump those files, bypass CI or branch protection, force-push, or publish an unverified local tarball. Completion requires the release-tag workflow, expected npm version and `latest`, matching workflow/registry artifact integrity and provenance. Blog dependency updates and OSS uploads remain separately authorized actions.
+
 ## v0.6 overview exploration boundary
 
 The feature branch adds optional two-hour return restoration, share URLs/manual copying, and opt-in random article previews. Defaults are `restore: true`, `share: true`, `random: false`; strict nonboolean input fails the build. Exploration code is overview-only, the provider-free runtime remains at most 8,192 minified bytes, and detail JSON, `posts.json` version 1, Front Matter, coordinates, resource routes, and lifecycle API version 1 remain compatible.

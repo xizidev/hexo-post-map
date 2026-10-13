@@ -1,4 +1,15 @@
 import { defineConfig, devices } from 'playwright/test';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+process.env.HPM_AUTHOR_RUN_ID ??= randomUUID();
+if (!/^[a-f0-9-]{36}$/u.test(process.env.HPM_AUTHOR_RUN_ID))
+  throw new Error('Invalid browser run ID');
+process.env.HPM_AUTHOR_READY_FILE = join(
+  tmpdir(),
+  `hpm-author-browser-${process.env.HPM_AUTHOR_RUN_ID}.json`,
+);
 
 export default defineConfig({
   testDir: './e2e',

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { parse, stringify } from 'yaml';
 import { normalizeNpmPackJson } from '../../scripts/npm-pack-json.mjs';
 import { withTemporaryWorkspace } from './runner-lifecycle.mjs';
+import { withPackedAuthorServer, verifyPackedAuthorCommand } from './author-server.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const trackFixture = join(repository, 'test/integration/fixtures/track/source');
@@ -33,7 +34,7 @@ const dummyCode = 'hpm-build-only-security';
 const environment = { ...process.env, npm_config_ignore_scripts: 'true' };
 for (const key of Object.keys(environment))
   if (key.startsWith('HEXO_POST_MAP_')) delete environment[key];
-await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellation }) => {
+await withTemporaryWorkspace(async ({ temporary, run: runChild }) => {
   const run = (command, arguments_, cwd, env = {}) =>
     runChild(command, arguments_, cwd, { ...environment, ...env });
   function success(result, label) {
@@ -226,6 +227,12 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
             },
           );
           success(generated, 'hexo generate');
+          if (!serve) {
+            await verifyPackedAuthorCommand({ site, env: environment, run });
+            console.log(
+              `PASS packed author / unchanged bytes: Hexo ${version} / ${theme} / ${root}`,
+            );
+          }
           success(
             await run(
               process.execPath,
@@ -364,7 +371,25 @@ await withTemporaryWorkspace(async ({ temporary, run: runChild, waitForCancellat
               server.listen(4179, '127.0.0.1', ready);
             });
             console.log(`Packed fixture ready on http://127.0.0.1:4179${root}map/`);
-            await waitForCancellation();
+            assert.ok(
+              process.env.HPM_AUTHOR_READY_FILE,
+              'Author browser bridge must be configured',
+            );
+            await withPackedAuthorServer(
+              {
+                site,
+                port: 4180,
+                env: {
+                  ...environment,
+                  HEXO_POST_MAP_AMAP_KEY: dummyKey,
+                  HEXO_POST_MAP_AMAP_SECURITY_JS_CODE: dummyCode,
+                },
+              },
+              async (_handle, signal) => {
+                if (signal.aborted) return;
+                await new Promise((done) => signal.addEventListener('abort', done, { once: true }));
+              },
+            );
           }
         }
       }

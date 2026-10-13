@@ -1,0 +1,4 @@
+export const AUTHOR_MAX_YAML_BYTES = 131072;
+export const AUTHOR_MAX_POINTS = 200;
+export const AUTHOR_MAX_ROUTE_STOPS = 1000;
+export const AUTHOR_MAX_ALIAS_COUNT = 50;

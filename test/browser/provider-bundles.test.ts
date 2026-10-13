@@ -31,6 +31,55 @@ async function productionInputs(entry: string): Promise<string[]> {
 }
 
 describe('browser provider bundle boundaries', () => {
+  it('isolates author Node and browser bundles from every reader entry', async () => {
+    for (const entry of ['runtime', 'detail', 'overview']) {
+      const bundle = await productionBundle(`src/browser/${entry}/index.ts`);
+      expect(
+        bundle.inputs.filter((input) =>
+          /src\/(?:author|browser\/author)\/|node_modules\/(?:yaml|hexo|vitest)\//u.test(input),
+        ),
+      ).toEqual([]);
+    }
+    const author = await build({
+      absWorkingDir: projectRoot,
+      bundle: true,
+      entryPoints: ['src/author/entry.ts'],
+      platform: 'node',
+      format: 'cjs',
+      target: 'node20',
+      metafile: true,
+      write: false,
+    });
+    expect(
+      Object.keys(author.metafile.inputs).filter((input) =>
+        /node_modules\/(?:hexo|vitest|chokidar|yaml)\/|src\/(?:browser|tracks|hexo)\//u.test(input),
+      ),
+    ).toEqual([]);
+    expect(
+      Object.values(author.metafile.outputs)
+        .flatMap((output) => output.imports)
+        .filter((item) => item.path === 'hexo'),
+    ).toEqual([]);
+    const main = await build({
+      absWorkingDir: projectRoot,
+      bundle: true,
+      entryPoints: ['src/index.ts'],
+      external: ['hexo', './author/server.cjs'],
+      platform: 'node',
+      format: 'cjs',
+      target: 'node20',
+      metafile: true,
+      write: false,
+    });
+    expect(
+      Object.keys(main.metafile.inputs).filter((input) =>
+        /src\/(?:author|browser\/author)\/|node_modules\/yaml\//u.test(input),
+      ),
+    ).toEqual([]);
+    expect(Object.values(main.metafile.outputs).flatMap((output) => output.imports)).toContainEqual(
+      { path: './author/server.cjs', kind: 'require-call', external: true },
+    );
+  });
   it('keeps exploration overview-only and the provider-free runtime within 8192 bytes', async () => {
     const [runtime, detail, overview] = await Promise.all([
       productionBundle('src/browser/runtime/index.ts'),
